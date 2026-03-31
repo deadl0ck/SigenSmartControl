@@ -288,23 +288,3 @@ A modern web interface is included for interactive simulation of the Sigen contr
 A privacy-first, auditable automation and simulation platform for Sigen inverters, batteries, and solar. Includes robust logging, scenario-specific tests, and a modern web UI for interactive system simulation.
 
 ---
-
-## Version Control & Check-in Instructions
-
-1. **Initialize the local git repository:**
-   ```sh
-   git init
-   git remote add origin https://github.com/deadl0ck/SigenSmartControl.git
-   ```
-2. **Add all files and commit:**
-   ```sh
-   git add .
-   git commit -m "Initial import: Sigen Smart Control system with web UI and tests"
-   git branch -M main
-   git push -u origin main
-   ```
-
-- Make sure your `.env` file is in `.gitignore` and not checked in.
-- All code, tests, and the web UI will be included in the initial commit.
-
----
