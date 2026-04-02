@@ -12,3 +12,7 @@ env/
 
 # macOS files
 .DS_Store
+
+# Local test/IDE artifacts
+.coverage
+.vscode/settings.json

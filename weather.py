@@ -1,3 +1,9 @@
+"""Solar forecast ingestion and day-period planning helpers.
+
+This module downloads county forecast data, normalizes it into daytime periods,
+and provides utility methods used by scheduler decision logic.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -21,17 +27,30 @@ class SolarForecast:
     """Download and interpret solar forecast data for one county."""
 
     def __init__(self, logger: logging.Logger) -> None:
+        """Initialize the forecast reader and load county table rows.
+
+        Args:
+            logger: Logger used for tabular forecast output and diagnostics.
+        """
         self.logger = logger
         self.table_data: list[TableRow] = []
         self.__get_solar_forecast_table(COUNTY)
 
     @staticmethod
     def __get_today() -> str:
-        today_day = datetime.now().strftime("%A").upper()
-        return today_day[:3].capitalize()
+        """Return today's three-letter day label (e.g., Mon, Tue)."""
+        return SolarForecast.__get_day(0)
 
     @staticmethod
     def __get_day(offset_days: int = 0) -> str:
+        """Return a three-letter day label for today plus an optional day offset.
+
+        Args:
+            offset_days: Number of days from today.
+
+        Returns:
+            Day label in title case, such as Mon, Tue, or Wed.
+        """
         day = (datetime.now() + timedelta(days=offset_days)).strftime("%A").upper()
         return day[:3].capitalize()
 
@@ -138,6 +157,11 @@ class SolarForecast:
         self.logger.info(DIVIDER)
 
     def get_todays_solar_values(self) -> list[str]:
+        """Return today's daytime statuses as compact codes.
+
+        Returns:
+            List of status codes in period order, where Red=R, Amber=A, Green=G.
+        """
         today_day = SolarForecast.__get_today()
 
         # Print today's rows and convert values to short status codes.
@@ -210,6 +234,11 @@ class SolarForecast:
         return plan
 
     def is_good_day(self) -> bool:
+        """Determine whether today's aggregate forecast meets the good-day threshold.
+
+        Returns:
+            True when weighted daytime status score is above configured threshold.
+        """
         # Use weighted scoring to decide if today is a good solar day.
         today: list[str] = self.get_todays_solar_values()
         good_periods = sum(GREEN_VAL for v in today if v == "G")
