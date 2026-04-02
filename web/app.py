@@ -1,3 +1,15 @@
+"""
+app.py
+------
+Flask web server providing REST API and UI for Sigen inverter simulation and configuration.
+
+Endpoints:
+  GET  /config            - Returns system configuration (inverter, battery, solar specs)
+  POST /simulate          - Accepts forecast and system parameters, returns mode decisions
+  GET  /                  - Serves main UI (index.html)
+  GET  /<path>            - Serves static assets (CSS, JavaScript, etc.)
+"""
+
 from flask import Flask, request, jsonify, send_from_directory
 import sys
 import os
@@ -10,6 +22,14 @@ app = Flask(__name__, static_folder='static')
 
 @app.route('/config', methods=['GET'])
 def get_config():
+    """Return system hardware configuration.
+    
+    Returns:
+        JSON object with keys:
+          - inverter_kw: Inverter capacity in kW
+          - battery_kwh: Battery capacity in kWh
+          - solar_pv_kw: Solar PV system capacity in kW
+    """
     # Return system specs as config
     return jsonify({
         'inverter_kw': INVERTER_KW,
@@ -19,8 +39,23 @@ def get_config():
 
 @app.route('/simulate', methods=['POST'])
 def simulate():
+    """Simulate mode decisions for a given scenario.
+    
+    Request body (JSON):
+      - inverter_kw: Override inverter capacity (optional)
+      - battery_kwh: Override battery capacity (optional)
+      - solar_pv_kw: Override solar capacity (optional)
+      - soc: Battery state-of-charge 0-100 (optional, default 80)
+      - forecast_morn: Morning forecast ('Green', 'Amber', 'Red')
+      - forecast_aftn: Afternoon forecast
+      - forecast_eve: Evening forecast
+      
+    Returns:
+        JSON object with mode decisions for each period.
+    """
     data = request.json
     def safe_float(val, default):
+        """Safely convert a value to float, with fallback default."""
         try:
             if val is None or val == '':
                 return float(default)
@@ -41,10 +76,19 @@ def simulate():
 
 @app.route('/', methods=['GET'])
 def serve_index():
+    """Serve the main UI page (index.html)."""
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/<path:path>', methods=['GET'])
 def serve_static(path):
+    """Serve static assets (CSS, JavaScript files, images, etc.).
+    
+    Args:
+        path: File path relative to the static/ directory.
+        
+    Returns:
+        The requested file, or 404 if not found.
+    """
     return send_from_directory(app.static_folder, path)
 
 if __name__ == '__main__':

@@ -1,5 +1,12 @@
-# This module provides a function to simulate the Sigen logic for the web API.
-# It reuses your config and mapping logic, but does not require hardware or real API calls.
+"""
+simulate_logic.py
+-----------------
+Web API simulation module for testing Sigen control logic without hardware.
+
+Reuses the core decision_logic engine but accepts parameters via the web API rather than
+fetching from the real Sigen inverter. Allows users to explore different forecast scenarios,
+battery states, and system configurations without live hardware.
+"""
 
 from config import SIGEN_MODES
 from decision_logic import (
@@ -16,11 +23,26 @@ def simulate_sigen_decision(
     forecast_morn: str,
     forecast_aftn: str,
     forecast_eve: str,
-    custom_var: str = None
+    custom_var: str = None,
 ):
-    """
-    Simulate the Sigen control logic for the web API.
-    Returns a dict with the mode decision for each period.
+    """Simulate the Sigen control logic for the web API.
+    
+    Evaluates operational mode decisions for each solar period based on provided
+    forecasts and system parameters. Uses simplified headroom/solar estimates.
+    
+    Args:
+        inverter_kw: Inverter capacity in kW.
+        battery_kwh: Total battery capacity in kWh.
+        solar_pv_kw: Solar PV system capacity in kW.
+        soc: Current battery state-of-charge (0-100).
+        forecast_morn: Morning period forecast status ('Green', 'Amber', or 'Red').
+        forecast_aftn: Afternoon period forecast status.
+        forecast_eve: Evening period forecast status.
+        custom_var: Reserved for future extensions.
+        
+    Returns:
+        Dict with keys for each period ('Morn', 'Aftn', 'Eve', 'NIGHT') mapping to
+        mode details: {'mode': int, 'mode_name': str, 'reason': str, 'forecast': str}.
     """
     HEADROOM_FRAC = 0.25
     SOC_HIGH_THRESHOLD = 95
