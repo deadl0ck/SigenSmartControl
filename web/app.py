@@ -20,15 +20,22 @@ def get_config():
 @app.route('/simulate', methods=['POST'])
 def simulate():
     data = request.json
+    def safe_float(val, default):
+        try:
+            if val is None or val == '':
+                return float(default)
+            return float(val)
+        except Exception:
+            return float(default)
+
     result = simulate_sigen_decision(
-        inverter_kw=float(data.get('inverter_kw', INVERTER_KW)),
-        battery_kwh=float(data.get('battery_kwh', BATTERY_KWH)),
-        solar_pv_kw=float(data.get('solar_pv_kw', SOLAR_PV_KW)),
-        soc=float(data.get('soc', 50)),
+        inverter_kw=safe_float(data.get('inverter_kw'), INVERTER_KW),
+        battery_kwh=safe_float(data.get('battery_kwh'), BATTERY_KWH),
+        solar_pv_kw=safe_float(data.get('solar_pv_kw'), SOLAR_PV_KW),
+        soc=safe_float(data.get('soc'), 80),
         forecast_morn=data.get('forecast_morn', 'Green'),
         forecast_aftn=data.get('forecast_aftn', 'Amber'),
-        forecast_eve=data.get('forecast_eve', 'Red'),
-        custom_var=data.get('custom_var', None)
+        forecast_eve=data.get('forecast_eve', 'Red')
     )
     return jsonify(result)
 

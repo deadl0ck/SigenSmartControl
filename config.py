@@ -20,6 +20,16 @@ Set to one of: 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'.
 """
 LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 
+# Scheduler runtime settings.
+# How often the self-contained scheduler wakes up to re-check forecast windows.
+POLL_INTERVAL_MINUTES = 15
+# How far ahead of a period start we begin monitoring SOC for a possible export.
+MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+# Fraction of expected solar energy to keep free in the battery as headroom.
+HEADROOM_FRAC = 0.25
+# If SOC is already above this threshold during a Green forecast, export to grid.
+SOC_HIGH_THRESHOLD = 95
+
 # Sigen operational mode values (from check_modes.py)
 SIGEN_MODES = {
     # Let Sigen AI optimize for savings and self-consumption

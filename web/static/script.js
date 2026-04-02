@@ -1,4 +1,22 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const MODE_LABELS = {
+        SELF_POWERED: 'Self Powered',
+        AI: 'AI',
+        TOU: 'Time of Use',
+        GRID_EXPORT: 'Grid Export',
+        REMOTE_EMS: 'Remote EMS',
+        CUSTOM: 'Custom'
+    };
+
+    const MODE_EXPLANATIONS = {
+        SELF_POWERED: 'Prioritizes using solar and battery to reduce grid import.',
+        AI: 'Lets Sigen optimize operation automatically.',
+        TOU: 'Optimizes behavior around time-of-use tariff windows.',
+        GRID_EXPORT: 'Prioritizes exporting available energy to the grid.',
+        REMOTE_EMS: 'Allows advanced remote energy management control.',
+        CUSTOM: 'Runs user-defined custom operating behavior.'
+    };
+
     // Fetch config and pre-populate fields
     fetch('/config')
         .then(res => res.json())
@@ -6,6 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('inverter_kw').value = cfg.inverter_kw;
             document.getElementById('battery_kwh').value = cfg.battery_kwh;
             document.getElementById('solar_pv_kw').value = cfg.solar_pv_kw;
+            if (!document.getElementById('soc').value) {
+                document.getElementById('soc').value = 80;
+            }
         });
 
     document.getElementById('sim-form').addEventListener('submit', async (e) => {
@@ -37,11 +58,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         let html = '<h3>Simulation Result</h3>';
         html += '<table class="mode-table">';
-        html += '<tr><th>Period</th><th>Mode</th><th>Reason</th></tr>';
+        html += '<tr><th>Period</th><th>Mode</th><th>Mode Explanation</th><th>Reason</th></tr>';
         for (const period of ['Morn', 'Aftn', 'Eve']) {
             if (result[period]) {
                 const mode = result[period].mode_name;
-                html += `<tr><td>${period}</td><td class="mode-${mode}">${mode}</td><td>${result[period].reason}</td></tr>`;
+                const modeLabel = MODE_LABELS[mode] || mode;
+                const modeExplanation = MODE_EXPLANATIONS[mode] || 'No description available for this mode.';
+                html += `<tr><td>${period}</td><td class="mode-${mode}">${modeLabel}</td><td>${modeExplanation}</td><td>${result[period].reason}</td></tr>`;
             }
         }
         html += '</table>';

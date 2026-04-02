@@ -1,7 +1,8 @@
 # This module provides a function to simulate the Sigen logic for the web API.
 # It reuses your config and mapping logic, but does not require hardware or real API calls.
 
-from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+from config import SIGEN_MODES
+from decision_logic import decide_operational_mode, calc_headroom_kwh
 
 def simulate_sigen_decision(
     inverter_kw: float,
@@ -27,21 +28,17 @@ def simulate_sigen_decision(
     results = {}
     for period, status in periods:
         # Simulate headroom and solar (simplified)
-        headroom_kwh = battery_kwh * (1 - soc / 100)
+        headroom_kwh = calc_headroom_kwh(battery_kwh, soc)
         period_solar_kwh = min(solar_pv_kw, inverter_kw) * 3.0  # Assume 3h period
-        # Pre-period export logic
-        if (
-            status.upper() == "GREEN"
-            and headroom_kwh < period_solar_kwh * HEADROOM_FRAC
-        ):
-            mode = SIGEN_MODES["GRID_EXPORT"]
-            reason = f"Headroom ({headroom_kwh:.2f} kWh) < {HEADROOM_FRAC*100:.0f}% of expected solar ({period_solar_kwh:.2f} kWh). Preemptively exporting to grid."
-        elif soc >= SOC_HIGH_THRESHOLD and status.upper() == "GREEN":
-            mode = SIGEN_MODES["GRID_EXPORT"]
-            reason = f"SOC >= {SOC_HIGH_THRESHOLD}% and forecast is Green. Exporting to grid."
-        else:
-            mode = FORECAST_TO_MODE.get(status.upper(), SIGEN_MODES["AI"])
-            reason = f"Default mapping for {status}."
+        mode, reason = decide_operational_mode(
+            period=period,
+            status=status,
+            soc=soc,
+            headroom_kwh=headroom_kwh,
+            period_solar_kwh=period_solar_kwh,
+            headroom_frac=HEADROOM_FRAC,
+            soc_high_threshold=SOC_HIGH_THRESHOLD,
+        )
         results[period] = {
             "mode": mode,
             "mode_name": [k for k, v in SIGEN_MODES.items() if v == mode][0],

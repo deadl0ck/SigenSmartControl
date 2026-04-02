@@ -1,290 +1,316 @@
 # Sigen Inverter Smart Control System
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Folder Structure](#folder-structure)
-4. [Setup Instructions](#setup-instructions)
-5. [Usage](#usage)
-6. [How It Works](#how-it-works)
-7. [Customizing Control Logic](#customizing-control-logic)
-8. [Troubleshooting](#troubleshooting)
 
----
+1. [Overview](#overview)
+2. [Plain English Summary](#plain-english-summary)
+3. [Key Files](#key-files)
+4. [Setup](#setup)
+5. [Configuration](#configuration)
+6. [How It Works](#how-it-works)
+7. [Scheduler Behavior](#scheduler-behavior)
+8. [Logging](#logging)
+9. [Web Simulator](#web-simulator)
+10. [Tests](#tests)
+11. [Notes](#notes)
 
 ## Overview
-This project provides a smart, locally forecast-driven control system for Sigen inverters. It integrates:
-- Met Éireann solar forecasts
-- Your electricity tariff schedule
-- Sigen inverter operational modes
-- Automated mode switching for maximum savings and solar self-consumption
 
-## Features
-- Reads and parses Met Éireann solar forecasts for your county
-- Maps forecast periods (Morning, Afternoon, Evening) to inverter control actions
-- Integrates your day/night/peak tariff schedule
-- Selects and sets the best Sigen operational mode automatically
-- Modular authentication and logging
-- Safe mode-checking utility
+This project provides a locally run control system for a Sigen inverter using:
 
-## Folder Structure
-```
-/requirements.txt         # Python dependencies
-/weather.py              # Solar forecast logic and planning
-/sigen_auth.py           # Singleton Sigen authentication
-/check_modes.py          # Utility to print available inverter modes
-/main.py                 # (To be extended) Main control loop
-/constants.py            # Project-wide constants
-/.env                    # Local credentials (not committed)
-```
+- Met Eireann solar forecast data
+- Battery state of charge from the Sigen API
+- Configurable operational mode mappings
+- A self-contained scheduler that evaluates conditions throughout the day
 
-## Setup Instructions
-1. **Clone the repository** and open in VS Code.
-2. **Install Python 3.10+** (recommended: 3.11 or 3.12).
-3. **Create a virtual environment:**
-   ```sh
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-4. **Install dependencies:**
-   ```sh
-   pip install -r requirements.txt
-   ```
-5. **Create a `.env` file** in the project root:
-   ```ini
-   SIGEN_USERNAME=your_sigen_email
-   SIGEN_PASSWORD=your_sigen_password
-   ```
-6. **Edit `constants.py`** to set your county if needed.
+The system can also be exercised through an interactive web simulator under `web/`.
 
-7. **Edit `config.py`** to set your system specifications:
-  - `SOLAR_PV_KW`: Your total solar PV array size in kW (e.g., 8.9)
-  - `INVERTER_KW`: Your inverter's maximum output in kW (e.g., 5.5)
-  - `BATTERY_KWH`: Your battery's usable capacity in kWh (e.g., 24)
+## Plain English Summary
 
-  Example:
-  ```python
-  SOLAR_PV_KW = 8.9
-  INVERTER_KW = 5.5
-  BATTERY_KWH = 24
-  ```
+This system acts like an automatic energy assistant for your home battery and inverter.
 
-  These values are used by the control logic to optimize charging, discharging, and export decisions for your specific hardware.
+It checks the expected solar generation for morning, afternoon, and evening, compares that
+with how full your battery is right now, and then decides which inverter mode makes the most sense.
 
-## Usage
-  ```sh
-  python check_modes.py
-  ```
-  ```sh
-  python weather.py
-  ```
-  ```sh
-  python main.py
-  ```
-## Usage
+If the battery is likely to run out of space before strong solar arrives, it can export sooner
+to create headroom and reduce wasted solar. If the battery is already very full and the forecast
+is good, it can also choose export mode to avoid clipping. Otherwise it follows your normal
+forecast-to-mode mapping rules.
 
-- **Check available inverter modes:**
-  ```sh
-  python check_modes.py
-  ```
-- **Run the solar forecast and planning logic:**
-  ```sh
-  python weather.py
-  ```
-- **Run the main control loop:**
-  ```sh
-  python main.py
-  ```
+This happens automatically on a timed loop, with detailed logs written on every check so you can
+see exactly what values were used and why each decision was made.
 
-## Control Loop & Logging
+## Key Files
 
-The main control loop (`main.py`) fetches today's solar forecast, determines the best Sigen operational mode for each period (Morning, Afternoon, Evening), and sets the inverter mode accordingly. All actions are logged.
-
-- **Logging Level:**
-  - Configurable in `config.py` via the `LOG_LEVEL` variable.
-  - Set to `'DEBUG'` for detailed logs, `'INFO'` for normal operation, or `'WARNING'`/`'ERROR'` for less output.
-  - Example:
-    ```python
-    LOG_LEVEL = "DEBUG"
-    ```
-
-## Test Cases: Forecast-to-Mode Mapping
-
-Below are test scenarios for each possible forecast combination. For each period (Morn, Aftn, Eve), the forecast can be Green, Amber, or Red. The expected operational mode is determined by the mapping in `config.py`.
-
-| Period  | Forecast | Expected Mode           | Mode Value | Description                                      |
-|---------|----------|------------------------|------------|--------------------------------------------------|
-| Morn    | Green    | SELF_POWERED           | 0          | Maximize self-consumption                        |
-| Morn    | Amber    | AI                     | 1          | Let Sigen AI optimize                            |
-| Morn    | Red      | TOU                    | 2          | Use TOU/tariff-based mode                        |
-| Aftn    | Green    | SELF_POWERED           | 0          | Maximize self-consumption                        |
-| Aftn    | Amber    | AI                     | 1          | Let Sigen AI optimize                            |
-| Aftn    | Red      | TOU                    | 2          | Use TOU/tariff-based mode                        |
-| Eve     | Green    | SELF_POWERED           | 0          | Maximize self-consumption                        |
-| Eve     | Amber    | AI                     | 1          | Let Sigen AI optimize                            |
-| Eve     | Red      | TOU                    | 2          | Use TOU/tariff-based mode                        |
-
-**How to test:**
-- You can simulate different forecasts by modifying the mapping in `config.py` or by mocking the forecast in `weather.py`.
-- Run `python main.py` and observe the logs to verify the correct mode is selected and set for each period.
-
-
-**Example log output:**
-```
-2026-03-31 20:00:00,000 - sigen_control - INFO - Period: Morn, Solar Value: 450, Status: Green
-2026-03-31 20:00:00,001 - sigen_control - INFO - Selected mode for Morn: SELF_POWERED (value=0)
-2026-03-31 20:00:00,002 - sigen_control - INFO - Set mode response for Morn: {...}
+```text
+config.py             Runtime configuration and mode mappings
+constants.py          Environment-backed location constants
+decision_logic.py     Shared decision logic used by runtime and web simulator
+main.py               Self-contained scheduler and runtime control loop
+weather.py            Solar forecast parsing
+sunrise_sunset.py     Sunrise/sunset lookup used to derive period windows
+web/app.py            Flask web simulator backend
+web/simulate_logic.py Web simulator wrapper around shared decision logic
+web/static/           Simulator UI
+tests/                Test suite
 ```
 
+## Setup
 
+1. Create and activate a virtual environment.
 
-## Sunrise/Sunset Integration
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
-The system can fetch sunrise and sunset times for your location using the [sunrise-sunset.org](https://sunrise-sunset.org/api) API. This allows you to dynamically determine when 'Morning', 'Afternoon', and 'Evening' start/end, rather than using fixed periods.
+2. Install dependencies.
 
-- The API endpoint is stored in `constants.py` as `SUNRISE_SUNSET_API_URL`.
-- The logic is implemented in `sunrise_sunset.py`.
-- Example usage:
-  ```python
-  from sunrise_sunset import get_sunrise_sunset
-  sunrise, sunset = get_sunrise_sunset(lat=53.5, lng=-7.3)  # Westmeath, Ireland
-  print(f"Sunrise: {sunrise}, Sunset: {sunset}")
-  ```
-- You can use these times to adjust your control logic for solar periods.
+```sh
+pip install -r requirements.txt
+pip install pytest pytest-asyncio
+```
 
+3. Create a `.env` file in the project root.
 
-This project is developed and tested with **Python 3.14** (see output below for your environment). It is strongly recommended to use a virtual environment for all development and testing.
+```ini
+SIGEN_USERNAME=your_sigen_email
+SIGEN_PASSWORD=your_sigen_password
+SIGEN_LATITUDE=53.55967
+SIGEN_LONGITUDE=-7.619216
+```
 
-### Setting up your environment
+4. Edit `config.py` for your hardware and scheduler settings.
 
-1. **Create and activate a virtual environment:**
-  ```sh
-  python3 -m venv .venv
-  source .venv/bin/activate
-  ```
-2. **Install dependencies:**
-  ```sh
-  pip install -r requirements.txt
-  # If you want to run tests, also install pytest and pytest-asyncio:
-  pip install pytest pytest-asyncio
-  ```
-  Or, to install everything at once:
-  ```sh
-  pip install -r requirements.txt pytest pytest-asyncio
-  ```
-3. **Check your Python version:**
-  ```sh
-  python --version
-  # Should print Python 3.14.x (or your compatible version)
-  ```
+## Configuration
 
-### Troubleshooting
-- If you see missing package errors (e.g., `No module named 'openpyxl'`), ensure you are using the correct virtual environment and have installed all dependencies.
-- If you want to use a different Python version, ensure all dependencies are compatible.
+The core runtime settings live in `config.py`.
 
-## Automated Test Suite
+### Hardware
 
+```python
+SOLAR_PV_KW = 8.9
+INVERTER_KW = 5.5
+BATTERY_KWH = 24
+```
 
-Unit tests are provided for all core logic:
-- Forecast parsing and period mapping (`test_weather.py`)
-- Config mappings and logging level (`test_config.py`)
-- Main control loop logic (`test_main.py`)
-- Sunrise/sunset API integration (`test_sunrise_sunset.py`)
+### Scheduler and decision thresholds
 
-All tests use Python logging for output and are written with `pytest`.
+```python
+POLL_INTERVAL_MINUTES = 15
+MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+HEADROOM_FRAC = 0.25
+SOC_HIGH_THRESHOLD = 95
+```
 
-### Running the tests
+Meaning:
 
-1. Install pytest if not already installed:
-  ```sh
-  pip install pytest
-  ```
-2. Run all tests:
-  ```sh
-  pytest
-  ```
-3. To see detailed log output, set `LOG_LEVEL = "DEBUG"` in `config.py` before running tests.
+- `POLL_INTERVAL_MINUTES`: how often the scheduler wakes up to evaluate each period
+- `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
+- `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
+- `SOC_HIGH_THRESHOLD`: if forecast is Green and SOC is at or above this threshold, export to grid
 
-### What is covered
-- Forecast-to-mode mapping for all combinations
-- Config integrity and logging level
-- Control loop logic (mode selection and API call simulation)
+### Mode mappings
 
-Tests are safe to run and do not require a real inverter or network connection.
+`SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config.py`.
 
 ## How It Works
-- The system fetches the latest solar forecast for your county.
-- It divides the day into Morning, Afternoon, and Evening periods.
-- For each period, it determines the solar status (Green/Amber/Red).
-- It combines this with your battery SOC and tariff period (Night/Day/Peak).
-- It selects the best Sigen operational mode (Self-Consumption, AI, Time-based Control, etc.) and sets it via the API.
-- All authentication is handled via a singleton pattern for efficiency.
 
-## Customizing Control Logic
-- Edit `weather.py` to adjust how forecast values are mapped to statuses.
-- Edit `main.py` to change how SOC, tariff, and forecast are combined for mode selection.
-- You can add your own custom Sigen modes if needed.
+### Shared decision logic
 
-## Troubleshooting
-- If you see auth errors, check your `.env` file and credentials.
-- If you see missing modes, run `python check_modes.py` to verify available options.
-- For API or network errors, check your internet connection and Sigen cloud status.
+The export and mode-selection logic is centralized in `decision_logic.py`.
 
----
+Both of these use the same shared code path:
 
-**For questions or improvements, open an issue or contact the maintainer.**
+- `main.py` runtime scheduler
+- `web/simulate_logic.py` web simulator
 
----
+That ensures the simulator and the live runtime cannot drift apart.
 
-## Test and Development Environment
+### Battery headroom calculation
 
-**Important:** This project uses a Python 3.14 virtual environment located at `.venv`.
+Battery headroom is the free storage space remaining in the battery:
 
-- Before running tests or scripts, always activate the virtual environment:
+$$
+\text{headroom\_kwh} = \text{battery\_kwh} \times \left(1 - \frac{\text{soc}}{100}\right)
+$$
 
-    source .venv/bin/activate
+Example:
 
-- Then run tests with:
+- battery size = `24 kWh`
+- SOC = `80%`
 
-    pytest -v
+$$
+24 \times (1 - 0.80) = 4.8 \text{ kWh}
+$$
 
-Or use the provided script:
+### Expected solar energy calculation
 
-    ./scripts/test.sh
+For the web simulator, expected solar for a period is:
 
-This ensures all dependencies (including `openpyxl`, `python-dotenv`, etc.) are available to your code and tests.
+$$
+\text{period\_solar\_kwh} = \min(\text{solar\_pv\_kw}, \text{inverter\_kw}) \times 3.0
+$$
 
-If you see errors about missing packages, double-check that your virtual environment is activated and all dependencies are installed:
+For the runtime scheduler, the period forecast value is read in watts and converted to kWh over an assumed 3-hour period:
 
-    pip install -r requirements.txt
+$$
+\text{period\_solar\_kwh} = \min\left(\frac{\text{forecast\_watts}}{1000}, \text{solar\_pv\_kw}, \text{inverter\_kw}\right) \times 3.0
+$$
 
----
+### Export-to-grid rules
 
-## Interactive Web Simulator
+The system exports to grid under either of these conditions.
 
-A modern web interface is included for interactive simulation of the Sigen control logic. You can edit inverter, battery, solar, SOC, and forecast values, then simulate what the system would do for each period.
+#### Rule 1: Insufficient headroom before a Green period
 
-### How to Use the Web Simulator
+The target free headroom is:
 
-1. **Install Flask (if not already installed):**
-   ```sh
-   pip install flask
-   ```
-2. **Start the web server:**
-   ```sh
-   python web/app.py
-   ```
-3. **Open your browser to:**
-   [http://localhost:5000](http://localhost:5000)
+$$
+\text{headroom\_target\_kwh} = \text{period\_solar\_kwh} \times \text{HEADROOM\_FRAC}
+$$
 
-- The web page is pre-filled with your config values (editable).
-- Set solar forecast for each part of the day and SOC.
-- Click "Simulate" to see the system's decision for each period in a color-coded table.
-- No sensitive data is exposed.
+If:
 
----
+$$
+\text{headroom\_kwh} < \text{headroom\_target\_kwh}
+$$
 
-## Repository Description
-A privacy-first, auditable automation and simulation platform for Sigen inverters, batteries, and solar. Includes robust logging, scenario-specific tests, and a modern web UI for interactive system simulation.
+then the system selects `GRID_EXPORT` to create battery space ahead of the solar period.
 
----
+#### Rule 2: High SOC on a Green forecast
+
+If:
+
+$$
+\text{soc} \ge \text{SOC\_HIGH\_THRESHOLD}
+$$
+
+and the forecast status is `Green`, the system selects `GRID_EXPORT`.
+
+### Dynamic export lead time
+
+If more battery headroom is needed before the upcoming period, the scheduler estimates how early export should begin.
+
+Headroom deficit:
+
+$$
+\text{headroom\_deficit\_kwh} = \max(0, \text{headroom\_target\_kwh} - \text{headroom\_kwh})
+$$
+
+Lead time before the period:
+
+$$
+\text{lead\_time\_hours} = \frac{\text{headroom\_deficit\_kwh} \times 1.1}{\text{inverter\_kw}}
+$$
+
+The `1.1` factor adds a 10% buffer.
+
+The scheduler then calculates:
+
+$$
+\text{export\_by} = \text{period\_start} - \text{lead\_time}
+$$
+
+When current time is at or after `export_by`, it can trigger the pre-period export decision.
+
+## Scheduler Behavior
+
+Running:
+
+```sh
+python main.py
+```
+
+starts a self-contained scheduler.
+
+The scheduler:
+
+1. Wakes every `POLL_INTERVAL_MINUTES`
+2. Refreshes forecast and sunrise/sunset data once per day
+3. Divides the daylight window from sunrise to sunset into equal period start times for `Morn`, `Aftn`, and `Eve`
+4. Begins monitoring each period when inside the `MAX_PRE_PERIOD_WINDOW_MINUTES` window before that period starts
+5. Fetches live SOC and evaluates the export/mode rules
+6. Applies pre-period export at most once per period per day
+7. Applies the definitive period-start mode at most once per period per day
+
+## Logging
+
+Logging is controlled by `LOG_LEVEL` in `config.py`.
+
+Recommended values:
+
+- `INFO` for normal operation
+- `DEBUG` for detailed troubleshooting
+
+### Check logging
+
+Each scheduler evaluation writes an info log containing the values used and the conclusion reached.
+
+For each check, the log includes:
+
+- current UTC time
+- period start time
+- forecast watts
+- forecast status
+- expected solar kWh
+- SOC
+- battery headroom kWh
+- target headroom kWh
+- headroom deficit kWh
+- calculated `export_by` time
+- selected decision mode
+- outcome
+- reason
+
+Example structure:
+
+```text
+[Morn] PRE-PERIOD CHECK | now=... | period_start=... | forecast_w=500 | status=Green |
+expected_solar_kwh=1.50 | soc=82.0 | headroom_kwh=4.32 | headroom_target_kwh=0.38 |
+headroom_deficit_kwh=0.00 | export_by=... | decision_mode=SELF_POWERED |
+outcome=waiting until export window opens | reason=Default mapping for Green.
+```
+
+## Web Simulator
+
+Start the web UI with:
+
+```sh
+python web/app.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:5000/
+```
+
+The simulator:
+
+- preloads inverter, battery, and solar config values
+- defaults SOC to `80%` while keeping it editable
+- lets you simulate Morning, Afternoon, and Evening forecasts
+- shows both the selected mode and a human-readable explanation
+- uses the same shared decision logic as the live runtime
+
+## Tests
+
+Run all tests with:
+
+```sh
+source .venv/bin/activate
+python -m pytest -q
+```
+
+Focused checks used during development:
+
+```sh
+python -m pytest -q web/test_app_simulate.py tests/test_main.py -rA
+```
+
+## Notes
+
+- The runtime scheduler is self-contained and does not require cron.
+- The decision logic is centralized so runtime and simulator stay aligned.
+- Sunrise/sunset times are used to derive dynamic daytime period boundaries.
