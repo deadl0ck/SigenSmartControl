@@ -6,7 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from weather import SolarForecast
-from sigen_auth import get_sigen_instance
+from sigen_interaction import SigenInteraction
 from config import (
     SIGEN_MODES,
     TARIFF_TO_MODE,
@@ -147,7 +147,7 @@ def extract_mode_value(raw_mode: Any) -> int | None:
     return None
 
 
-async def log_current_mode_on_startup(sigen: Any, mode_names: dict[int, str]) -> None:
+async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
     try:
         current_mode_raw = await sigen.get_operational_mode()
         current_mode = extract_mode_value(current_mode_raw)
@@ -166,7 +166,7 @@ async def log_current_mode_on_startup(sigen: Any, mode_names: dict[int, str]) ->
 
 async def apply_mode_change(
     *,
-    sigen: Any,
+    sigen: SigenInteraction | None,
     mode: int,
     period: str,
     reason: str,
@@ -188,6 +188,10 @@ async def apply_mode_change(
     if FULL_SIMULATION_MODE:
         return True
 
+    if sigen is None:
+        logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
+        return False
+
     try:
         response = await sigen.set_operational_mode(mode, -1)
         logger.info(f"Set mode response for {period}: {response}")
@@ -195,6 +199,48 @@ async def apply_mode_change(
     except Exception as e:
         logger.error(f"Failed to set mode for {period}: {e}")
         return False
+
+
+async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInteraction | None:
+    """Create and validate the Sigen interaction, with dry-run fallback support."""
+    try:
+        sigen = await SigenInteraction.create()
+        await log_current_mode_on_startup(sigen, mode_names)
+        return sigen
+    except Exception as e:
+        if FULL_SIMULATION_MODE:
+            logger.warning(
+                "[SCHEDULER] Inverter authentication failed, but FULL_SIMULATION_MODE is enabled. "
+                "Continuing in offline dry-run mode with simulated SOC values. "
+                f"Reason: {e}"
+            )
+            return None
+        raise
+
+
+def suppress_elapsed_periods_except_latest(
+    now_utc: datetime,
+    period_windows: dict[str, datetime],
+    day_state: dict[str, dict[str, bool]],
+) -> list[str]:
+    """Suppress stale elapsed periods and keep only the latest elapsed period actionable."""
+    elapsed_periods = [
+        period
+        for period, period_start in sorted(period_windows.items(), key=lambda item: item[1])
+        if now_utc >= period_start
+    ]
+    if len(elapsed_periods) <= 1:
+        return []
+
+    suppressed_periods: list[str] = []
+    for period in elapsed_periods[:-1]:
+        state = day_state.get(period)
+        if state is None:
+            continue
+        state["pre_set"] = True
+        state["start_set"] = True
+        suppressed_periods.append(period)
+    return suppressed_periods
 
 
 async def main() -> None:
@@ -242,7 +288,7 @@ async def main() -> None:
         return kw * period_hours
 
     # Legacy one-shot run path (scheduler mode is run_scheduler).
-    sigen = await get_sigen_instance()
+    sigen = await SigenInteraction.create()
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
     await log_current_mode_on_startup(sigen, mode_names)
     forecast = SolarForecast(logger)
@@ -320,7 +366,13 @@ async def run_scheduler() -> None:
             return val[:2] + "***MASKED***" + val[-2:]
         return val
 
-    relevant_env_vars = ["SIGEN_USERNAME", "SIGEN_PASSWORD", "SIGEN_LATITUDE", "SIGEN_LONGITUDE"]
+    relevant_env_vars = [
+        "SIGEN_USERNAME",
+        "SIGEN_PASSWORD",
+        "SIGEN_LATITUDE",
+        "SIGEN_LONGITUDE",
+        "SIMULATED_SOC_PERCENT",
+    ]
     logger.info("[SCHEDULER] Environment:")
     for k in relevant_env_vars:
         v = os.getenv(k)
@@ -330,10 +382,18 @@ async def run_scheduler() -> None:
         f"Inverter={INVERTER_KW} kW, Battery={BATTERY_KWH} kWh"
     )
 
+    simulated_soc_raw = os.getenv("SIMULATED_SOC_PERCENT", "80")
+    try:
+        simulated_soc_percent = float(simulated_soc_raw)
+    except ValueError:
+        logger.warning(
+            f"[SCHEDULER] Invalid SIMULATED_SOC_PERCENT='{simulated_soc_raw}'. Falling back to 80%."
+        )
+        simulated_soc_percent = 80.0
+
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
 
-    sigen = await get_sigen_instance()
-    await log_current_mode_on_startup(sigen, mode_names)
+    sigen = await create_scheduler_interaction(mode_names)
     current_date = None
     today_period_windows: dict[str, datetime] = {}
     tomorrow_period_windows: dict[str, datetime] = {}
@@ -401,6 +461,11 @@ async def run_scheduler() -> None:
         day_state = {p: {"pre_set": False, "start_set": False} for p in daytime_periods}
 
     async def fetch_soc(period: str) -> float | None:
+        if sigen is None:
+            logger.info(
+                f"[{period}] SOC: {simulated_soc_percent}% (simulated; inverter unavailable in dry-run mode)"
+            )
+            return simulated_soc_percent
         try:
             energy_flow: dict[str, Any] = await sigen.get_energy_flow()
             soc = energy_flow.get("batterySoc")
@@ -495,6 +560,23 @@ async def run_scheduler() -> None:
             current_date = today
             try:
                 await refresh_daily_data()
+                suppressed_periods = suppress_elapsed_periods_except_latest(
+                    now,
+                    today_period_windows,
+                    day_state,
+                )
+                if suppressed_periods:
+                    elapsed_periods = [
+                        period
+                        for period, period_start in sorted(today_period_windows.items(), key=lambda item: item[1])
+                        if now >= period_start
+                    ]
+                    latest_elapsed_period = elapsed_periods[-1]
+                    logger.info(
+                        "[SCHEDULER] Suppressing stale elapsed daytime periods on startup/day refresh: "
+                        f"{', '.join(suppressed_periods)}. "
+                        f"Keeping only the latest elapsed period actionable: {latest_elapsed_period}."
+                    )
             except Exception as e:
                 logger.error(
                     f"[SCHEDULER] Failed to refresh daily data: {e}. Retrying next tick."

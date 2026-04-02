@@ -82,7 +82,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 	# If caplog is not available, try to parse from terminalreporter sections
 	if not result_lines:
-		for secname, content in terminalreporter.sections:
+		sections = getattr(terminalreporter, "sections", [])
+		for secname, content in sections:
 			if "Captured log" in secname:
 				for line in content.splitlines():
 					if "[RESULT]" in line:

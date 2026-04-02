@@ -46,6 +46,8 @@ see exactly what values were used and why each decision was made.
 config.py             Runtime configuration and mode mappings
 constants.py          Environment-backed location constants
 decision_logic.py     Shared decision logic used by runtime and web simulator
+sigen_auth.py         Authentication and singleton creation for Sigen API client
+sigen_interaction.py  SigenInteraction wrapper for all Sigen API calls
 main.py               Self-contained scheduler and runtime control loop
 weather.py            Solar forecast parsing
 sunrise_sunset.py     Sunrise/sunset lookup used to derive period windows
@@ -68,7 +70,7 @@ source .venv/bin/activate
 
 ```sh
 pip install -r requirements.txt
-pip install pytest pytest-asyncio
+pip install pytest pytest-asyncio pytest-cov
 ```
 
 3. Create a `.env` file in the project root.
@@ -148,6 +150,8 @@ The tariff schedule currently captured in `config.py` is:
 ### Shared decision logic
 
 The export and mode-selection logic is centralized in `decision_logic.py`.
+
+All direct Sigen API calls are centralized in `sigen_interaction.py` via `SigenInteraction`.
 
 Both of these use the same shared code path:
 
@@ -394,6 +398,12 @@ Focused checks used during development:
 
 ```sh
 python -m pytest -q web/test_app_simulate.py tests/test_main.py -rA
+```
+
+Coverage run:
+
+```sh
+python -m pytest -q --cov=. --cov-report=term-missing
 ```
 
 ## Notes

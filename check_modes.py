@@ -9,7 +9,7 @@ Safe to run: does not change any inverter settings.
 import asyncio
 import logging
 from typing import Any
-from sigen_auth import get_sigen_instance
+from sigen_interaction import SigenInteraction
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,7 +19,7 @@ async def main() -> None:
     """
     Connects to Sigen inverter and prints all available operational mode labels and values.
     """
-    sigen = await get_sigen_instance()
+    sigen = await SigenInteraction.create()
     operational_modes: list[dict[str, Any]] = await sigen.get_operational_modes()
     logger.info("Available Sigen operational modes:")
     for mode in operational_modes:
