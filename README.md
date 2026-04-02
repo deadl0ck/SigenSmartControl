@@ -76,8 +76,8 @@ pip install pytest pytest-asyncio
 ```ini
 SIGEN_USERNAME=your_sigen_email
 SIGEN_PASSWORD=your_sigen_password
-SIGEN_LATITUDE=53.55967
-SIGEN_LONGITUDE=-7.619216
+SIGEN_LATITUDE=53.3498
+SIGEN_LONGITUDE=-6.2603
 ```
 
 4. Edit `config.py` for your hardware and scheduler settings.
