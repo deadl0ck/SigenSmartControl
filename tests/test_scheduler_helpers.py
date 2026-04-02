@@ -106,22 +106,38 @@ def test_get_hours_until_cheap_rate_counts_down_before_cheap_window() -> None:
 
 
 class DummyModeInteraction:
-    def __init__(self, current_mode: int):
+    def __init__(self, current_mode):
         self.current_mode = current_mode
         self.set_calls: list[tuple[int, int]] = []
 
     async def get_operational_mode(self):
-        return {"mode": self.current_mode}
+        return self.current_mode
 
     async def set_operational_mode(self, mode: int, profile_id: int):
         self.set_calls.append((mode, profile_id))
-        self.current_mode = mode
+        self.current_mode = {"mode": mode}
         return {"ok": True, "mode": mode, "profile_id": profile_id}
 
 
 @pytest.mark.asyncio
 async def test_apply_mode_change_skips_when_already_target_mode() -> None:
-    sigen = DummyModeInteraction(current_mode=1)
+    sigen = DummyModeInteraction(current_mode={"mode": 1})
+
+    ok = await main.apply_mode_change(
+        sigen=sigen,
+        mode=1,
+        period="Eve (period-start)",
+        reason="Already AI for evening arbitrage.",
+        mode_names={1: "AI"},
+    )
+
+    assert ok is True
+    assert sigen.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_change_skips_when_current_mode_is_human_label() -> None:
+    sigen = DummyModeInteraction(current_mode="Sigen AI Mode")
 
     ok = await main.apply_mode_change(
         sigen=sigen,

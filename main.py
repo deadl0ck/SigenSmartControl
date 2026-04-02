@@ -191,12 +191,42 @@ def should_use_ai_mode_for_evening(period: str, now_utc: datetime) -> tuple[bool
 def extract_mode_value(raw_mode: Any) -> int | None:
     if isinstance(raw_mode, int):
         return raw_mode
+    if isinstance(raw_mode, str):
+        if raw_mode.isdigit():
+            return int(raw_mode)
+        return None
     if isinstance(raw_mode, dict):
         for key in ("mode", "operationalMode", "operational_mode", "value"):
             value = raw_mode.get(key)
             if isinstance(value, int):
                 return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
     return None
+
+
+def mode_matches_target(raw_mode: Any, target_mode: int, mode_names: dict[int, str]) -> bool:
+    """Return True if a raw mode response already represents the target mode."""
+    current_mode = extract_mode_value(raw_mode)
+    if current_mode is not None:
+        return current_mode == target_mode
+
+    target_label = mode_names.get(target_mode)
+    if not target_label:
+        return False
+
+    target_norm = target_label.strip().lower()
+    if isinstance(raw_mode, str):
+        value_norm = raw_mode.strip().lower()
+        return value_norm == target_norm or target_norm in value_norm
+
+    if isinstance(raw_mode, dict):
+        label = raw_mode.get("label")
+        if isinstance(label, str):
+            value_norm = label.strip().lower()
+            return value_norm == target_norm or target_norm in value_norm
+
+    return False
 
 
 async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
@@ -231,8 +261,7 @@ async def apply_mode_change(
 
     try:
         current_mode_raw = await sigen.get_operational_mode()
-        current_mode = extract_mode_value(current_mode_raw)
-        if current_mode is not None and current_mode == mode:
+        if mode_matches_target(current_mode_raw, mode, mode_names):
             logger.info(ACTION_DIVIDER)
             logger.info("Skipping inverter set_operational_mode (already at target mode)")
             logger.info(f"Target period/context: {period}")
