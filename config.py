@@ -127,9 +127,9 @@ TARIFF_TO_MODE = {
     "PEAK": SIGEN_MODES["SELF_POWERED"],
 }
 
-# Mode used during the overnight shoulder period outside cheap-rate hours.
-# This prevents the system from moving into charge-oriented TOU mode before cheap rates begin.
-SHOULDER_NIGHT_MODE = SIGEN_MODES["AI"]
+# Mode used before cheap-rate starts overnight.
+# This prevents the system from moving into charge-oriented TOU mode too early.
+PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
 # from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE

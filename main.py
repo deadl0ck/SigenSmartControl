@@ -11,7 +11,7 @@ from sigen_interaction import SigenInteraction
 from config import (
     SIGEN_MODES,
     TARIFF_TO_MODE,
-    SHOULDER_NIGHT_MODE,
+    PRE_CHEAP_RATE_MODE,
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
@@ -683,9 +683,9 @@ async def run_scheduler() -> None:
                             soc_high_threshold=SOC_HIGH_THRESHOLD,
                         )
                         if mode == TARIFF_TO_MODE["NIGHT"] and not is_cheap_rate_window(now):
-                            mode = SHOULDER_NIGHT_MODE
+                            mode = PRE_CHEAP_RATE_MODE
                             reason = (
-                                f"{reason} Cheap-rate window has not opened yet, so using shoulder mode "
+                                f"{reason} Cheap-rate window has not opened yet, so using pre-cheap-rate mode "
                                 "instead of charge-oriented night mode."
                             )
                         log_check(

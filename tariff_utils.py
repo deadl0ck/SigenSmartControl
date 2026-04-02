@@ -19,7 +19,7 @@ from config import (
     DAY_RATE_MORNING_END_HOUR,
     PEAK_RATE_END_HOUR,
     PEAK_RATE_START_HOUR,
-    SHOULDER_NIGHT_MODE,
+    PRE_CHEAP_RATE_MODE,
     TARIFF_TO_MODE,
     LOCAL_TIMEZONE,
 )
@@ -116,8 +116,8 @@ def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
         
     Returns:
         Tuple of (mode_value: int, phase_label: str, explanation: str) describing whether
-        to use cheap-rate mode (if in the cheap window) or shoulder mode (if before cheap
-        rates to prevent early charging).
+        to use cheap-rate mode (if in the cheap window) or pre-cheap-rate mode (if before
+        cheap rates to prevent early charging).
     """
     local_now = now_utc.astimezone(LOCAL_TZ)
     if is_cheap_rate_window(now_utc):
@@ -130,11 +130,11 @@ def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
             ),
         )
     return (
-        SHOULDER_NIGHT_MODE,
-        "shoulder",
+        PRE_CHEAP_RATE_MODE,
+        "pre-cheap-rate",
         (
             f"Local time {local_now.strftime('%H:%M')} is outside the cheap-rate window "
-            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding shoulder mode to avoid charging before cheap rates."
+            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding pre-cheap-rate mode to avoid charging before cheap rates."
         ),
     )
 

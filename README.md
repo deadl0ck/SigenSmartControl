@@ -213,8 +213,8 @@ For daytime periods, read it like this:
 For night:
 
 1. Use night tariff behavior (`TARIFF_TO_MODE["NIGHT"]`) during cheap-rate hours.
-2. Before cheap-rate starts, hold `SHOULDER_NIGHT_MODE` to avoid early charge behavior.
-3. Optional next-day pre-check can prepare for tomorrow morning, but still respects shoulder protection.
+2. Before cheap-rate starts, hold `PRE_CHEAP_RATE_MODE` to avoid early charge behavior.
+3. Optional next-day pre-check can prepare for tomorrow morning, but still respects pre-cheap-rate protection.
 
 ### Quick examples
 
@@ -354,19 +354,19 @@ The scheduler now has an explicit night window.
 
 During the active night window it can do two separate things:
 
-1. Apply either a shoulder mode or the configured night mode depending on local tariff time.
+1. Apply either a pre-cheap-rate mode or the configured night mode depending on local tariff time.
 2. Optionally run a next-day pre-check for the next morning forecast after `NIGHT_PRECHECK_DELAY_MINUTES`.
 
 For example, with cheap rates from 11pm to 8am:
 
-- after sunset but before 11pm, the system stays in a shoulder mode so it does not start charge-oriented night behavior too early
+- after sunset but before 11pm, the system stays in pre-cheap-rate mode so it does not start charge-oriented night behavior too early
 - from 11pm to 8am local time, it can use `TARIFF_TO_MODE["NIGHT"]`
 - after 8am, if the first daytime period has not started yet, it falls back out of the cheap-rate night mode again
 
 The next-day pre-check uses the upcoming first daytime period, normally `Morn`.
 
 If the next morning looks strong enough that headroom must be created, it can choose `GRID_EXPORT` overnight.
-Otherwise it stays in the appropriate shoulder or cheap-rate night mode for the current local tariff phase.
+Otherwise it stays in the appropriate pre-cheap-rate or cheap-rate night mode for the current local tariff phase.
 
 ### AI Mode profit-max and arbitrage (battery sell-discharge-recharge)
 
