@@ -1,5 +1,12 @@
+"""
+constants.py
+-------------
+Application-wide constants for Sigen inverter control system.
 
-# User's home location (Westmeath, Ireland) - loaded from environment variables for privacy
+Loads environment variables for location (latitude/longitude), defines forecast
+scoring thresholds, and API endpoints for ESB Networks solar forecast data.
+"""
+
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -12,6 +19,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 def _get_env_float_required(var: str) -> float:
+    """Load a required floating-point environment variable.
+    
+    Args:
+        var: Environment variable name.
+        
+    Returns:
+        Parsed float value.
+        
+    Raises:
+        RuntimeError: If variable is not set or cannot be parsed as float.
+    """
     val = os.getenv(var)
     if val is None:
         logger.error(f"Required environment variable '{var}' is not set. Application cannot start.")
@@ -24,7 +42,6 @@ def _get_env_float_required(var: str) -> float:
 
 LATITUDE: Final[float] = _get_env_float_required("SIGEN_LATITUDE")
 LONGITUDE: Final[float] = _get_env_float_required("SIGEN_LONGITUDE")
-"""Application constants used by weather forecasting logic."""
 
 
 # County used when filtering the ESB forecast data.
