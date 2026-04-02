@@ -43,6 +43,23 @@ from decision_logic import (
     decide_night_preparation_mode,
     calc_headroom_kwh,
 )
+from tariff_utils import (
+    _parse_utc,
+    derive_period_windows,
+    get_first_period_info,
+    is_cheap_rate_window,
+    get_night_tariff_mode,
+    get_hours_until_cheap_rate,
+    get_tariff_period_for_time,
+    suppress_elapsed_periods_except_latest,
+    LOCAL_TZ,
+)
+from mode_control import (
+    should_use_ai_mode_for_evening,
+    extract_mode_value,
+    mode_matches_target,
+    ACTION_DIVIDER,
+)
 from sunrise_sunset import get_sunrise_sunset
 from constants import LATITUDE, LONGITUDE
 
@@ -55,260 +72,9 @@ logger = logging.getLogger("sigen_control")
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
-LOCAL_TZ = ZoneInfo(LOCAL_TIMEZONE)
-ACTION_DIVIDER = "=" * 100
 
 
-def _parse_utc(iso_str: str) -> datetime:
-    """Parse an ISO 8601 timestamp, ensuring it carries UTC tzinfo.
-    
-    Args:
-        iso_str: ISO 8601 formatted timestamp string.
-        
-    Returns:
-        Timezone-aware datetime with UTC tzinfo.
-    """
-    dt = datetime.fromisoformat(iso_str)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
-
-
-def derive_period_windows(
-    sunrise_utc: datetime,
-    sunset_utc: datetime,
-    period_names: list[str],
-) -> dict[str, datetime]:
-    """
-    Divide the solar day into equal windows and return each period's start time (UTC).
-    With the default three periods (Morn/Aftn/Eve) the solar day is split into thirds
-    starting at sunrise.
-    """
-    solar_day = sunset_utc - sunrise_utc
-    n = len(period_names)
-    return {
-        name: sunrise_utc + solar_day * (i / n)
-        for i, name in enumerate(period_names)
-    }
-
-
-def get_first_period_info(
-    period_windows: dict[str, datetime],
-    period_forecast: dict[str, tuple[int, str]],
-) -> tuple[str, datetime, int, str] | None:
-    """Retrieve the earliest period from a collection of periods.
-    
-    Args:
-        period_windows: Mapping of period names to their start times (UTC).
-        period_forecast: Mapping of period names to (solar_watts, status) tuples.
-        
-    Returns:
-        Tuple of (period_name, start_time, solar_value, status) for the earliest period,
-        or None if no periods are available.
-    """
-    available_periods = [
-        (period, start, *period_forecast[period])
-        for period, start in period_windows.items()
-        if period in period_forecast
-    ]
-    if not available_periods:
-        return None
-    return min(available_periods, key=lambda item: item[1])
-
-
-def is_cheap_rate_window(now_utc: datetime) -> bool:
-    """Determine whether the current time falls within the cheap-rate tariff window.
-    
-    Args:
-        now_utc: Current time in UTC.
-        
-    Returns:
-        True if now_utc is within the configured cheap-rate window (CHEAP_RATE_START_HOUR
-        to CHEAP_RATE_END_HOUR in local timezone), False otherwise.
-    """
-    local_hour = now_utc.astimezone(LOCAL_TZ).hour
-    if CHEAP_RATE_START_HOUR < CHEAP_RATE_END_HOUR:
-        return CHEAP_RATE_START_HOUR <= local_hour < CHEAP_RATE_END_HOUR
-    return local_hour >= CHEAP_RATE_START_HOUR or local_hour < CHEAP_RATE_END_HOUR
-
-
-def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
-    """Determine the appropriate mode for night-time tariff periods.
-    
-    Args:
-        now_utc: Current time in UTC.
-        
-    Returns:
-        Tuple of (mode_value: int, phase_label: str, explanation: str) describing whether
-        to use cheap-rate mode (if in the cheap window) or shoulder mode (if before cheap
-        rates to prevent early charging).
-    """
-    local_now = now_utc.astimezone(LOCAL_TZ)
-    if is_cheap_rate_window(now_utc):
-        return (
-            TARIFF_TO_MODE["NIGHT"],
-            "cheap-rate",
-            (
-                f"Local time {local_now.strftime('%H:%M')} is inside the cheap-rate window "
-                f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Applying night tariff mode."
-            ),
-        )
-    return (
-        SHOULDER_NIGHT_MODE,
-        "shoulder",
-        (
-            f"Local time {local_now.strftime('%H:%M')} is outside the cheap-rate window "
-            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding shoulder mode to avoid charging before cheap rates."
-        ),
-    )
-
-
-def get_hours_until_cheap_rate(now_utc: datetime) -> float:
-    """Calculate hours until the next cheap-rate window opens in local timezone.
-    
-    Args:
-        now_utc: Current time in UTC.
-        
-    Returns:
-        Hours until the next cheap-rate window starts. Returns 0.0 if already within
-        the cheap-rate window. Accounts for daily cycle wrap-around.
-    """
-    if is_cheap_rate_window(now_utc):
-        return 0.0
-
-    local_now = now_utc.astimezone(LOCAL_TZ)
-    cheap_start_local = local_now.replace(
-        hour=CHEAP_RATE_START_HOUR,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    if local_now >= cheap_start_local:
-        cheap_start_local += timedelta(days=1)
-
-    return (cheap_start_local - local_now).total_seconds() / 3600.0
-
-
-def get_tariff_period_for_time(when_utc: datetime) -> str:
-    """Determine which tariff period (NIGHT, PEAK, or DAY) applies at a given time.
-    
-    Args:
-        when_utc: Time to check, in UTC.
-        
-    Returns:
-        String representing the tariff period: 'NIGHT' (cheap rates), 'PEAK' (highest rates),
-        or 'DAY' (standard daytime rates).
-    """
-    local_hour = when_utc.astimezone(LOCAL_TZ).hour
-
-    if is_cheap_rate_window(when_utc):
-        return "NIGHT"
-
-    if PEAK_RATE_START_HOUR <= local_hour < PEAK_RATE_END_HOUR:
-        return "PEAK"
-
-    if DAY_RATE_MORNING_START_HOUR <= local_hour < DAY_RATE_MORNING_END_HOUR:
-        return "DAY"
-
-    if DAY_RATE_EVENING_START_HOUR <= local_hour < DAY_RATE_EVENING_END_HOUR:
-        return "DAY"
-
-    return "DAY"
-
-
-def should_use_ai_mode_for_evening(period: str, now_utc: datetime) -> tuple[bool, str]:
-    """
-    Determine whether to switch to AI Mode for evening period profit-max optimization.
-    
-    Returns:
-        (should_use_ai_mode: bool, reason: str)
-    
-    AI Mode is recommended for evening when:
-    - Evening period is active (user configured via EVENING_AI_MODE_START_HOUR)
-    - Enables automatic battery arbitrage: discharge at day rates, recharge at cheap night rates
-    """
-    if not ENABLE_EVENING_AI_MODE_TRANSITION:
-        return False, ""
-    
-    if period.upper() != "EVE":
-        return False, ""
-    
-    local_hour = now_utc.astimezone(LOCAL_TZ).hour
-    if local_hour < EVENING_AI_MODE_START_HOUR:
-        return False, f"Local hour {local_hour} is before EVENING_AI_MODE_START_HOUR ({EVENING_AI_MODE_START_HOUR})"
-    
-    return True, (
-        f"Using AI Mode for Evening period: triggered at local hour {local_hour} "
-        f"(>= {EVENING_AI_MODE_START_HOUR}). "
-        f"This allows automatic profit-max battery arbitrage before cheap-rate window opens."
-    )
-
-
-
-def extract_mode_value(raw_mode: Any) -> int | None:
-    """Extract numeric mode value from various response formats returned by the API.
-    
-    Args:
-        raw_mode: Mode value in any format (int, string, dict, etc.) as returned by
-                  the Sigen API.
-        
-    Returns:
-        Integer mode value (one of the SIGEN_MODES values), or None if extraction fails
-        or the response does not contain a numeric mode.
-    """
-    if isinstance(raw_mode, int):
-        return raw_mode
-    if isinstance(raw_mode, str):
-        if raw_mode.isdigit():
-            return int(raw_mode)
-        return None
-    if isinstance(raw_mode, dict):
-        for key in ("mode", "operationalMode", "operational_mode", "value"):
-            value = raw_mode.get(key)
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str) and value.isdigit():
-                return int(value)
-    return None
-
-
-def mode_matches_target(raw_mode: Any, target_mode: int, mode_names: dict[int, str]) -> bool:
-    """Check whether a raw mode response already represents the target mode.
-    
-    Handles multiple response formats: numeric values, string labels, and dict structures.
-    Uses numeric comparison first, then falls back to human-readable label matching
-    (e.g., 'Sigen AI Mode' contains 'AI' which matches AI mode).
-    
-    Args:
-        raw_mode: Current mode from API (can be int, string, or dict).
-        target_mode: Numeric mode value we want to match against.
-        mode_names: Mapping from numeric mode to human-readable label (e.g., {1: 'AI'}).
-        
-    Returns:
-        True if raw_mode already represents target_mode (avoiding redundant API calls),
-        False otherwise.
-    """
-    current_mode = extract_mode_value(raw_mode)
-    if current_mode is not None:
-        return current_mode == target_mode
-
-    target_label = mode_names.get(target_mode)
-    if not target_label:
-        return False
-
-    target_norm = target_label.strip().lower()
-    if isinstance(raw_mode, str):
-        value_norm = raw_mode.strip().lower()
-        return value_norm == target_norm or target_norm in value_norm
-
-    if isinstance(raw_mode, dict):
-        label = raw_mode.get("label")
-        if isinstance(label, str):
-            value_norm = label.strip().lower()
-            return value_norm == target_norm or target_norm in value_norm
-
-    return False
-
+# --- Scheduler interaction and mode control ---
 
 async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
     """Log the inverter's current operational mode during startup.
@@ -422,44 +188,6 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
             )
             return None
         raise
-
-
-def suppress_elapsed_periods_except_latest(
-    now_utc: datetime,
-    period_windows: dict[str, datetime],
-    day_state: dict[str, dict[str, bool]],
-) -> list[str]:
-    """Mark all elapsed periods as 'done' except the latest, allowing recovery if missed.
-    
-    When multiple periods have started before the scheduler catches up, suppresses
-    pre_set and start_set on all but the latest elapsed period so only the current
-    period can trigger actions.
-    
-    Args:
-        now_utc: Current time in UTC.
-        period_windows: Mapping of period names to start times (UTC).
-        day_state: Mutable dict tracking pre_set and start_set status per period.
-        
-    Returns:
-        List of suppressed period names for logging.
-    """
-    elapsed_periods = [
-        period
-        for period, period_start in sorted(period_windows.items(), key=lambda item: item[1])
-        if now_utc >= period_start
-    ]
-    if len(elapsed_periods) <= 1:
-        return []
-
-    suppressed_periods: list[str] = []
-    for period in elapsed_periods[:-1]:
-        state = day_state.get(period)
-        if state is None:
-            continue
-        state["pre_set"] = True
-        state["start_set"] = True
-        suppressed_periods.append(period)
-    return suppressed_periods
 
 
 async def main() -> None:
