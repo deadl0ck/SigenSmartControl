@@ -2,11 +2,16 @@
 sigen_interaction.py
 --------------------
 Single interaction layer for all direct Sigen API calls.
+Centralizes simulation mode handling for all write operations.
 """
 
 from typing import Any, Protocol
 
 from sigen_auth import get_sigen_instance
+from config import FULL_SIMULATION_MODE
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SigenApiProtocol(Protocol):
@@ -45,6 +50,16 @@ class SigenInteraction:
         return await self._client.get_operational_mode()
 
     async def set_operational_mode(self, mode: int, profile_id: int = -1) -> Any:
+        """
+        Set the operational mode. In FULL_SIMULATION_MODE, logs the action
+        but does not send the command to the inverter.
+        """
+        if FULL_SIMULATION_MODE:
+            logger.info(
+                f"[SIMULATION] set_operational_mode(mode={mode}, profile_id={profile_id}) "
+                f"- command suppressed in simulation mode"
+            )
+            return {"simulated": True, "mode": mode, "profile_id": profile_id}
         return await self._client.set_operational_mode(mode, profile_id)
 
     async def get_energy_flow(self) -> dict[str, Any]:

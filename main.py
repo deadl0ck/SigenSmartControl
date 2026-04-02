@@ -225,20 +225,12 @@ async def apply_mode_change(
     mode_names: dict[int, str],
 ) -> bool:
     mode_label = mode_names.get(mode, mode)
-    action_line = (
-        "FULL SIMULATION MODE: WOULD call inverter set_operational_mode"
-        if FULL_SIMULATION_MODE
-        else "LIVE MODE: calling inverter set_operational_mode"
-    )
     logger.info(ACTION_DIVIDER)
-    logger.info(action_line)
+    logger.info(f"Calling inverter set_operational_mode")
     logger.info(f"Target period/context: {period}")
     logger.info(f"Target mode: {mode_label} (value={mode})")
     logger.info(f"Decision reason: {reason}")
     logger.info(ACTION_DIVIDER)
-
-    if FULL_SIMULATION_MODE:
-        return True
 
     if sigen is None:
         logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")

@@ -22,7 +22,11 @@ class DummyClient:
 
 
 @pytest.mark.asyncio
-async def test_sigen_interaction_from_client_methods() -> None:
+async def test_sigen_interaction_from_client_methods(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Patch FULL_SIMULATION_MODE to False to test pass-through behavior
+    import sigen_interaction
+    monkeypatch.setattr(sigen_interaction, "FULL_SIMULATION_MODE", False)
+    
     dummy = DummyClient()
     interaction = SigenInteraction.from_client(dummy)
 
@@ -46,3 +50,21 @@ async def test_sigen_interaction_create_uses_auth_factory(monkeypatch: pytest.Mo
 
     interaction = await SigenInteraction.create()
     assert await interaction.get_operational_mode() == {"mode": 1}
+
+
+@pytest.mark.asyncio
+async def test_sigen_interaction_set_operational_mode_respects_simulation_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Test that set_operational_mode respects FULL_SIMULATION_MODE
+    import sigen_interaction
+    monkeypatch.setattr(sigen_interaction, "FULL_SIMULATION_MODE", True)
+    
+    dummy = DummyClient()
+    interaction = SigenInteraction.from_client(dummy)
+
+    # In simulation mode, should return simulated response and NOT call the client
+    set_resp = await interaction.set_operational_mode(2, -1)
+    assert set_resp == {"simulated": True, "mode": 2, "profile_id": -1}
+    # Verify the dummy client was NOT called
+    assert dummy.set_calls == []
