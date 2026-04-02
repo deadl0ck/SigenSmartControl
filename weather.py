@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 import logging
 from typing import TypeAlias
@@ -29,6 +29,11 @@ class SolarForecast:
     def __get_today() -> str:
         today_day = datetime.now().strftime("%A").upper()
         return today_day[:3].capitalize()
+
+    @staticmethod
+    def __get_day(offset_days: int = 0) -> str:
+        day = (datetime.now() + timedelta(days=offset_days)).strftime("%A").upper()
+        return day[:3].capitalize()
 
     @staticmethod
     def __status_from_value(value: int) -> str:
@@ -157,14 +162,30 @@ class SolarForecast:
     def get_todays_period_forecast(self) -> PeriodForecast:
         """Return today's Morn/Aftn/Eve forecast values and status by period."""
         today_day = SolarForecast.__get_today()
+        return self.get_period_forecast_for_day(today_day)
+
+    def get_period_forecast_for_day(
+        self,
+        day_label: str,
+        *,
+        include_night: bool = False,
+    ) -> PeriodForecast:
+        """Return forecast values and status for a specific day label such as Mon/Tue."""
         period_forecast: PeriodForecast = {}
 
         for day, time, value, status in self.table_data:
-            if day != today_day or time == "NIGHT":
+            if day != day_label:
+                continue
+            if not include_night and time == "NIGHT":
                 continue
             period_forecast[time] = (value, status)
 
         return period_forecast
+
+    def get_tomorrows_period_forecast(self) -> PeriodForecast:
+        """Return tomorrow's daytime forecast values and status by period."""
+        tomorrow_day = SolarForecast.__get_day(1)
+        return self.get_period_forecast_for_day(tomorrow_day)
 
     def get_simple_inverter_plan(self) -> InverterPlan:
         """Create a simple planning hint for charge/discharge by daytime period."""

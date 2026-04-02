@@ -99,6 +99,15 @@ BATTERY_KWH = 24
 ```python
 POLL_INTERVAL_MINUTES = 15
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+NIGHT_MODE_ENABLED = True
+NEXT_DAY_PRECHECK_ENABLED = True
+NIGHT_PRECHECK_DELAY_MINUTES = 30
+LOCAL_TIMEZONE = "Europe/Dublin"
+DAY_RATE_CENTS_PER_KWH = 26.596
+PEAK_RATE_CENTS_PER_KWH = 32.591
+NIGHT_RATE_CENTS_PER_KWH = 13.462
+CHEAP_RATE_START_HOUR = 23
+CHEAP_RATE_END_HOUR = 8
 HEADROOM_FRAC = 0.25
 SOC_HIGH_THRESHOLD = 95
 ```
@@ -107,8 +116,26 @@ Meaning:
 
 - `POLL_INTERVAL_MINUTES`: how often the scheduler wakes up to evaluate each period
 - `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
+- `NIGHT_MODE_ENABLED`: whether the scheduler explicitly applies the configured night mode overnight
+- `NEXT_DAY_PRECHECK_ENABLED`: whether the scheduler evaluates the next morning's forecast during the night window
+- `NIGHT_PRECHECK_DELAY_MINUTES`: how long after the night window starts before the next-day pre-check runs
+- `LOCAL_TIMEZONE`: timezone used when evaluating tariff windows
+- `DAY_RATE_CENTS_PER_KWH`: day unit rate for 08:00-17:00 and 19:00-23:00
+- `PEAK_RATE_CENTS_PER_KWH`: peak unit rate for 17:00-19:00
+- `NIGHT_RATE_CENTS_PER_KWH`: night unit rate for 23:00-08:00
+- `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
+- `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
 - `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
 - `SOC_HIGH_THRESHOLD`: if forecast is Green and SOC is at or above this threshold, export to grid
+
+### Tariff schedule currently configured
+
+The tariff schedule currently captured in `config.py` is:
+
+- `08:00-17:00`: Day at `26.596 c/kWh`
+- `17:00-19:00`: Peak at `32.591 c/kWh`
+- `19:00-23:00`: Day at `26.596 c/kWh`
+- `23:00-08:00`: Night at `13.462 c/kWh`
 
 ### Mode mappings
 
@@ -188,6 +215,23 @@ $$
 
 and the forecast status is `Green`, the system selects `GRID_EXPORT`.
 
+### Day and peak tariff influence
+
+In addition to forecast status and SOC/headroom, the scheduler also considers the
+tariff period for the target time of the period action:
+
+- `DAY` during 08:00-17:00 and 19:00-23:00
+- `PEAK` during 17:00-19:00
+- `NIGHT` during 23:00-08:00
+
+Decision precedence for daytime periods is:
+
+1. Export-to-grid safety/space rules (headroom shortfall or high SOC with Green forecast)
+2. Peak tariff override: if tariff is `PEAK` and export was not selected, force self-powered mode to minimize expensive imports
+3. Otherwise use the forecast mapping (Green/Amber/Red)
+
+This means peak pricing can actively change the daytime mode choice, not just night windows.
+
 ### Dynamic export lead time
 
 If more battery headroom is needed before the upcoming period, the scheduler estimates how early export should begin.
@@ -214,6 +258,29 @@ $$
 
 When current time is at or after `export_by`, it can trigger the pre-period export decision.
 
+### Night behavior
+
+The scheduler now has an explicit night window.
+
+- Before the first daytime period starts, the system treats that as a pre-dawn night window.
+- After sunset, the system treats that as the evening/night window for the upcoming day.
+
+During the active night window it can do two separate things:
+
+1. Apply either a shoulder mode or the configured night mode depending on local tariff time.
+2. Optionally run a next-day pre-check for the next morning forecast after `NIGHT_PRECHECK_DELAY_MINUTES`.
+
+For example, with cheap rates from 11pm to 8am:
+
+- after sunset but before 11pm, the system stays in a shoulder mode so it does not start charge-oriented night behavior too early
+- from 11pm to 8am local time, it can use `TARIFF_TO_MODE["NIGHT"]`
+- after 8am, if the first daytime period has not started yet, it falls back out of the cheap-rate night mode again
+
+The next-day pre-check uses the upcoming first daytime period, normally `Morn`.
+
+If the next morning looks strong enough that headroom must be created, it can choose `GRID_EXPORT` overnight.
+Otherwise it stays in the appropriate shoulder or cheap-rate night mode for the current local tariff phase.
+
 ## Scheduler Behavior
 
 Running:
@@ -229,10 +296,12 @@ The scheduler:
 1. Wakes every `POLL_INTERVAL_MINUTES`
 2. Refreshes forecast and sunrise/sunset data once per day
 3. Divides the daylight window from sunrise to sunset into equal period start times for `Morn`, `Aftn`, and `Eve`
-4. Begins monitoring each period when inside the `MAX_PRE_PERIOD_WINDOW_MINUTES` window before that period starts
-5. Fetches live SOC and evaluates the export/mode rules
-6. Applies pre-period export at most once per period per day
-7. Applies the definitive period-start mode at most once per period per day
+4. Explicitly applies night mode during the night window when enabled
+5. Optionally checks the next morning forecast during the night window and can prepare with export if needed
+6. Begins monitoring each daytime period when inside the `MAX_PRE_PERIOD_WINDOW_MINUTES` window before that period starts
+7. Fetches live SOC and evaluates export, forecast, and tariff-period rules for each period
+8. Applies pre-period export at most once per period per day
+9. Applies the definitive period-start mode at most once per period per day
 
 ## Logging
 

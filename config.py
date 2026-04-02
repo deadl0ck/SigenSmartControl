@@ -25,6 +25,29 @@ LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 POLL_INTERVAL_MINUTES = 15
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+# Whether the scheduler should explicitly apply the configured night mode.
+NIGHT_MODE_ENABLED = True
+# Whether the scheduler should perform a night-before pre-check for the next morning.
+NEXT_DAY_PRECHECK_ENABLED = True
+# How long after the night window starts before running the next-day pre-check.
+NIGHT_PRECHECK_DELAY_MINUTES = 30
+# Local timezone used for tariff windows.
+LOCAL_TIMEZONE = "Europe/Dublin"
+# Tariff rates in cents per kWh.
+DAY_RATE_CENTS_PER_KWH = 26.596
+PEAK_RATE_CENTS_PER_KWH = 32.591
+NIGHT_RATE_CENTS_PER_KWH = 13.462
+# Tariff time windows in local time.
+DAY_RATE_MORNING_START_HOUR = 8
+DAY_RATE_MORNING_END_HOUR = 17
+PEAK_RATE_START_HOUR = 17
+PEAK_RATE_END_HOUR = 19
+DAY_RATE_EVENING_START_HOUR = 19
+DAY_RATE_EVENING_END_HOUR = 23
+# Cheap-rate tariff window start hour in local time.
+CHEAP_RATE_START_HOUR = 23
+# Cheap-rate tariff window end hour in local time.
+CHEAP_RATE_END_HOUR = 8
 # Fraction of expected solar energy to keep free in the battery as headroom.
 HEADROOM_FRAC = 0.25
 # If SOC is already above this threshold during a Green forecast, export to grid.
@@ -66,6 +89,10 @@ TARIFF_TO_MODE = {
     # Peak: Expensive grid, maximize self-consumption
     "PEAK": SIGEN_MODES["SELF_POWERED"],
 }
+
+# Mode used during the overnight shoulder period outside cheap-rate hours.
+# This prevents the system from moving into charge-oriented TOU mode before cheap rates begin.
+SHOULDER_NIGHT_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
 # from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
