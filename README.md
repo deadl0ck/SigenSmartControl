@@ -111,11 +111,14 @@ PEAK_RATE_CENTS_PER_KWH = 32.591
 NIGHT_RATE_CENTS_PER_KWH = 13.462
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
+SELL_RATE_CENTS_PER_KWH = 18.5
 HEADROOM_FRAC = 0.25
 SOC_HIGH_THRESHOLD = 95
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
+ENABLE_EVENING_AI_MODE_TRANSITION = True
+EVENING_AI_MODE_START_HOUR = 17
 ```
 
 Meaning:
@@ -130,6 +133,7 @@ Meaning:
 - `DAY_RATE_CENTS_PER_KWH`: day unit rate for 08:00-17:00 and 19:00-23:00
 - `PEAK_RATE_CENTS_PER_KWH`: peak unit rate for 17:00-19:00
 - `NIGHT_RATE_CENTS_PER_KWH`: night unit rate for 23:00-08:00
+- `SELL_RATE_CENTS_PER_KWH`: export unit rate used for arbitrage analysis and simulation notes
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
 - `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
@@ -137,6 +141,8 @@ Meaning:
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
+- `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
+- `EVENING_AI_MODE_START_HOUR`: local hour after which Evening can transition to AI mode
 
 ### Tariff schedule currently configured
 
@@ -184,10 +190,14 @@ The runtime does not just apply one mapping directly. It uses this order:
 
 1. Export rules first (highest priority):
 If forecast is Green and battery headroom is too low, or SOC is already very high, use `GRID_EXPORT`.
-2. Peak-price rule second:
+2. Evening bridge rule second:
+If period is Evening and battery can safely cover expected household demand until cheap-rate starts, use `SELF_POWERED`.
+3. Peak-price rule third:
 If export is not needed and tariff is Peak, use `SELF_POWERED`.
-3. Default mapping last:
+4. Default mapping last:
 If neither of the above applies, use `FORECAST_TO_MODE` (Green/Amber/Red).
+5. Evening AI transition at period-start (optional final override):
+If `ENABLE_EVENING_AI_MODE_TRANSITION` is enabled and local time is after `EVENING_AI_MODE_START_HOUR`, set `AI` for Evening so mySigen profit-max can run arbitrage.
 
 ### Plain “if/then” version
 
@@ -198,6 +208,7 @@ For daytime periods, read it like this:
 3. Else if period is Evening and battery can cover expected load until cheap-rate starts -> `SELF_POWERED`.
 4. Else if tariff is Peak -> `SELF_POWERED`.
 5. Else -> use forecast mapping (Green/Amber/Red).
+6. At Evening period-start, if Evening AI transition is enabled and local time is past the configured threshold -> force `AI`.
 
 For night:
 
@@ -272,6 +283,10 @@ $$
 If:
 
 $$
+#### Why AI is preferred for Evening in this project
+
+Evening can still have some usable solar, but in most real-world days it is lower and less reliable than daytime generation. The bigger financial lever near cheap-rate start is battery state, not late solar peak.
+
 \text{headroom\_kwh} < \text{headroom\_target\_kwh}
 $$
 
@@ -394,6 +409,20 @@ This approach:
 - Leverages Sigen's native profit-max optimization
 - Simplifies debugging: all tariff/export behavior is centralized on the device
 - Remains flexible: profit-max parameters can be tuned in mySigen without code changes
+
+#### Why AI is preferred for Evening in this project
+
+Evening can still have usable solar, but it is usually less predictable and lower than daytime production. Near cheap-rate start, the larger economic lever is often battery state rather than late-day solar capture.
+
+With your tariff setup (`sell = 18.5 c/kWh`, `night = 13.462 c/kWh`), the arbitrage spread is positive. Because of that, the default preference is to let AI profit-max decide whether to discharge/export before cheap rates and then refill overnight.
+
+In practical terms:
+
+- if evening solar is still worthwhile, AI can still choose self-use/export behavior dynamically
+- if SOC is high before cheap-rate, AI can create battery headroom by discharging/exporting
+- during cheap-rate hours, AI can recharge at lower unit cost
+
+That is why the scheduler supports an Evening AI transition instead of hard-coding one fixed Evening policy for all days.
 
 ### Full simulation mode (dry run)
 

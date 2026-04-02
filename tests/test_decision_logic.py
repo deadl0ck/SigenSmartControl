@@ -85,3 +85,41 @@ def test_peak_tariff_does_not_override_grid_export_rule():
 
     assert mode == SIGEN_MODES["GRID_EXPORT"]
     assert "export" in reason.lower()
+
+
+def test_evening_red_uses_self_powered_when_battery_can_bridge_to_cheap_rate():
+    mode, reason = decide_operational_mode(
+        period="Eve",
+        status="Red",
+        soc=70,
+        headroom_kwh=6.0,
+        period_solar_kwh=0.5,
+        tariff_period="DAY",
+        battery_kwh=24,
+        hours_until_cheap_rate=4.0,
+        estimated_home_load_kw=0.8,
+        bridge_battery_reserve_kwh=1.0,
+        enable_pre_cheap_rate_battery_bridge=True,
+    )
+
+    assert mode == SIGEN_MODES["SELF_POWERED"]
+    assert "Evening bridge rule" in reason
+
+
+def test_evening_red_falls_back_to_tou_when_bridge_energy_is_insufficient():
+    mode, reason = decide_operational_mode(
+        period="Eve",
+        status="Red",
+        soc=20,
+        headroom_kwh=6.0,
+        period_solar_kwh=0.5,
+        tariff_period="DAY",
+        battery_kwh=24,
+        hours_until_cheap_rate=4.0,
+        estimated_home_load_kw=1.2,
+        bridge_battery_reserve_kwh=1.5,
+        enable_pre_cheap_rate_battery_bridge=True,
+    )
+
+    assert mode == SIGEN_MODES["TOU"]
+    assert "Default mapping for Red" in reason

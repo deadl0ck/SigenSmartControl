@@ -92,3 +92,14 @@ async def test_create_scheduler_interaction_success_logs_startup(monkeypatch: py
     result = await main.create_scheduler_interaction({1: "AI"})
     assert result is interaction
     assert called["startup_log"] is True
+
+
+def test_get_hours_until_cheap_rate_returns_zero_when_already_cheap_window() -> None:
+    now_utc = datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)
+    assert main.get_hours_until_cheap_rate(now_utc) == 0.0
+
+
+def test_get_hours_until_cheap_rate_counts_down_before_cheap_window() -> None:
+    now_utc = datetime(2026, 1, 15, 21, 0, tzinfo=timezone.utc)
+    hours = main.get_hours_until_cheap_rate(now_utc)
+    assert abs(hours - 2.0) < 0.01
