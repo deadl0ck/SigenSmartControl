@@ -2,7 +2,11 @@
 # It reuses your config and mapping logic, but does not require hardware or real API calls.
 
 from config import SIGEN_MODES
-from decision_logic import decide_operational_mode, calc_headroom_kwh
+from decision_logic import (
+    decide_operational_mode,
+    decide_night_preparation_mode,
+    calc_headroom_kwh,
+)
 
 def simulate_sigen_decision(
     inverter_kw: float,
@@ -24,12 +28,14 @@ def simulate_sigen_decision(
         ("Morn", forecast_morn),
         ("Aftn", forecast_aftn),
         ("Eve", forecast_eve),
+        # Night mode itself is tariff-driven; we use next morning's forecast context.
+        ("NIGHT", forecast_morn),
     ]
     results = {}
     for period, status in periods:
         # Simulate headroom and solar (simplified)
         headroom_kwh = calc_headroom_kwh(battery_kwh, soc)
-        period_solar_kwh = min(solar_pv_kw, inverter_kw) * 3.0  # Assume 3h period
+        period_solar_kwh = 0.0 if period == "NIGHT" else min(solar_pv_kw, inverter_kw) * 3.0
         mode, reason = decide_operational_mode(
             period=period,
             status=status,
@@ -44,4 +50,22 @@ def simulate_sigen_decision(
             "mode_name": [k for k, v in SIGEN_MODES.items() if v == mode][0],
             "reason": reason,
         }
+
+    # Simulate optional overnight prep decision for next morning.
+    next_morn_solar_kwh = min(solar_pv_kw, inverter_kw) * 3.0
+    prep_mode, prep_reason = decide_night_preparation_mode(
+        target_period="Morn",
+        status=forecast_morn,
+        soc=soc,
+        headroom_kwh=calc_headroom_kwh(battery_kwh, soc),
+        period_solar_kwh=next_morn_solar_kwh,
+        headroom_frac=HEADROOM_FRAC,
+        soc_high_threshold=SOC_HIGH_THRESHOLD,
+    )
+    results["NightPrep"] = {
+        "mode": prep_mode,
+        "mode_name": [k for k, v in SIGEN_MODES.items() if v == prep_mode][0],
+        "reason": prep_reason,
+    }
+
     return results

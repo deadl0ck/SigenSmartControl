@@ -99,6 +99,7 @@ BATTERY_KWH = 24
 ```python
 POLL_INTERVAL_MINUTES = 15
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+FULL_SIMULATION_MODE = True
 NIGHT_MODE_ENABLED = True
 NEXT_DAY_PRECHECK_ENABLED = True
 NIGHT_PRECHECK_DELAY_MINUTES = 30
@@ -116,6 +117,7 @@ Meaning:
 
 - `POLL_INTERVAL_MINUTES`: how often the scheduler wakes up to evaluate each period
 - `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
+- `FULL_SIMULATION_MODE`: when `True`, run full logic and logging but do not send inverter mode-change commands
 - `NIGHT_MODE_ENABLED`: whether the scheduler explicitly applies the configured night mode overnight
 - `NEXT_DAY_PRECHECK_ENABLED`: whether the scheduler evaluates the next morning's forecast during the night window
 - `NIGHT_PRECHECK_DELAY_MINUTES`: how long after the night window starts before the next-day pre-check runs
@@ -281,6 +283,20 @@ The next-day pre-check uses the upcoming first daytime period, normally `Morn`.
 If the next morning looks strong enough that headroom must be created, it can choose `GRID_EXPORT` overnight.
 Otherwise it stays in the appropriate shoulder or cheap-rate night mode for the current local tariff phase.
 
+### Full simulation mode (dry run)
+
+Set `FULL_SIMULATION_MODE = True` in `config.py` to run safely without changing inverter state.
+
+When enabled:
+
+- the scheduler still runs all calculations and timing checks
+- forecast and SOC are still fetched normally
+- startup still fetches and logs current inverter mode
+- every would-be mode change is logged clearly with a full separator banner and action details
+- no `set_operational_mode(...)` command is sent to the inverter
+
+This is intended for realistic test runs where you want full observability without altering the live system state.
+
 ## Scheduler Behavior
 
 Running:
@@ -360,6 +376,8 @@ The simulator:
 - preloads inverter, battery, and solar config values
 - defaults SOC to `80%` while keeping it editable
 - lets you simulate Morning, Afternoon, and Evening forecasts
+- treats Night as tariff-driven (not a manual solar status)
+- derives overnight prep decisions from the next morning forecast
 - shows both the selected mode and a human-readable explanation
 - uses the same shared decision logic as the live runtime
 

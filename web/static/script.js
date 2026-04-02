@@ -59,12 +59,13 @@ document.addEventListener('DOMContentLoaded', () => {
         let html = '<h3>Simulation Result</h3>';
         html += '<table class="mode-table">';
         html += '<tr><th>Period</th><th>Mode</th><th>Mode Explanation</th><th>Reason</th></tr>';
-        for (const period of ['Morn', 'Aftn', 'Eve']) {
+        for (const period of ['Morn', 'Aftn', 'Eve', 'NIGHT', 'NightPrep']) {
             if (result[period]) {
                 const mode = result[period].mode_name;
                 const modeLabel = MODE_LABELS[mode] || mode;
                 const modeExplanation = MODE_EXPLANATIONS[mode] || 'No description available for this mode.';
-                html += `<tr><td>${period}</td><td class="mode-${mode}">${modeLabel}</td><td>${modeExplanation}</td><td>${result[period].reason}</td></tr>`;
+                const periodLabel = period === 'NightPrep' ? 'Night Prep (for Morn)' : period;
+                html += `<tr><td>${periodLabel}</td><td class="mode-${mode}">${modeLabel}</td><td>${modeExplanation}</td><td>${result[period].reason}</td></tr>`;
             }
         }
         html += '</table>';

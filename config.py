@@ -1,11 +1,3 @@
-# --- System Specifications (edit to match your hardware) ---
-# Solar PV array size in kW (DC rating)
-SOLAR_PV_KW = 8.9
-# Inverter maximum output in kW (AC rating)
-INVERTER_KW = 5.5
-# Battery usable capacity in kWh
-BATTERY_KWH = 24
-
 """
 config.py
 
@@ -14,17 +6,30 @@ Configuration file for Sigen inverter operational mode mappings and forecast-to-
 Edit this file to adjust how forecast statuses and tariff periods map to Sigen operational modes.
 """
 
-"""
-LOG_LEVEL controls the verbosity of logging throughout the system.
-Set to one of: 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'.
-"""
+# ==============================
+# System Specifications
+# ==============================
+# Solar PV array size in kW (DC rating)
+SOLAR_PV_KW = 8.9
+# Inverter maximum output in kW (AC rating)
+INVERTER_KW = 5.5
+# Battery usable capacity in kWh
+BATTERY_KWH = 24
+
+# LOG_LEVEL controls the verbosity of logging throughout the system.
+# Set to one of: 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'.
 LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 
-# Scheduler runtime settings.
+# ==============================
+# Runtime / Scheduler Settings
+# ==============================
 # How often the self-contained scheduler wakes up to re-check forecast windows.
 POLL_INTERVAL_MINUTES = 15
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+# Full simulation mode: reads data and logs intended actions but never sends
+# inverter mode-change commands.
+FULL_SIMULATION_MODE = True
 # Whether the scheduler should explicitly apply the configured night mode.
 NIGHT_MODE_ENABLED = True
 # Whether the scheduler should perform a night-before pre-check for the next morning.
@@ -33,6 +38,9 @@ NEXT_DAY_PRECHECK_ENABLED = True
 NIGHT_PRECHECK_DELAY_MINUTES = 30
 # Local timezone used for tariff windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
+# ==============================
+# Tariff Configuration
+# ==============================
 # Tariff rates in cents per kWh.
 DAY_RATE_CENTS_PER_KWH = 26.596
 PEAK_RATE_CENTS_PER_KWH = 32.591
@@ -48,11 +56,17 @@ DAY_RATE_EVENING_END_HOUR = 23
 CHEAP_RATE_START_HOUR = 23
 # Cheap-rate tariff window end hour in local time.
 CHEAP_RATE_END_HOUR = 8
+# ==============================
+# Decision Thresholds
+# ==============================
 # Fraction of expected solar energy to keep free in the battery as headroom.
 HEADROOM_FRAC = 0.25
 # If SOC is already above this threshold during a Green forecast, export to grid.
 SOC_HIGH_THRESHOLD = 95
 
+# ==============================
+# Sigen Modes
+# ==============================
 # Sigen operational mode values (from check_modes.py)
 SIGEN_MODES = {
     # Let Sigen AI optimize for savings and self-consumption
@@ -69,6 +83,9 @@ SIGEN_MODES = {
     "CUSTOM": 9,  # Custom Operation Mode
 }
 
+# ==============================
+# Forecast-to-Mode Mapping
+# ==============================
 # Map forecast status (Red/Amber/Green) to Sigen operational mode
 # Adjust these mappings to change automation behavior
 FORECAST_TO_MODE = {
@@ -80,6 +97,9 @@ FORECAST_TO_MODE = {
     "RED": SIGEN_MODES["TOU"],
 }
 
+# ==============================
+# Tariff-to-Mode Mapping
+# ==============================
 # Example: Map tariff period to Sigen mode (optional, for advanced logic)
 TARIFF_TO_MODE = {
     # Night: Cheap grid, charge battery if needed

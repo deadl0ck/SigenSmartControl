@@ -11,6 +11,7 @@ from config import (
     SIGEN_MODES,
     TARIFF_TO_MODE,
     SHOULDER_NIGHT_MODE,
+    FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
@@ -46,6 +47,7 @@ POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
 LOCAL_TZ = ZoneInfo(LOCAL_TIMEZONE)
+ACTION_DIVIDER = "=" * 100
 
 
 def _parse_utc(iso_str: str) -> datetime:
@@ -134,6 +136,67 @@ def get_tariff_period_for_time(when_utc: datetime) -> str:
     return "DAY"
 
 
+def extract_mode_value(raw_mode: Any) -> int | None:
+    if isinstance(raw_mode, int):
+        return raw_mode
+    if isinstance(raw_mode, dict):
+        for key in ("mode", "operationalMode", "operational_mode", "value"):
+            value = raw_mode.get(key)
+            if isinstance(value, int):
+                return value
+    return None
+
+
+async def log_current_mode_on_startup(sigen: Any, mode_names: dict[int, str]) -> None:
+    try:
+        current_mode_raw = await sigen.get_operational_mode()
+        current_mode = extract_mode_value(current_mode_raw)
+        logger.info(ACTION_DIVIDER)
+        logger.info("STARTUP CHECK: fetched current inverter mode")
+        if current_mode is not None:
+            logger.info(
+                f"Current mode is {mode_names.get(current_mode, current_mode)} (value={current_mode})"
+            )
+        else:
+            logger.info(f"Current mode response (unparsed): {current_mode_raw}")
+        logger.info(ACTION_DIVIDER)
+    except Exception as e:
+        logger.error(f"Failed to fetch current inverter mode on startup: {e}")
+
+
+async def apply_mode_change(
+    *,
+    sigen: Any,
+    mode: int,
+    period: str,
+    reason: str,
+    mode_names: dict[int, str],
+) -> bool:
+    mode_label = mode_names.get(mode, mode)
+    action_line = (
+        "FULL SIMULATION MODE: WOULD call inverter set_operational_mode"
+        if FULL_SIMULATION_MODE
+        else "LIVE MODE: calling inverter set_operational_mode"
+    )
+    logger.info(ACTION_DIVIDER)
+    logger.info(action_line)
+    logger.info(f"Target period/context: {period}")
+    logger.info(f"Target mode: {mode_label} (value={mode})")
+    logger.info(f"Decision reason: {reason}")
+    logger.info(ACTION_DIVIDER)
+
+    if FULL_SIMULATION_MODE:
+        return True
+
+    try:
+        response = await sigen.set_operational_mode(mode, -1)
+        logger.info(f"Set mode response for {period}: {response}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set mode for {period}: {e}")
+        return False
+
+
 async def main() -> None:
     """
     Main control loop for Sigen inverter automation.
@@ -180,10 +243,10 @@ async def main() -> None:
 
     # Legacy one-shot run path (scheduler mode is run_scheduler).
     sigen = await get_sigen_instance()
+    mode_names = {v: k for k, v in SIGEN_MODES.items()}
+    await log_current_mode_on_startup(sigen, mode_names)
     forecast = SolarForecast(logger)
     period_forecast = forecast.get_todays_period_forecast()
-
-    mode_names = {v: k for k, v in SIGEN_MODES.items()}
 
 
     for period, (solar_value, status) in period_forecast.items():
@@ -218,12 +281,13 @@ async def main() -> None:
             f"Selected mode for {period}: {mode_names.get(mode, mode)} (value={mode}). Reason: {decision_reason}"
         )
 
-        # Set the inverter mode (simulate or actually set)
-        try:
-            response = await sigen.set_operational_mode(mode, -1)
-            logger.info(f"Set mode response for {period}: {response}")
-        except Exception as e:
-            logger.error(f"Failed to set mode for {period}: {e}")
+        await apply_mode_change(
+            sigen=sigen,
+            mode=mode,
+            period=period,
+            reason=decision_reason,
+            mode_names=mode_names,
+        )
 
     logger.info("Control loop complete.")
 
@@ -269,6 +333,7 @@ async def run_scheduler() -> None:
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
 
     sigen = await get_sigen_instance()
+    await log_current_mode_on_startup(sigen, mode_names)
     current_date = None
     today_period_windows: dict[str, datetime] = {}
     tomorrow_period_windows: dict[str, datetime] = {}
@@ -475,11 +540,18 @@ async def run_scheduler() -> None:
                     outcome=f"night {night_phase} mode applied",
                 )
                 try:
-                    await sigen.set_operational_mode(night_mode, -1)
-                    night_state["mode_set_for"] = night_context["target_date"]
-                    night_state["mode_phase"] = night_phase
+                    ok = await apply_mode_change(
+                        sigen=sigen,
+                        mode=night_mode,
+                        period=night_period_name,
+                        reason=night_mode_reason,
+                        mode_names=mode_names,
+                    )
+                    if ok:
+                        night_state["mode_set_for"] = night_context["target_date"]
+                        night_state["mode_phase"] = night_phase
                 except Exception as e:
-                    logger.error(f"[{night_period_name}] Failed to set base night mode: {e}")
+                    logger.error(f"[{night_period_name}] Unexpected error applying base night mode: {e}")
 
             if NEXT_DAY_PRECHECK_ENABLED and night_state["prep_set_for"] != night_context["target_date"]:
                 precheck_opens_at = (
@@ -524,11 +596,15 @@ async def run_scheduler() -> None:
                             reason=reason,
                             outcome="night pre-check action applied",
                         )
-                        try:
-                            await sigen.set_operational_mode(mode, -1)
+                        ok = await apply_mode_change(
+                            sigen=sigen,
+                            mode=mode,
+                            period=night_period_name,
+                            reason=reason,
+                            mode_names=mode_names,
+                        )
+                        if ok:
                             night_state["prep_set_for"] = night_context["target_date"]
-                        except Exception as e:
-                            logger.error(f"[{night_period_name}] Failed to apply night prep action: {e}")
                 else:
                     log_check(
                         night_period_name,
@@ -603,10 +679,13 @@ async def run_scheduler() -> None:
                                 reason=reason,
                                 outcome=outcome,
                             )
-                            try:
-                                await sigen.set_operational_mode(mode, -1)
-                            except Exception as e:
-                                logger.error(f"[{period}] Failed to set pre-period mode: {e}")
+                            await apply_mode_change(
+                                sigen=sigen,
+                                mode=mode,
+                                period=f"{period} (pre-period)",
+                                reason=reason,
+                                mode_names=mode_names,
+                            )
                         else:
                             log_check(
                                 period,
@@ -679,12 +758,16 @@ async def run_scheduler() -> None:
                         reason=reason,
                         outcome="period start mode applied",
                     )
-                    try:
-                        await sigen.set_operational_mode(mode, -1)
+                    ok = await apply_mode_change(
+                        sigen=sigen,
+                        mode=mode,
+                        period=f"{period} (period-start)",
+                        reason=reason,
+                        mode_names=mode_names,
+                    )
+                    if ok:
                         s["start_set"] = True
                         s["pre_set"] = True  # Suppress further pre-period checks.
-                    except Exception as e:
-                        logger.error(f"[{period}] Failed to set period-start mode: {e}")
 
         logger.info(
             f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "

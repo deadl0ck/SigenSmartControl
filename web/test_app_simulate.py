@@ -25,11 +25,14 @@ def test_simulate_valid_soc(client):
         'soc': 80,
         'forecast_morn': 'Green',
         'forecast_aftn': 'Amber',
-        'forecast_eve': 'Red'
+        'forecast_eve': 'Red',
+        'forecast_night': 'Red'
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert 'Morn' in data and 'mode' in data['Morn']
+    assert 'NIGHT' in data and 'mode' in data['NIGHT']
+    assert 'NightPrep' in data and 'mode' in data['NightPrep']
 
 def test_simulate_missing_soc(client):
     resp = post_simulate(client, {
@@ -39,11 +42,13 @@ def test_simulate_missing_soc(client):
         # 'soc' omitted
         'forecast_morn': 'Green',
         'forecast_aftn': 'Amber',
-        'forecast_eve': 'Red'
+        'forecast_eve': 'Red',
+        'forecast_night': 'Red'
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert 'Morn' in data and 'mode' in data['Morn']
+    assert 'NIGHT' in data and 'mode' in data['NIGHT']
 
 def test_simulate_empty_soc(client):
     resp = post_simulate(client, {
@@ -53,11 +58,13 @@ def test_simulate_empty_soc(client):
         'soc': '',
         'forecast_morn': 'Green',
         'forecast_aftn': 'Amber',
-        'forecast_eve': 'Red'
+        'forecast_eve': 'Red',
+        'forecast_night': 'Red'
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert 'Morn' in data and 'mode' in data['Morn']
+    assert 'NIGHT' in data and 'mode' in data['NIGHT']
 
 def test_simulate_invalid_soc(client):
     resp = post_simulate(client, {
@@ -67,8 +74,10 @@ def test_simulate_invalid_soc(client):
         'soc': 'notanumber',
         'forecast_morn': 'Green',
         'forecast_aftn': 'Amber',
-        'forecast_eve': 'Red'
+        'forecast_eve': 'Red',
+        'forecast_night': 'Red'
     })
     assert resp.status_code == 200
     data = resp.get_json()
     assert 'Morn' in data and 'mode' in data['Morn']
+    assert 'NIGHT' in data and 'mode' in data['NIGHT']
