@@ -45,6 +45,7 @@ LOCAL_TIMEZONE = "Europe/Dublin"
 DAY_RATE_CENTS_PER_KWH = 26.596
 PEAK_RATE_CENTS_PER_KWH = 32.591
 NIGHT_RATE_CENTS_PER_KWH = 13.462
+SELL_RATE_CENTS_PER_KWH = 18.5
 # Tariff time windows in local time.
 DAY_RATE_MORNING_START_HOUR = 8
 DAY_RATE_MORNING_END_HOUR = 17
@@ -63,6 +64,14 @@ CHEAP_RATE_END_HOUR = 8
 HEADROOM_FRAC = 0.25
 # If SOC is already above this threshold during a Green forecast, export to grid.
 SOC_HIGH_THRESHOLD = 95
+# Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
+# if current battery energy is sufficient to cover expected household demand.
+ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
+# Estimated average household load (kW) used to calculate battery energy needed
+# to reach cheap-rate start time.
+ESTIMATED_HOME_LOAD_KW = 0.8
+# Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
+BRIDGE_BATTERY_RESERVE_KWH = 1.0
 
 # ==============================
 # Sigen Modes

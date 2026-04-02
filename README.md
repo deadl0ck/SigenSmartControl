@@ -113,6 +113,9 @@ CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
 HEADROOM_FRAC = 0.25
 SOC_HIGH_THRESHOLD = 95
+ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
+ESTIMATED_HOME_LOAD_KW = 0.8
+BRIDGE_BATTERY_RESERVE_KWH = 1.0
 ```
 
 Meaning:
@@ -131,6 +134,9 @@ Meaning:
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
 - `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
 - `SOC_HIGH_THRESHOLD`: if forecast is Green and SOC is at or above this threshold, export to grid
+- `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
+- `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
+- `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
 
 ### Tariff schedule currently configured
 
@@ -140,6 +146,7 @@ The tariff schedule currently captured in `config.py` is:
 - `17:00-19:00`: Peak at `32.591 c/kWh`
 - `19:00-23:00`: Day at `26.596 c/kWh`
 - `23:00-08:00`: Night at `13.462 c/kWh`
+- **Sell rate**: `18.5 c/kWh` (used when exporting to grid; enables arbitrage between sell and cheap-rate recharge)
 
 ### Mode mappings
 
@@ -188,8 +195,9 @@ For daytime periods, read it like this:
 
 1. If Green forecast AND battery space is too small for expected solar -> `GRID_EXPORT`.
 2. Else if Green forecast AND SOC already above threshold -> `GRID_EXPORT`.
-3. Else if tariff is Peak -> `SELF_POWERED`.
-4. Else -> use forecast mapping (Green/Amber/Red).
+3. Else if period is Evening and battery can cover expected load until cheap-rate starts -> `SELF_POWERED`.
+4. Else if tariff is Peak -> `SELF_POWERED`.
+5. Else -> use forecast mapping (Green/Amber/Red).
 
 For night:
 
@@ -344,6 +352,48 @@ The next-day pre-check uses the upcoming first daytime period, normally `Morn`.
 
 If the next morning looks strong enough that headroom must be created, it can choose `GRID_EXPORT` overnight.
 Otherwise it stays in the appropriate shoulder or cheap-rate night mode for the current local tariff phase.
+
+### AI Mode profit-max and arbitrage (battery sell-discharge-recharge)
+
+When using **Sigen AI Mode** with **profit-max** enabled in the mySigen app, the system can optimize battery charging by performing energy arbitrage: selling excess battery at higher rates and then recharging from the grid at cheap-rate times.
+
+#### How it works
+
+The arbitrage opportunity exists when:
+
+- **Sell rate** (18.5 c/kWh during day/peak) is higher than **night charge rate** (13.462 c/kWh)
+- Battery is at high SOC as evening approaches
+- Cheap-rate window (23:00-08:00) is approaching
+
+AI mode with profit-max will:
+
+1. **Discharge excess battery before cheap rates** (typically around 17:00-23:00) into `GRID_EXPORT` mode at day/peak rates (18.5-32.6 c/kWh)
+2. **Recharge from grid during cheap window** (23:00-08:00) at night rates (13.462 c/kWh)
+3. *Net gain*: ~5 c/kWh per cycle ((18.5 - 13.462) × kWh discharged → recharged)
+
+#### Configuration requirements
+
+For AI Mode profit-max to work correctly, you must:
+
+1. **Set tariffs in mySigen app**: Configure day, peak, night, and sell rates in the device settings
+2. **Enable profit-max mode**: In mySigen app settings, activate "Profit Max" or "Export Optimization" mode
+3. **Set sell rate in config.py**: Document the sell rate for reference and simulation
+4. **Verify discharge cut-off SOC**: Ensure the discharge cut-off in mySigen app is low enough (typically 10-20%) to allow significant discharge before cheap rates start
+
+#### Why this scheduler uses TOU → AI transition at night
+
+This scheduler can be tuned to:
+
+- Run the day in forecast-based modes (Green/Amber/Red)
+- Switch to **AI Mode** as evening approaches
+- Let AI mode handle the sell-discharge-recharge optimization automatically
+
+This approach:
+
+- Avoids hard-coded discharge logic in the Python scheduler
+- Leverages Sigen's native profit-max optimization
+- Simplifies debugging: all tariff/export behavior is centralized on the device
+- Remains flexible: profit-max parameters can be tuned in mySigen without code changes
 
 ### Full simulation mode (dry run)
 
