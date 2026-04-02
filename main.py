@@ -1,6 +1,7 @@
 
-import logging
 import asyncio
+import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -33,6 +34,9 @@ from config import (
     BRIDGE_BATTERY_RESERVE_KWH,
     ENABLE_EVENING_AI_MODE_TRANSITION,
     EVENING_AI_MODE_START_HOUR,
+    SOLAR_PV_KW,
+    INVERTER_KW,
+    BATTERY_KWH,
 )
 from decision_logic import (
     decide_operational_mode,
@@ -56,7 +60,14 @@ ACTION_DIVIDER = "=" * 100
 
 
 def _parse_utc(iso_str: str) -> datetime:
-    """Parse an ISO 8601 timestamp, ensuring it carries UTC tzinfo."""
+    """Parse an ISO 8601 timestamp, ensuring it carries UTC tzinfo.
+    
+    Args:
+        iso_str: ISO 8601 formatted timestamp string.
+        
+    Returns:
+        Timezone-aware datetime with UTC tzinfo.
+    """
     dt = datetime.fromisoformat(iso_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -85,6 +96,16 @@ def get_first_period_info(
     period_windows: dict[str, datetime],
     period_forecast: dict[str, tuple[int, str]],
 ) -> tuple[str, datetime, int, str] | None:
+    """Retrieve the earliest period from a collection of periods.
+    
+    Args:
+        period_windows: Mapping of period names to their start times (UTC).
+        period_forecast: Mapping of period names to (solar_watts, status) tuples.
+        
+    Returns:
+        Tuple of (period_name, start_time, solar_value, status) for the earliest period,
+        or None if no periods are available.
+    """
     available_periods = [
         (period, start, *period_forecast[period])
         for period, start in period_windows.items()
@@ -96,6 +117,15 @@ def get_first_period_info(
 
 
 def is_cheap_rate_window(now_utc: datetime) -> bool:
+    """Determine whether the current time falls within the cheap-rate tariff window.
+    
+    Args:
+        now_utc: Current time in UTC.
+        
+    Returns:
+        True if now_utc is within the configured cheap-rate window (CHEAP_RATE_START_HOUR
+        to CHEAP_RATE_END_HOUR in local timezone), False otherwise.
+    """
     local_hour = now_utc.astimezone(LOCAL_TZ).hour
     if CHEAP_RATE_START_HOUR < CHEAP_RATE_END_HOUR:
         return CHEAP_RATE_START_HOUR <= local_hour < CHEAP_RATE_END_HOUR
@@ -103,6 +133,16 @@ def is_cheap_rate_window(now_utc: datetime) -> bool:
 
 
 def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
+    """Determine the appropriate mode for night-time tariff periods.
+    
+    Args:
+        now_utc: Current time in UTC.
+        
+    Returns:
+        Tuple of (mode_value: int, phase_label: str, explanation: str) describing whether
+        to use cheap-rate mode (if in the cheap window) or shoulder mode (if before cheap
+        rates to prevent early charging).
+    """
     local_now = now_utc.astimezone(LOCAL_TZ)
     if is_cheap_rate_window(now_utc):
         return (
@@ -124,7 +164,15 @@ def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
 
 
 def get_hours_until_cheap_rate(now_utc: datetime) -> float:
-    """Return hours until next cheap-rate start in local time, or 0 if already in cheap-rate window."""
+    """Calculate hours until the next cheap-rate window opens in local timezone.
+    
+    Args:
+        now_utc: Current time in UTC.
+        
+    Returns:
+        Hours until the next cheap-rate window starts. Returns 0.0 if already within
+        the cheap-rate window. Accounts for daily cycle wrap-around.
+    """
     if is_cheap_rate_window(now_utc):
         return 0.0
 
@@ -142,6 +190,15 @@ def get_hours_until_cheap_rate(now_utc: datetime) -> float:
 
 
 def get_tariff_period_for_time(when_utc: datetime) -> str:
+    """Determine which tariff period (NIGHT, PEAK, or DAY) applies at a given time.
+    
+    Args:
+        when_utc: Time to check, in UTC.
+        
+    Returns:
+        String representing the tariff period: 'NIGHT' (cheap rates), 'PEAK' (highest rates),
+        or 'DAY' (standard daytime rates).
+    """
     local_hour = when_utc.astimezone(LOCAL_TZ).hour
 
     if is_cheap_rate_window(when_utc):
@@ -189,6 +246,16 @@ def should_use_ai_mode_for_evening(period: str, now_utc: datetime) -> tuple[bool
 
 
 def extract_mode_value(raw_mode: Any) -> int | None:
+    """Extract numeric mode value from various response formats returned by the API.
+    
+    Args:
+        raw_mode: Mode value in any format (int, string, dict, etc.) as returned by
+                  the Sigen API.
+        
+    Returns:
+        Integer mode value (one of the SIGEN_MODES values), or None if extraction fails
+        or the response does not contain a numeric mode.
+    """
     if isinstance(raw_mode, int):
         return raw_mode
     if isinstance(raw_mode, str):
@@ -206,7 +273,21 @@ def extract_mode_value(raw_mode: Any) -> int | None:
 
 
 def mode_matches_target(raw_mode: Any, target_mode: int, mode_names: dict[int, str]) -> bool:
-    """Return True if a raw mode response already represents the target mode."""
+    """Check whether a raw mode response already represents the target mode.
+    
+    Handles multiple response formats: numeric values, string labels, and dict structures.
+    Uses numeric comparison first, then falls back to human-readable label matching
+    (e.g., 'Sigen AI Mode' contains 'AI' which matches AI mode).
+    
+    Args:
+        raw_mode: Current mode from API (can be int, string, or dict).
+        target_mode: Numeric mode value we want to match against.
+        mode_names: Mapping from numeric mode to human-readable label (e.g., {1: 'AI'}).
+        
+    Returns:
+        True if raw_mode already represents target_mode (avoiding redundant API calls),
+        False otherwise.
+    """
     current_mode = extract_mode_value(raw_mode)
     if current_mode is not None:
         return current_mode == target_mode
@@ -230,6 +311,12 @@ def mode_matches_target(raw_mode: Any, target_mode: int, mode_names: dict[int, s
 
 
 async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
+    """Log the inverter's current operational mode during startup.
+    
+    Args:
+        sigen: SigenInteraction instance for API calls.
+        mode_names: Mapping from numeric mode to human-readable label.
+    """
     try:
         current_mode_raw = await sigen.get_operational_mode()
         current_mode = extract_mode_value(current_mode_raw)
@@ -254,6 +341,21 @@ async def apply_mode_change(
     reason: str,
     mode_names: dict[int, str],
 ) -> bool:
+    """Attempt to change the inverter operational mode with idempotency checks.
+    
+    Reads the current mode before writing; if already at target mode, logs and returns True
+    without calling the API. Falls back to set attempt if read fails.
+    
+    Args:
+        sigen: SigenInteraction instance, or None in dry-run mode.
+        mode: Target numeric mode value.
+        period: Human-readable period/context label for logging.
+        reason: Explanation of why this mode change is being made.
+        mode_names: Mapping from numeric mode to human-readable label.
+        
+    Returns:
+        True if mode was set or already at target, False if set operation failed.
+    """
     mode_label = mode_names.get(mode, mode)
     if sigen is None:
         logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
@@ -292,7 +394,21 @@ async def apply_mode_change(
 
 
 async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInteraction | None:
-    """Create and validate the Sigen interaction, with dry-run fallback support."""
+    """Create and validate the Sigen API interaction wrapper.
+    
+    Attempts to initialize API connection and logs current inverter mode on startup.
+    If authentication fails but FULL_SIMULATION_MODE is enabled, returns None for
+    dry-run operation; otherwise re-raises the exception.
+    
+    Args:
+        mode_names: Mapping from numeric mode to human-readable label.
+        
+    Returns:
+        SigenInteraction instance if successful, or None in simulation mode if auth fails.
+        
+    Raises:
+        Exception: If API initialization fails and not in simulation mode.
+    """
     try:
         sigen = await SigenInteraction.create()
         await log_current_mode_on_startup(sigen, mode_names)
@@ -313,7 +429,20 @@ def suppress_elapsed_periods_except_latest(
     period_windows: dict[str, datetime],
     day_state: dict[str, dict[str, bool]],
 ) -> list[str]:
-    """Suppress stale elapsed periods and keep only the latest elapsed period actionable."""
+    """Mark all elapsed periods as 'done' except the latest, allowing recovery if missed.
+    
+    When multiple periods have started before the scheduler catches up, suppresses
+    pre_set and start_set on all but the latest elapsed period so only the current
+    period can trigger actions.
+    
+    Args:
+        now_utc: Current time in UTC.
+        period_windows: Mapping of period names to start times (UTC).
+        day_state: Mutable dict tracking pre_set and start_set status per period.
+        
+    Returns:
+        List of suppressed period names for logging.
+    """
     elapsed_periods = [
         period
         for period, period_start in sorted(period_windows.items(), key=lambda item: item[1])
@@ -342,9 +471,16 @@ async def main() -> None:
     - All actions are logged at the configured level
     """
 
-    import os
-
     def mask(val, key=None):
+        """Mask sensitive environment variable values in logs.
+        
+        Args:
+            val: Value to check for masking.
+            key: Optional environment variable name.
+            
+        Returns:
+            Masked string for sensitive values, original value otherwise.
+        """
         if key and key.upper() in ("SIGEN_PASSWORD",):
             return "***MASKED***"
         if not isinstance(val, str):
@@ -365,12 +501,20 @@ async def main() -> None:
         else:
             logger.info(f"[RUN] ENV {k} = {mask(v, k)}")
 
-    from config import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
     logger.info("Starting Sigen inverter control loop...")
     logger.info(f"System Specs: Solar PV = {SOLAR_PV_KW} kW, Inverter = {INVERTER_KW} kW, Battery = {BATTERY_KWH} kWh")
 
     # Helper to estimate max possible solar input for a period (kWh)
     def estimate_period_solar(solar_value: int, period_hours: float = 3.0) -> float:
+        """Estimate total solar energy available during a period.
+        
+        Args:
+            solar_value: Forecasted power in watts (typically average for period).
+            period_hours: Duration of the period in hours (default 3.0).
+            
+        Returns:
+            Estimated energy in kWh, capped by system limits (PV size, inverter capacity).
+        """
         # solar_value is forecast W for the period; scale by PV size
         # Assume forecast is average W for period
         kw = (solar_value / 1000.0)
@@ -449,10 +593,17 @@ async def run_scheduler() -> None:
       5. Every action (pre-export and period-start) is performed at most once per
          period per day to avoid redundant inverter commands.
     """
-    import os
-    from config import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
 
     def mask(val, key=None):
+        """Mask sensitive environment variable values in logs.
+        
+        Args:
+            val: Value to check for masking.
+            key: Optional environment variable name.
+            
+        Returns:
+            Masked string for sensitive values, original value otherwise.
+        """
         if key and key.upper() in ("SIGEN_PASSWORD",):
             return "***MASKED***"
         if not isinstance(val, str):
@@ -507,6 +658,11 @@ async def run_scheduler() -> None:
     }
 
     async def refresh_daily_data() -> None:
+        """Fetch and cache solar forecast and sunrise/sunset times for today and tomorrow.
+        
+        Called once per calendar day to initialize/refresh period windows, forecasts,
+        and sunrise/sunset times used throughout the day's scheduling loop.
+        """
         nonlocal today_period_windows, tomorrow_period_windows
         nonlocal today_period_forecast, tomorrow_period_forecast
         nonlocal today_sunrise_utc, today_sunset_utc, tomorrow_sunrise_utc, day_state
@@ -556,6 +712,14 @@ async def run_scheduler() -> None:
         day_state = {p: {"pre_set": False, "start_set": False} for p in daytime_periods}
 
     async def fetch_soc(period: str) -> float | None:
+        """Fetch current battery state-of-charge from inverter or use simulated value.
+        
+        Args:
+            period: Human-readable period/context label for logging.
+            
+        Returns:
+            Battery SOC percentage (0-100), or None if fetch fails.
+        """
         if sigen is None:
             logger.info(
                 f"[{period}] SOC: {simulated_soc_percent}% (simulated; inverter unavailable in dry-run mode)"
@@ -571,6 +735,14 @@ async def run_scheduler() -> None:
             return None
 
     def estimate_solar(solar_value: int) -> float:
+        """Estimate total solar energy available during a period.
+        
+        Args:
+            solar_value: Forecasted power in watts (typically average for period).
+            
+        Returns:
+            Estimated energy in kWh assuming 3-hour period, capped by system limits.
+        """
         kw = min(solar_value / 1000.0, SOLAR_PV_KW, INVERTER_KW)
         return kw * 3.0  # assume 3-hour period
 
@@ -592,6 +764,25 @@ async def run_scheduler() -> None:
         reason: str,
         outcome: str,
     ) -> None:
+        """Log a comprehensive decision checkpoint with all relevant state and parameters.
+        
+        Args:
+            period: Human-readable period/context label.
+            stage: Scheduling stage (PRE-PERIOD, PERIOD-START, NIGHT-BASE, etc.).
+            now_utc: Current time in UTC.
+            period_start_utc: Period start time in UTC.
+            solar_value: Forecasted power in watts.
+            status: Forecast status string (e.g., 'GREEN', 'YELLOW').
+            period_solar_kwh: Estimated available solar energy.
+            soc: Current battery SOC percentage, or None if unavailable.
+            headroom_kwh: Current available battery headroom.
+            headroom_target_kwh: Target headroom needed before period.
+            headroom_deficit_kwh: Shortfall (if any) against target.
+            export_by_utc: Deadline for pre-period export window.
+            mode: Target operational mode, or None.
+            reason: Explanation of decision logic.
+            outcome: Description of action taken.
+        """
         mode_label = mode_names.get(mode, mode) if mode is not None else "N/A"
         export_by_label = export_by_utc.isoformat() if export_by_utc is not None else "N/A"
         logger.info(
@@ -607,6 +798,19 @@ async def run_scheduler() -> None:
         )
 
     def get_active_night_context(now_utc: datetime) -> dict[str, Any] | None:
+        """Determine whether a night window is currently active and return scheduling context.
+        
+        Returns active night context during two windows:
+        - PRE-DAWN: Before the first daytime period of today
+        - EVENING-NIGHT: After today's sunset until tomorrow's first daytime period
+        
+        Args:
+            now_utc: Current time in UTC.
+            
+        Returns:
+            Dict with keys {window_name, night_start, target_period, target_start, solar_value,
+            status, target_date} if in a night window, or None if in daytime.
+        """
         today_first_period = get_first_period_info(today_period_windows, today_period_forecast)
         tomorrow_first_period = get_first_period_info(tomorrow_period_windows, tomorrow_period_forecast)
 
