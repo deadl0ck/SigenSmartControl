@@ -147,123 +147,61 @@ The tariff schedule currently captured in `config.py` is:
 
 ### Mode mappings in plain English
 
-Think of mappings as the rulebook that converts a condition (forecast or tariff) into
-an inverter behavior.
+The easiest way to read this is:
 
-There are 3 layers:
+- `SIGEN_MODES` = the list of available inverter modes.
+- `FORECAST_TO_MODE` = your default weather rules.
+- `TARIFF_TO_MODE` = your default price-period rules.
 
-1. The mode dictionary (`SIGEN_MODES`): this is the master list of inverter modes and
-their numeric IDs used by the Sigen API.
-2. The forecast mapping (`FORECAST_TO_MODE`): this says what to do for Green/Amber/Red
-solar conditions.
-3. The tariff mapping (`TARIFF_TO_MODE`): this says what to do for Day/Peak/Night price periods.
-
-The runtime then applies decision priority rules on top of those mappings, so the final
-mode is not always a direct lookup.
-
-#### 1) `SIGEN_MODES` (what each mode means)
-
-- `AI`: Let Sigen optimize automatically.
-	Use this when conditions are normal and you want balanced behavior without forcing a hard strategy.
-- `SELF_POWERED`: Prefer serving the home from solar + battery and avoid importing from grid when possible.
-	Use this when grid prices are high (especially peak) or when maximizing self-consumption is preferred.
-- `TOU`: Use time-of-use behavior.
-	Typically used when tariff windows matter, especially at night when charging can be cheaper.
-- `GRID_EXPORT`: Push energy to grid.
-	Used intentionally to create battery headroom before strong solar, or when battery is already very full.
-- `REMOTE_EMS` / `CUSTOM`: advanced modes available in Sigen, not used by default in this scheduler flow.
-
-#### 2) `FORECAST_TO_MODE` (default weather-based behavior)
-
-Current defaults are:
+Current defaults in this project:
 
 - Green -> `SELF_POWERED`
 - Amber -> `AI`
 - Red -> `TOU`
+- Night tariff -> `TOU`
+- Peak tariff -> `SELF_POWERED`
 
-Plain English interpretation:
+Mode descriptions:
 
-- Green (good expected solar): run in a mode that uses local solar/battery strongly.
-- Amber (mixed day): keep flexible optimization.
-- Red (poor expected solar): allow tariff-aware behavior.
+| Mode | Main idea | How it behaves day-to-day | When to use it |
+| --- | --- | --- | --- |
+| **Sigen AI Mode** | The inverter uses smart algorithms and schedule data to decide when to charge, discharge, or export to minimize your electricity cost. | Automatically switches between self-consumption, TOU-like scheduling, and grid export based on predicted solar, load, and tariff. It is currently the recommended primary mode in the commissioning guide. | Best if you are on a variable tariff, have dynamic pricing, or just want the system to manage everything without manual time-based rules. |
+| **Self-consumption Mode** | The system prioritizes using solar and battery for your own loads instead of sending power to the grid. | Solar first powers the house; surplus charges the battery; only what remains after that is exported. The battery discharges to cover home loads when solar is low, aiming to reduce grid import as much as possible. | Good if your main goal is to maximize self-use of solar, reduce your bills, and you do not care much about exporting to the grid. |
+| **Fully Fed to Grid Mode** | The system's priority is to push PV generation to the grid rather than store it in the battery. | Solar is sent to the grid first; the battery is only used if specifically scheduled or forced (for example, backup). Self-consumption is minimised unless overridden by other settings. | Mainly for setups where export is the main goal (for example, certain feed-in tariff systems, or where battery storage is secondary). |
+| **Time-based Control (TOU) Mode** | The system follows a schedule you define for charging, discharging, and self-consumption during different time windows. | You set up charge windows (for example, `00:00-05:00`) to charge the battery from grid when electricity is cheap, and discharge windows (for example, `17:00-22:00`) to use stored energy when prices are high. Other times can be set to self-consumption or grid-only. | Ideal if you are on a time-of-use tariff (cheaper at night, expensive during peak hours) and want to arbitrage between cheap-charge and expensive-use periods. |
+| **Remote EMS / Time-based EMS** | The system is controlled by a remote-scheduling service (for example, via the mySigen app or installer-defined schedules). | Charge/discharge times and SOC limits are pushed from the cloud or installer view, overriding or layering on top of local modes. TOU rules can be set remotely without touching the local-mode table. | Used when an installer or platform wants centrally managed scheduling (for example, for multiple homes, grid-support schemes, or dynamic market signals). |
 
-Important: this is the default baseline only. Higher-priority rules can override it.
+### Final decision order (very important)
 
-#### 3) `TARIFF_TO_MODE` (price-period behavior)
+The runtime does not just apply one mapping directly. It uses this order:
 
-Current defaults are:
+1. Export rules first (highest priority):
+If forecast is Green and battery headroom is too low, or SOC is already very high, use `GRID_EXPORT`.
+2. Peak-price rule second:
+If export is not needed and tariff is Peak, use `SELF_POWERED`.
+3. Default mapping last:
+If neither of the above applies, use `FORECAST_TO_MODE` (Green/Amber/Red).
 
-- Night -> `TOU`
-- Day -> `AI`
-- Peak -> `SELF_POWERED`
+### Plain “if/then” version
 
-Plain English interpretation:
+For daytime periods, read it like this:
 
-- Night (cheap): charging-oriented behavior is acceptable.
-- Day (normal): balanced optimization is fine.
-- Peak (expensive): avoid buying expensive grid power by favoring self-powered behavior.
+1. If Green forecast AND battery space is too small for expected solar -> `GRID_EXPORT`.
+2. Else if Green forecast AND SOC already above threshold -> `GRID_EXPORT`.
+3. Else if tariff is Peak -> `SELF_POWERED`.
+4. Else -> use forecast mapping (Green/Amber/Red).
 
-#### Which mapping wins when they disagree?
+For night:
 
-The scheduler uses this order of precedence:
+1. Use night tariff behavior (`TARIFF_TO_MODE["NIGHT"]`) during cheap-rate hours.
+2. Before cheap-rate starts, hold `SHOULDER_NIGHT_MODE` to avoid early charge behavior.
+3. Optional next-day pre-check can prepare for tomorrow morning, but still respects shoulder protection.
 
-1. Safety/headroom export rules (highest priority)
-2. Peak tariff override to self-powered (if export was not selected)
-3. Forecast mapping fallback (Green/Amber/Red default)
+### Quick examples
 
-So if forecast says one thing and tariff says another:
-
-- Export rule can override both
-- Peak period can override forecast (except when export rule triggers)
-- Otherwise forecast mapping decides
-
-#### Practical examples
-
-Example A: Green morning, SOC already high, battery space too small for expected solar:
-
-- Forecast mapping would normally pick `SELF_POWERED`
-- Export headroom rule takes priority
-- Final result: `GRID_EXPORT`
-
-Example B: Amber period during peak tariff:
-
-- Forecast mapping would pick `AI`
-- Peak override forces self-powered strategy
-- Final result: `SELF_POWERED`
-
-Example C: Red period during normal day tariff:
-
-- No export trigger
-- No peak override
-- Final result follows forecast mapping: `TOU`
-
-Example D: Overnight before cheap window opens:
-
-- Night-prep logic may want night mode
-- But shoulder protection avoids charge-oriented behavior too early
-- Final result can be `SHOULDER_NIGHT_MODE` (currently `AI`) until cheap hours begin
-
-This is why changing one mapping value in `config.py` can alter behavior, but the final
-runtime result still depends on SOC/headroom and tariff timing at that moment.
-
-### Quick decision flow
-
-Use this as the shortest possible mental model of what the runtime does when choosing a mode.
-
-```mermaid
-flowchart TD
-	A[Start period decision] --> B{Green + not enough headroom\nor SOC above high threshold?}
-	B -->|Yes| C[Set GRID_EXPORT]
-	B -->|No| D{Tariff period is PEAK?}
-	D -->|Yes| E[Set SELF_POWERED]
-	D -->|No| F[Use FORECAST_TO_MODE\nGreen/Amber/Red mapping]
-```
-
-For overnight logic, this runs in parallel:
-
-1. Apply night base mode by tariff phase (cheap-rate night mode or shoulder mode).
-2. Optionally run next-day pre-check after configured delay.
-3. If pre-check wants charge-oriented night mode but cheap-rate has not started yet, hold shoulder mode.
+- Green + high SOC -> `GRID_EXPORT` (headroom protection wins).
+- Amber + Peak tariff -> `SELF_POWERED` (peak override wins).
+- Red + normal Day tariff -> `TOU` (default forecast mapping).
 
 ## How It Works
 
