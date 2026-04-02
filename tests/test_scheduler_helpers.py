@@ -103,3 +103,49 @@ def test_get_hours_until_cheap_rate_counts_down_before_cheap_window() -> None:
     now_utc = datetime(2026, 1, 15, 21, 0, tzinfo=timezone.utc)
     hours = main.get_hours_until_cheap_rate(now_utc)
     assert abs(hours - 2.0) < 0.01
+
+
+class DummyModeInteraction:
+    def __init__(self, current_mode: int):
+        self.current_mode = current_mode
+        self.set_calls: list[tuple[int, int]] = []
+
+    async def get_operational_mode(self):
+        return {"mode": self.current_mode}
+
+    async def set_operational_mode(self, mode: int, profile_id: int):
+        self.set_calls.append((mode, profile_id))
+        self.current_mode = mode
+        return {"ok": True, "mode": mode, "profile_id": profile_id}
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_change_skips_when_already_target_mode() -> None:
+    sigen = DummyModeInteraction(current_mode=1)
+
+    ok = await main.apply_mode_change(
+        sigen=sigen,
+        mode=1,
+        period="Eve (period-start)",
+        reason="Already AI for evening arbitrage.",
+        mode_names={1: "AI"},
+    )
+
+    assert ok is True
+    assert sigen.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_change_sets_when_target_differs() -> None:
+    sigen = DummyModeInteraction(current_mode=0)
+
+    ok = await main.apply_mode_change(
+        sigen=sigen,
+        mode=1,
+        period="Eve (period-start)",
+        reason="Switching to AI for evening arbitrage.",
+        mode_names={0: "SELF_POWERED", 1: "AI"},
+    )
+
+    assert ok is True
+    assert sigen.set_calls == [(1, -1)]

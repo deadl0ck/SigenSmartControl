@@ -225,16 +225,33 @@ async def apply_mode_change(
     mode_names: dict[int, str],
 ) -> bool:
     mode_label = mode_names.get(mode, mode)
+    if sigen is None:
+        logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
+        return False
+
+    try:
+        current_mode_raw = await sigen.get_operational_mode()
+        current_mode = extract_mode_value(current_mode_raw)
+        if current_mode is not None and current_mode == mode:
+            logger.info(ACTION_DIVIDER)
+            logger.info("Skipping inverter set_operational_mode (already at target mode)")
+            logger.info(f"Target period/context: {period}")
+            logger.info(f"Target mode: {mode_label} (value={mode})")
+            logger.info(f"Decision reason: {reason}")
+            logger.info(ACTION_DIVIDER)
+            return True
+    except Exception as e:
+        logger.warning(
+            f"Could not read current inverter mode before setting {mode_label} for {period}: {e}. "
+            "Proceeding with mode set attempt."
+        )
+
     logger.info(ACTION_DIVIDER)
-    logger.info(f"Calling inverter set_operational_mode")
+    logger.info("Calling inverter set_operational_mode")
     logger.info(f"Target period/context: {period}")
     logger.info(f"Target mode: {mode_label} (value={mode})")
     logger.info(f"Decision reason: {reason}")
     logger.info(ACTION_DIVIDER)
-
-    if sigen is None:
-        logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
-        return False
 
     try:
         response = await sigen.set_operational_mode(mode, -1)
