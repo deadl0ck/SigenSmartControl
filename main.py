@@ -28,6 +28,11 @@ from config import (
     CHEAP_RATE_END_HOUR,
     HEADROOM_FRAC,
     SOC_HIGH_THRESHOLD,
+    ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+    ESTIMATED_HOME_LOAD_KW,
+    BRIDGE_BATTERY_RESERVE_KWH,
+    ENABLE_EVENING_AI_MODE_TRANSITION,
+    EVENING_AI_MODE_START_HOUR,
 )
 from decision_logic import (
     decide_operational_mode,
@@ -118,6 +123,24 @@ def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
     )
 
 
+def get_hours_until_cheap_rate(now_utc: datetime) -> float:
+    """Return hours until next cheap-rate start in local time, or 0 if already in cheap-rate window."""
+    if is_cheap_rate_window(now_utc):
+        return 0.0
+
+    local_now = now_utc.astimezone(LOCAL_TZ)
+    cheap_start_local = local_now.replace(
+        hour=CHEAP_RATE_START_HOUR,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if local_now >= cheap_start_local:
+        cheap_start_local += timedelta(days=1)
+
+    return (cheap_start_local - local_now).total_seconds() / 3600.0
+
+
 def get_tariff_period_for_time(when_utc: datetime) -> str:
     local_hour = when_utc.astimezone(LOCAL_TZ).hour
 
@@ -134,6 +157,35 @@ def get_tariff_period_for_time(when_utc: datetime) -> str:
         return "DAY"
 
     return "DAY"
+
+
+def should_use_ai_mode_for_evening(period: str, now_utc: datetime) -> tuple[bool, str]:
+    """
+    Determine whether to switch to AI Mode for evening period profit-max optimization.
+    
+    Returns:
+        (should_use_ai_mode: bool, reason: str)
+    
+    AI Mode is recommended for evening when:
+    - Evening period is active (user configured via EVENING_AI_MODE_START_HOUR)
+    - Enables automatic battery arbitrage: discharge at day rates, recharge at cheap night rates
+    """
+    if not ENABLE_EVENING_AI_MODE_TRANSITION:
+        return False, ""
+    
+    if period.upper() != "EVE":
+        return False, ""
+    
+    local_hour = now_utc.astimezone(LOCAL_TZ).hour
+    if local_hour < EVENING_AI_MODE_START_HOUR:
+        return False, f"Local hour {local_hour} is before EVENING_AI_MODE_START_HOUR ({EVENING_AI_MODE_START_HOUR})"
+    
+    return True, (
+        f"Using AI Mode for Evening period: triggered at local hour {local_hour} "
+        f"(>= {EVENING_AI_MODE_START_HOUR}). "
+        f"This allows automatic profit-max battery arbitrage before cheap-rate window opens."
+    )
+
 
 
 def extract_mode_value(raw_mode: Any) -> int | None:
@@ -322,6 +374,11 @@ async def main() -> None:
             tariff_period=get_tariff_period_for_time(datetime.now(timezone.utc)),
             headroom_frac=HEADROOM_FRAC,
             soc_high_threshold=SOC_HIGH_THRESHOLD,
+            battery_kwh=BATTERY_KWH,
+            hours_until_cheap_rate=get_hours_until_cheap_rate(datetime.now(timezone.utc)),
+            estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+            bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+            enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
         )
         logger.info(
             f"Selected mode for {period}: {mode_names.get(mode, mode)} (value={mode}). Reason: {decision_reason}"
@@ -739,6 +796,11 @@ async def run_scheduler() -> None:
                         tariff_period=get_tariff_period_for_time(period_start),
                         headroom_frac=HEADROOM_FRAC,
                         soc_high_threshold=SOC_HIGH_THRESHOLD,
+                        battery_kwh=BATTERY_KWH,
+                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
+                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
                     )
 
                     if now >= export_by:
@@ -822,7 +884,19 @@ async def run_scheduler() -> None:
                         tariff_period=get_tariff_period_for_time(period_start),
                         headroom_frac=HEADROOM_FRAC,
                         soc_high_threshold=SOC_HIGH_THRESHOLD,
+                        battery_kwh=BATTERY_KWH,
+                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
+                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
                     )
+                    
+                    # Check if Evening period should use AI Mode for profit-max arbitrage
+                    use_ai_mode, ai_mode_reason = should_use_ai_mode_for_evening(period, now)
+                    if use_ai_mode:
+                        mode = SIGEN_MODES["AI"]
+                        reason = ai_mode_reason
+                    
                     log_check(
                         period,
                         "PERIOD-START",

@@ -72,6 +72,14 @@ ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 # Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
+# Enable AI Mode transition for evening periods approaching cheap-rate window.
+# When enabled, the Evening period will switch to AI Mode (with profit-max configured
+# in mySigen app) to allow automatic battery arbitrage: discharge at day/peak rates,
+# then recharge at cheap night rates.
+ENABLE_EVENING_AI_MODE_TRANSITION = True
+# Hour (local time) after which Evening period should use AI Mode for profit-max optimization.
+# E.g., if set to 17, Evening mode will switch to AI after 17:00 (5 PM).
+EVENING_AI_MODE_START_HOUR = 17
 
 # ==============================
 # Sigen Modes
