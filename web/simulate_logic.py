@@ -23,7 +23,6 @@ def simulate_sigen_decision(
     forecast_morn: str,
     forecast_aftn: str,
     forecast_eve: str,
-    custom_var: str = None,
 ):
     """Simulate the Sigen control logic for the web API.
     
@@ -38,7 +37,6 @@ def simulate_sigen_decision(
         forecast_morn: Morning period forecast status ('Green', 'Amber', or 'Red').
         forecast_aftn: Afternoon period forecast status.
         forecast_eve: Evening period forecast status.
-        custom_var: Reserved for future extensions.
         
     Returns:
         Dict with keys for each period ('Morn', 'Aftn', 'Eve', 'NIGHT') mapping to

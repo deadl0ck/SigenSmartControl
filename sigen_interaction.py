@@ -20,7 +20,7 @@ class SigenApiProtocol(Protocol):
     async def get_operational_mode(self) -> Any:
         ...
 
-    async def set_operational_mode(self, mode: int, profile_id: int = -1) -> Any:
+    async def set_operational_mode(self, mode: int) -> Any:
         ...
 
     async def get_energy_flow(self) -> dict[str, Any]:
@@ -49,18 +49,24 @@ class SigenInteraction:
     async def get_operational_mode(self) -> Any:
         return await self._client.get_operational_mode()
 
-    async def set_operational_mode(self, mode: int, profile_id: int = -1) -> Any:
+    async def set_operational_mode(self, mode: int) -> Any:
         """
         Set the operational mode. In FULL_SIMULATION_MODE, logs the action
         but does not send the command to the inverter.
         """
+        logger.info("************************************************************************************************")
+        logger.info("************************************************************************************************")
         if FULL_SIMULATION_MODE:
             logger.info(
-                f"[SIMULATION] set_operational_mode(mode={mode}, profile_id={profile_id}) "
+                f"[SIMULATION] set_operational_mode(mode={mode}) "
                 f"- command suppressed in simulation mode"
             )
-            return {"simulated": True, "mode": mode, "profile_id": profile_id}
-        return await self._client.set_operational_mode(mode, profile_id)
+            return {"simulated": True, "mode": mode}
+        else:
+            logger.info(f"Setting operational mode to {mode}")
+        logger.info("************************************************************************************************")
+        logger.info("************************************************************************************************")
+        return await self._client.set_operational_mode(mode)
 
     async def get_energy_flow(self) -> dict[str, Any]:
         return await self._client.get_energy_flow()

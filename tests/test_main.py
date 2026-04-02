@@ -38,10 +38,11 @@ logger = logging.getLogger("test")
 class DummySigen:
     def __init__(self):
         self.set_modes = []
-    async def set_operational_mode(self, mode, profile_id):
-        logger.info(f"[TEST] DummySigen: set_operational_mode({mode}, {profile_id})")
-        self.set_modes.append((mode, profile_id))
-        return {"result": "ok", "mode": mode, "profile_id": profile_id}
+
+    async def set_operational_mode(self, mode):
+        logger.info(f"[TEST] DummySigen: set_operational_mode({mode})")
+        self.set_modes.append(mode)
+        return {"result": "ok", "mode": mode}
 
 @pytest.mark.asyncio
 async def test_control_loop():
@@ -59,16 +60,16 @@ async def test_control_loop():
         mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["AI"])
         logger.info(f"[TEST] Period: {period}, Solar Value: {solar_value}, Status: {status}")
         logger.info(f"[TEST] Selected mode for {period}: {mode} ({mode_names.get(mode, 'UNKNOWN')})")
-        resp = await sigen.set_operational_mode(mode, -1)
+        resp = await sigen.set_operational_mode(mode)
         logger.info(f"[TEST] set_operational_mode response: {resp}")
         assert resp["result"] == "ok"
         assert resp["mode"] == mode
         logger.info(f"[RESULT] test_control_loop: PASSED - Testing {status} solar forecast for {period} ({solar_value}W): Sigen inverter commanded to {mode_names.get(mode, 'UNKNOWN')} mode.")
     logger.info(f"[TEST] set_modes called: {sigen.set_modes}")
     assert sigen.set_modes == [
-        (SIGEN_MODES["SELF_POWERED"], -1),
-        (SIGEN_MODES["AI"], -1),
-        (SIGEN_MODES["TOU"], -1),
+        SIGEN_MODES["SELF_POWERED"],
+        SIGEN_MODES["AI"],
+        SIGEN_MODES["TOU"],
     ]
     logger.info("[RESULT] test_control_loop: PASSED - Control loop selected correct modes for each period and called set_operational_mode as expected.")
     logger.info(f"[TEST] Control loop assertions passed.")

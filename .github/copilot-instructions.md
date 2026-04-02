@@ -112,6 +112,12 @@ async def process_periods(
 
 ## Code Quality Targets
 
+### Simplicity First (Project Preference)
+- **Prefer the simplest code that works today.**
+- **Do not add speculative parameters or abstractions** for future use.
+- If a parameter is not actively used by current behavior and call sites, **remove it**.
+- Add complexity only when there is a present, tested requirement.
+
 ### Testing
 - **Maintain test coverage** — all public functions should have corresponding tests.
 - **Run tests frequently:** `python -m pytest -q` before committing.

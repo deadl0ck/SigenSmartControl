@@ -195,7 +195,7 @@ async def apply_mode_change(
     logger.info(ACTION_DIVIDER)
 
     try:
-        response = await sigen.set_operational_mode(mode, -1)
+        response = await sigen.set_operational_mode(mode)
         logger.info(f"Set mode response for {period}: {response}")
         return True
     except Exception as e:

@@ -10,7 +10,7 @@ def mask(val, key=None):
 		return val[:2] + "***MASKED***" + val[-2:]
 	return val
 
-def pytest_configure(config):
+def pytest_configure():
 	"""
 	Log all constants from constants.py once at the start of the test session.
 	"""
@@ -55,7 +55,7 @@ def pytest_configure(config):
 import pytest
 import logging
 
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
+def pytest_terminal_summary(terminalreporter):
 	"""
 	Print a summary at the end of the test run, including total tests, pass/fail/skip counts,
 	and a recap of all [RESULT] lines from the log output.

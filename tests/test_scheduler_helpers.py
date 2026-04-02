@@ -108,15 +108,15 @@ def test_get_hours_until_cheap_rate_counts_down_before_cheap_window() -> None:
 class DummyModeInteraction:
     def __init__(self, current_mode):
         self.current_mode = current_mode
-        self.set_calls: list[tuple[int, int]] = []
+        self.set_calls: list[int] = []
 
     async def get_operational_mode(self):
         return self.current_mode
 
-    async def set_operational_mode(self, mode: int, profile_id: int):
-        self.set_calls.append((mode, profile_id))
+    async def set_operational_mode(self, mode: int):
+        self.set_calls.append(mode)
         self.current_mode = {"mode": mode}
-        return {"ok": True, "mode": mode, "profile_id": profile_id}
+        return {"ok": True, "mode": mode}
 
 
 @pytest.mark.asyncio
@@ -164,4 +164,4 @@ async def test_apply_mode_change_sets_when_target_differs() -> None:
     )
 
     assert ok is True
-    assert sigen.set_calls == [(1, -1)]
+    assert sigen.set_calls == [1]
