@@ -23,7 +23,7 @@ def simulate_sigen_decision(
     forecast_morn: str,
     forecast_aftn: str,
     forecast_eve: str,
-):
+) -> dict[str, dict[str, int | str]]:
     """Simulate the Sigen control logic for the web API.
     
     Evaluates operational mode decisions for each solar period based on provided

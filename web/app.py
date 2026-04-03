@@ -54,8 +54,16 @@ def simulate():
         JSON object with mode decisions for each period.
     """
     data = request.json
-    def safe_float(val, default):
-        """Safely convert a value to float, with fallback default."""
+    def safe_float(val: Any, default: float) -> float:
+        """Safely convert a value to float, with fallback default.
+        
+        Args:
+            val: Value to convert (may be None, empty string, or numeric).
+            default: Default value to return if conversion fails.
+            
+        Returns:
+            Converted float value or the default.
+        """
         try:
             if val is None or val == '':
                 return float(default)

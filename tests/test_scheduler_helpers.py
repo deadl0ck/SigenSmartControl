@@ -1,3 +1,8 @@
+"""Unit tests for scheduler helper functions from main.py.
+
+Tests period suppression, scheduler initialization, and mode application logic.
+"""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest

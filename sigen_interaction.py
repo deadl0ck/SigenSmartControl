@@ -39,6 +39,11 @@ class SigenInteraction:
 
     @classmethod
     async def create(cls) -> "SigenInteraction":
+        """Create a SigenInteraction instance by authenticating with the Sigen API.
+        
+        Returns:
+            A new SigenInteraction instance with an authenticated client.
+        """
         client = await get_sigen_instance()
         return cls(client)
 
@@ -48,12 +53,24 @@ class SigenInteraction:
         return cls(client)
 
     async def get_operational_mode(self) -> Any:
+        """Get the current operational mode from the inverter.
+        
+        Returns:
+            Raw operational mode payload from the Sigen API.
+        """
         return await self._client.get_operational_mode()
 
     async def set_operational_mode(self, mode: int) -> Any:
-        """
-        Set the operational mode. In FULL_SIMULATION_MODE, logs the action
-        but does not send the command to the inverter.
+        """Set the operational mode.
+        
+        In FULL_SIMULATION_MODE, logs the action but does not send the command
+        to the inverter. In live mode, sends the mode to the real Sigen API.
+        
+        Args:
+            mode: Operational mode integer from SIGEN_MODES.
+            
+        Returns:
+            Response dict from the API or simulator.
         """
         mode_label = MODE_NAMES.get(mode, f"UNKNOWN({mode})")
         try:
@@ -73,7 +90,17 @@ class SigenInteraction:
             logger.info("************************************************************************************************")
 
     async def get_energy_flow(self) -> dict[str, Any]:
+        """Get current energy flow telemetry from the inverter.
+        
+        Returns:
+            Raw energy_flow payload with PV power, battery state, exports, etc.
+        """
         return await self._client.get_energy_flow()
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
+        """Get the list of supported operational modes.
+        
+        Returns:
+            List of mode dictionaries available on the inverter.
+        """
         return await self._client.get_operational_modes()

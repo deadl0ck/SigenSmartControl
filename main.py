@@ -1,4 +1,11 @@
 
+"""Main scheduler loop for coordinating Sigen inverter mode decisions.
+
+The scheduler continuously monitors solar forecasts, battery state, and tariff windows,
+making operational mode decisions that optimize between self-powered generation,
+grid arbitrage, and cost-minimization based on real-time conditions.
+"""
+
 import asyncio
 import logging
 import os

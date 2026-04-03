@@ -1,18 +1,23 @@
+"""Shared pytest fixtures and configuration for all test modules."""
+
 import sys
 import os
 import logging
 import importlib
+from typing import Any
 
-def mask(val, key=None):
+def mask(val: Any, key: str | None = None) -> str:
 	if key and key.upper() in ("SIGEN_PASSWORD",):
 		return "***MASKED***"
 	if isinstance(val, str) and ("PASS" in val or "SECRET" in val or "TOKEN" in val):
 		return val[:2] + "***MASKED***" + val[-2:]
 	return val
 
-def pytest_configure():
-	"""
-	Log all constants from constants.py once at the start of the test session.
+def pytest_configure() -> None:
+	"""Configure pytest logging and environment variables for the test session.
+	
+	Loads .env file, sets up logging, and logs relevant environment variables
+	with sensitive values masked.
 	"""
 	# Ensure .env is loaded for all tests
 	logger = logging.getLogger("test")
@@ -55,10 +60,14 @@ def pytest_configure():
 import pytest
 import logging
 
-def pytest_terminal_summary(terminalreporter):
-	"""
-	Print a summary at the end of the test run, including total tests, pass/fail/skip counts,
-	and a recap of all [RESULT] lines from the log output.
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+	"""Print a summary at the end of the test run.
+	
+	Displays total tests run, pass/fail/skip counts, and recaps all [RESULT]
+	lines from the log output.
+	
+	Args:
+		terminalreporter: The terminal reporter instance from pytest.
 	"""
 	total = terminalreporter._numcollected
 	passed = len(terminalreporter.stats.get('passed', []))

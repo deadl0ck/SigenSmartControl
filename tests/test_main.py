@@ -14,6 +14,11 @@ Mocks forecast and Sigen API. Uses pytest and logging.
 
 import sys
 import logging
+"""Integration tests for the main scheduler control loop.
+
+Tests forecast-to-mode decision flow with mocked forecast providers and alerts.
+"""
+
 import pytest
 from config import FORECAST_TO_MODE, SIGEN_MODES
 import logging

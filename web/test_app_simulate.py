@@ -1,3 +1,7 @@
+"""Unit tests for the web simulation API (web/app.py).
+
+Tests REST endpoints for configuration and mode simulation.
+"""
 
 import os
 import sys

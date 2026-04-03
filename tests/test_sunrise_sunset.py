@@ -5,6 +5,11 @@ Unit tests for sunrise_sunset.py (fetching sunrise/sunset times).
 
 import sys
 import logging
+"""Unit tests for sunrise/sunset API integration (sunrise_sunset.py).
+
+Tests time parsing and API response handling.
+"""
+
 import pytest
 from unittest.mock import patch
 from sunrise_sunset import get_sunrise_sunset

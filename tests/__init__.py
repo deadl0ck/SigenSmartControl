@@ -1,1 +1,1 @@
-# Init for tests package
+"""Test suite for the Sigen inverter control system."""

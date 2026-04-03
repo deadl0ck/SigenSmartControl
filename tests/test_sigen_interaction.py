@@ -1,5 +1,10 @@
 import pytest
 
+"""Unit tests for the Sigen inverter interaction layer (sigen_interaction.py).
+
+Tests mode setting, simulation mode, and API wrapper behavior.
+"""
+
 from sigen_interaction import SigenInteraction
 
 

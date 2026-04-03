@@ -18,6 +18,12 @@ Uses pytest and logging for output.
 
 import sys
 import logging
+"""Unit tests for system configuration (config.py).
+
+Validates that all required configuration constants are present,
+positive, and structured correctly.
+"""
+
 import pytest
 
 import config

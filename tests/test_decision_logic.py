@@ -1,3 +1,8 @@
+"""Unit tests for the decision logic engine (decision_logic.py).
+
+Tests mode selection algorithms under various battery, solar, and tariff conditions.
+"""
+
 from config import SIGEN_MODES, TARIFF_TO_MODE
 from decision_logic import decide_night_preparation_mode, decide_operational_mode
 from datetime import datetime, timezone
