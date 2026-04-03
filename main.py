@@ -62,6 +62,8 @@ from mode_control import (
 )
 from sunrise_sunset import get_sunrise_sunset
 from constants import LATITUDE, LONGITUDE
+from forecast_calibration import build_and_save_forecast_calibration, get_period_calibration
+from telemetry_archive import append_inverter_telemetry_snapshot
 
 # --- Logging configuration ---
 LOG_LEVEL = getattr(logging, __import__('config').LOG_LEVEL, logging.INFO)
@@ -376,6 +378,7 @@ async def run_scheduler() -> None:
     today_sunrise_utc: datetime | None = None
     today_sunset_utc: datetime | None = None
     tomorrow_sunrise_utc: datetime | None = None
+    forecast_calibration: dict[str, Any] = build_and_save_forecast_calibration()
     # Tracks which actions have been taken for each period today.
     # day_state[period] = {"pre_set": bool, "start_set": bool}
     day_state: dict[str, dict[str, bool]] = {}
@@ -394,7 +397,9 @@ async def run_scheduler() -> None:
         nonlocal today_period_windows, tomorrow_period_windows
         nonlocal today_period_forecast, tomorrow_period_forecast
         nonlocal today_sunrise_utc, today_sunset_utc, tomorrow_sunrise_utc, day_state
+        nonlocal forecast_calibration
         logger.info("[SCHEDULER] Refreshing daily forecast and sunrise/sunset data.")
+        forecast_calibration = build_and_save_forecast_calibration()
         forecast_obj: SolarForecastProvider = create_solar_forecast_provider(logger)
         today_period_forecast = forecast_obj.get_todays_period_forecast()
         tomorrow_period_forecast = forecast_obj.get_tomorrows_period_forecast()
@@ -462,7 +467,31 @@ async def run_scheduler() -> None:
             logger.error(f"[{period}] Failed to fetch SOC: {e}")
             return None
 
-    def estimate_solar(solar_value: int) -> float:
+    async def archive_inverter_telemetry(reason: str, now_utc: datetime) -> None:
+        """Persist one raw inverter telemetry sample for later analysis.
+
+        Args:
+            reason: Context label for why the snapshot is being captured.
+            now_utc: Current scheduler timestamp in UTC.
+        """
+        if sigen is None:
+            return
+
+        try:
+            energy_flow = await sigen.get_energy_flow()
+            operational_mode = await sigen.get_operational_mode()
+            append_inverter_telemetry_snapshot(
+                energy_flow=energy_flow,
+                operational_mode=operational_mode,
+                reason=reason,
+                scheduler_now_utc=now_utc,
+                forecast_today=today_period_forecast,
+                forecast_tomorrow=tomorrow_period_forecast,
+            )
+        except Exception as exc:
+            logger.warning(f"[TELEMETRY] Failed to capture inverter snapshot: {exc}")
+
+    def estimate_solar(period: str, solar_value: int) -> float:
         """Estimate total solar energy available during a period.
         
         Args:
@@ -471,7 +500,9 @@ async def run_scheduler() -> None:
         Returns:
             Estimated energy in kWh assuming 3-hour period, capped by system limits.
         """
-        kw = min(solar_value / 1000.0, SOLAR_PV_KW, INVERTER_KW)
+        period_calibration = get_period_calibration(forecast_calibration, period)
+        adjusted_watts = solar_value * period_calibration["power_multiplier"]
+        kw = min(adjusted_watts / 1000.0, SOLAR_PV_KW)
         return kw * 3.0  # assume 3-hour period
 
     def log_check(
@@ -637,8 +668,14 @@ async def run_scheduler() -> None:
         night_context = get_active_night_context(now)
         if NIGHT_MODE_ENABLED and night_context is not None:
             night_period_name = f"Night->{night_context['target_period']}"
-            night_period_solar_kwh = estimate_solar(night_context["solar_value"])
-            night_headroom_target_kwh = night_period_solar_kwh * HEADROOM_FRAC
+            night_period_solar_kwh = estimate_solar(
+                night_context["target_period"],
+                night_context["solar_value"],
+            )
+            night_headroom_target_kwh = (
+                night_period_solar_kwh
+                * get_period_calibration(forecast_calibration, night_context["target_period"])["headroom_fraction"]
+            )
             night_mode, night_phase, night_mode_reason = get_night_tariff_mode(now)
 
             if (
@@ -757,7 +794,8 @@ async def run_scheduler() -> None:
         for period, period_start in today_period_windows.items():
             s = day_state[period]
             solar_value, status = today_period_forecast[period]
-            period_solar_kwh = estimate_solar(solar_value)
+            period_solar_kwh = estimate_solar(period, solar_value)
+            period_calibration = get_period_calibration(forecast_calibration, period)
 
             # --- Pre-period export check ---
             # Active when within MAX_PRE_PERIOD_WINDOW of the period start.
@@ -765,11 +803,16 @@ async def run_scheduler() -> None:
                 soc = await fetch_soc(period)
                 if soc is not None:
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = period_solar_kwh * HEADROOM_FRAC
+                    headroom_target_kwh = period_solar_kwh * period_calibration["headroom_fraction"]
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     if headroom_deficit > 0:
                         # Time needed = deficit (kWh) / inverter export capacity (kW), +10% buffer.
-                        lead_time = timedelta(hours=(headroom_deficit * 1.1) / INVERTER_KW)
+                        lead_time = timedelta(
+                            hours=(
+                                headroom_deficit
+                                * period_calibration["export_lead_buffer_multiplier"]
+                            ) / INVERTER_KW
+                        )
                         export_by = period_start - lead_time
                     else:
                         export_by = period_start  # No export needed; arm at period start.
@@ -781,7 +824,7 @@ async def run_scheduler() -> None:
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
                         tariff_period=get_tariff_period_for_time(period_start),
-                        headroom_frac=HEADROOM_FRAC,
+                        headroom_frac=period_calibration["headroom_fraction"],
                         soc_high_threshold=SOC_HIGH_THRESHOLD,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),
@@ -860,7 +903,7 @@ async def run_scheduler() -> None:
                 soc = await fetch_soc(period)
                 if soc is not None:
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = period_solar_kwh * HEADROOM_FRAC
+                    headroom_target_kwh = period_solar_kwh * period_calibration["headroom_fraction"]
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     mode, reason = decide_operational_mode(
                         period=period,
@@ -869,7 +912,7 @@ async def run_scheduler() -> None:
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
                         tariff_period=get_tariff_period_for_time(period_start),
-                        headroom_frac=HEADROOM_FRAC,
+                        headroom_frac=period_calibration["headroom_fraction"],
                         soc_high_threshold=SOC_HIGH_THRESHOLD,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),
@@ -916,6 +959,7 @@ async def run_scheduler() -> None:
             f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "
             f"Next check in {POLL_INTERVAL_SECONDS // 60} minutes."
         )
+        await archive_inverter_telemetry("scheduler_tick", now)
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 

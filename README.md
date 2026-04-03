@@ -192,6 +192,24 @@ Why the normalization exists:
 - Without labelling ESB values as synthetic, the logs can make county statuses look like real measured watts, which is misleading.
 - The goal is not to force perfect agreement. The goal is to make ESB-vs-Quartz differences interpretable enough to judge whether Quartz is a credible future decision source.
 
+Actual inverter telemetry is also archived locally for later analysis:
+
+- The scheduler appends one raw inverter snapshot per tick to `data/inverter_telemetry.jsonl` when the inverter API is reachable.
+- Each record includes the raw `get_energy_flow()` payload, current operational mode, scheduler timestamp, and the forecast state seen by the scheduler at that time.
+- Each record also includes derived clipping heuristics. If inverter-side solar is at or near the `5.5 kW` ceiling, the snapshot is flagged as likely clipping, with higher confidence when the battery is already near full and battery power is near zero.
+- This file is intended for post-run analysis so you can compare forecasted periods against what the inverter and battery actually did.
+
+Daily bounded calibration is also applied from that telemetry:
+
+- On daily forecast refresh, the scheduler reads recent telemetry from `data/inverter_telemetry.jsonl` and writes a bounded calibration artifact to `data/forecast_calibration.json`.
+- The calibration adjusts three numeric inputs per daytime period (`Morn`, `Aftn`, `Eve`):
+	- `power_multiplier`: inflates forecast watts when recent actual PV has been consistently higher than forecast
+	- `headroom_fraction`: increases reserved battery headroom when clipping has been observed
+	- `export_lead_buffer_multiplier`: starts pre-export slightly earlier when clipping risk has been recurring
+- Changes are deliberately bounded per day so the system cannot swing too far overnight.
+- The rule structure does not self-rewrite. It keeps the existing decision logic, but feeds it better period-specific numeric inputs.
+- Manual rebuild is also available with `python forecast_calibration.py`.
+
 ### Mode mappings
 
 `SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config.py`.

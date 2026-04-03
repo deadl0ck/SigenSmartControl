@@ -5,10 +5,12 @@ Unit tests for weather.py (SolarForecast) and config-based mode mapping.
 Uses pytest and logging for output.
 """
 
+import json
 import sys
 import logging
 import pytest
-from weather import SolarForecast
+import weather as weather_module
+from weather import ComparingSolarForecastProvider, SolarForecast
 from config import FORECAST_TO_MODE, SIGEN_MODES
 import logging
 logger = logging.getLogger(__name__)
@@ -37,6 +39,8 @@ class DummyLogger:
         logger.error(msg)
     def debug(self, msg):
         logger.debug(msg)
+    def warning(self, msg):
+        logger.warning(msg)
 
 @pytest.fixture
 def dummy_forecast():
@@ -90,3 +94,92 @@ def test_integration(dummy_forecast):
         assert mode in SIGEN_MODES.values()
         logger.info(f"[RESULT] test_integration: PASSED - Testing {status} solar forecast for {period} ({value}W): Sigen inverter should switch to {mode_names.get(mode, 'UNKNOWN')} mode.")
     logger.info(f"[TEST] Integration assertions passed.")
+
+
+def test_comparison_snapshot_is_written(tmp_path, monkeypatch):
+    """Persist one JSONL snapshot per provider refresh for later analysis."""
+    archive_path = tmp_path / "forecast_comparisons.jsonl"
+    monkeypatch.setattr(weather_module, "FORECAST_COMPARISON_ARCHIVE_PATH", str(archive_path))
+
+    class StaticProvider:
+        def __init__(self, today, tomorrow):
+            self._today = today
+            self._tomorrow = tomorrow
+
+        def get_todays_period_forecast(self):
+            return self._today
+
+        def get_tomorrows_period_forecast(self):
+            return self._tomorrow
+
+        def get_todays_solar_values(self):
+            return []
+
+        def get_simple_inverter_plan(self):
+            return {}
+
+        def is_good_day(self):
+            return False
+
+    primary = StaticProvider(
+        {"Morn": (100, "Red"), "Aftn": (300, "Amber")},
+        {"Morn": (500, "Green")},
+    )
+    secondary = StaticProvider(
+        {"Morn": (1200, "Amber"), "Aftn": (2600, "Green")},
+        {"Morn": (4000, "Green")},
+    )
+
+    ComparingSolarForecastProvider(
+        DummyLogger(),
+        primary,
+        secondary,
+        primary_name="esb_api",
+        secondary_name="quartz",
+    )
+
+    assert archive_path.exists()
+    snapshot_lines = archive_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(snapshot_lines) == 1
+
+    snapshot = json.loads(snapshot_lines[0])
+    assert snapshot["primary_provider"] == "esb_api"
+    assert snapshot["secondary_provider"] == "quartz"
+    assert snapshot["today"]["periods"]["Morn"]["primary"]["status"] == "Red"
+    assert snapshot["today"]["periods"]["Morn"]["secondary"]["status"] == "Amber"
+    assert snapshot["today"]["summary"]["mismatches"] == 2
+
+
+def test_comparison_provider_uses_primary_status_with_secondary_watts():
+    """Scheduler-facing forecast should preserve ESB status but use Quartz watts."""
+
+    class StaticProvider:
+        def __init__(self, today, tomorrow):
+            self._today = today
+            self._tomorrow = tomorrow
+
+        def get_todays_period_forecast(self):
+            return self._today
+
+        def get_tomorrows_period_forecast(self):
+            return self._tomorrow
+
+        def get_todays_solar_values(self):
+            return []
+
+        def get_simple_inverter_plan(self):
+            return {}
+
+        def is_good_day(self):
+            return False
+
+    provider = ComparingSolarForecastProvider(
+        DummyLogger(),
+        StaticProvider({"Aftn": (300, "Amber")}, {"Morn": (100, "Red")}),
+        StaticProvider({"Aftn": (2118, "Amber")}, {"Morn": (1139, "Red")}),
+        primary_name="esb_api",
+        secondary_name="quartz",
+    )
+
+    assert provider.get_todays_period_forecast() == {"Aftn": (2118, "Amber")}
+    assert provider.get_tomorrows_period_forecast() == {"Morn": (1139, "Red")}

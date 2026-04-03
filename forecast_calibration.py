@@ -1,0 +1,276 @@
+"""Build bounded daily forecast calibration from archived inverter telemetry.
+
+The scheduler keeps its existing rule structure but can consume a small daily
+calibration artifact that adjusts numeric inputs conservatively based on recent
+telemetry and observed clipping risk.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+import json
+import logging
+from pathlib import Path
+from statistics import median
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from config import HEADROOM_FRAC, LOCAL_TIMEZONE
+from constants import FORECAST_CALIBRATION_PATH, INVERTER_TELEMETRY_ARCHIVE_PATH
+from telemetry_archive import derive_clipping_metrics
+
+
+logger = logging.getLogger(__name__)
+
+PERIODS = ("Morn", "Aftn", "Eve")
+DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER = 1.1
+DEFAULT_POWER_MULTIPLIER = 1.0
+WINDOW_DAYS = 7
+
+
+def _default_period_calibration() -> dict[str, float]:
+    """Return baseline calibration values for one daytime period."""
+    return {
+        "power_multiplier": DEFAULT_POWER_MULTIPLIER,
+        "headroom_fraction": HEADROOM_FRAC,
+        "export_lead_buffer_multiplier": DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+        "telemetry_samples": 0,
+        "ratios_used": 0,
+        "clipping_observations": 0,
+        "clipping_rate": 0.0,
+    }
+
+
+def default_forecast_calibration() -> dict[str, Any]:
+    """Return the baseline calibration artifact structure."""
+    return {
+        "generated_at": None,
+        "window_days": WINDOW_DAYS,
+        "timezone": LOCAL_TIMEZONE,
+        "periods": {period: _default_period_calibration() for period in PERIODS},
+    }
+
+
+def load_forecast_calibration() -> dict[str, Any]:
+    """Load the most recent saved calibration, or defaults if unavailable."""
+    path = Path(FORECAST_CALIBRATION_PATH)
+    if not path.exists():
+        return default_forecast_calibration()
+
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default_forecast_calibration()
+
+    calibration = default_forecast_calibration()
+    loaded_periods = loaded.get("periods", {})
+    for period in PERIODS:
+        if isinstance(loaded_periods.get(period), dict):
+            calibration["periods"][period].update(loaded_periods[period])
+    calibration["generated_at"] = loaded.get("generated_at")
+    calibration["window_days"] = loaded.get("window_days", WINDOW_DAYS)
+    calibration["timezone"] = loaded.get("timezone", LOCAL_TIMEZONE)
+    return calibration
+
+
+def get_period_calibration(calibration: dict[str, Any], period: str) -> dict[str, float]:
+    """Return one period's calibration values with baseline fallback."""
+    return calibration.get("periods", {}).get(period, _default_period_calibration())
+
+
+def _bounded_step(
+    current: float,
+    target: float,
+    *,
+    max_step: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Move toward a target with daily safety limits."""
+    delta = max(-max_step, min(max_step, target - current))
+    return max(minimum, min(maximum, current + delta))
+
+
+def _infer_period_from_local_time(captured_at_local: datetime) -> str | None:
+    """Map local wall-clock time into daytime forecast periods."""
+    hour = captured_at_local.hour
+    if 7 <= hour < 12:
+        return "Morn"
+    if 12 <= hour < 16:
+        return "Aftn"
+    if 16 <= hour < 20:
+        return "Eve"
+    return None
+
+
+def _extract_forecast_value_w(forecast_for_day: Any, period: str) -> int | None:
+    """Extract forecast watts for a period from archived scheduler forecast state."""
+    if not isinstance(forecast_for_day, dict):
+        return None
+
+    value = forecast_for_day.get(period)
+    if not isinstance(value, list) or len(value) < 2:
+        return None
+
+    try:
+        return int(value[0])
+    except Exception:
+        return None
+
+
+def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
+    """Read telemetry JSONL records inside the rolling analysis window."""
+    path = Path(INVERTER_TELEMETRY_ARCHIVE_PATH)
+    if not path.exists():
+        return []
+
+    cutoff_date = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date() - timedelta(days=WINDOW_DAYS)
+    snapshots: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            snapshot = json.loads(line)
+            captured_at = datetime.fromisoformat(snapshot["captured_at"])
+        except Exception:
+            continue
+
+        if captured_at.date() < cutoff_date:
+            continue
+        snapshots.append(snapshot)
+
+    return snapshots
+
+
+def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict[str, Any]:
+    """Compute and persist a bounded daily calibration artifact.
+
+    Calibration is derived from recent telemetry using three conservative knobs:
+    1. `power_multiplier` inflates forecast watts by period when actual solar is
+       regularly higher than forecast.
+    2. `headroom_fraction` increases modestly when clipping is observed.
+    3. `export_lead_buffer_multiplier` widens the export lead-time buffer under
+       repeated clipping risk.
+    """
+    now_utc = now_utc or datetime.now(UTC)
+    prior = load_forecast_calibration()
+    calibration = default_forecast_calibration()
+    snapshots = _read_recent_telemetry(now_utc)
+
+    ratios_by_period: dict[str, list[float]] = {period: [] for period in PERIODS}
+    clipping_by_period: dict[str, list[bool]] = {period: [] for period in PERIODS}
+
+    for snapshot in snapshots:
+        try:
+            captured_at_local = datetime.fromisoformat(snapshot["captured_at"])
+        except Exception:
+            continue
+
+        period = _infer_period_from_local_time(captured_at_local)
+        if period is None:
+            continue
+
+        derived = snapshot.get("derived")
+        if not isinstance(derived, dict):
+            derived = derive_clipping_metrics(snapshot.get("energy_flow", {}))
+
+        extracted_metrics = derived.get("extracted_metrics", {})
+        solar_power_kw = extracted_metrics.get("solar_power_kw")
+        forecast_w = _extract_forecast_value_w(snapshot.get("forecast_today"), period)
+        if isinstance(solar_power_kw, (int, float)) and forecast_w and forecast_w > 0:
+            ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
+            ratios_by_period[period].append(max(0.5, min(2.0, ratio)))
+
+        clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
+
+    for period in PERIODS:
+        prior_period = get_period_calibration(prior, period)
+        ratios = ratios_by_period[period]
+        clipping_samples = clipping_by_period[period]
+        clipping_rate = (
+            sum(1 for value in clipping_samples if value) / len(clipping_samples)
+            if clipping_samples else 0.0
+        )
+
+        if ratios:
+            target_multiplier = max(0.85, min(1.5, median(ratios)))
+        else:
+            target_multiplier = prior_period["power_multiplier"]
+
+        target_headroom_fraction = max(
+            HEADROOM_FRAC,
+            min(0.45, HEADROOM_FRAC + (0.10 * clipping_rate) + (0.05 * max(0.0, target_multiplier - 1.0))),
+        )
+        target_lead_buffer = max(
+            DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+            min(
+                1.6,
+                DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER
+                + (0.25 * clipping_rate)
+                + (0.15 * max(0.0, target_multiplier - 1.0)),
+            ),
+        )
+
+        calibration["periods"][period] = {
+            "power_multiplier": round(
+                _bounded_step(
+                    float(prior_period["power_multiplier"]),
+                    float(target_multiplier),
+                    max_step=0.08,
+                    minimum=0.85,
+                    maximum=1.5,
+                ),
+                3,
+            ),
+            "headroom_fraction": round(
+                _bounded_step(
+                    float(prior_period["headroom_fraction"]),
+                    float(target_headroom_fraction),
+                    max_step=0.03,
+                    minimum=HEADROOM_FRAC,
+                    maximum=0.45,
+                ),
+                3,
+            ),
+            "export_lead_buffer_multiplier": round(
+                _bounded_step(
+                    float(prior_period["export_lead_buffer_multiplier"]),
+                    float(target_lead_buffer),
+                    max_step=0.08,
+                    minimum=DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+                    maximum=1.6,
+                ),
+                3,
+            ),
+            "telemetry_samples": len(clipping_samples),
+            "ratios_used": len(ratios),
+            "clipping_observations": sum(1 for value in clipping_samples if value),
+            "clipping_rate": round(clipping_rate, 3),
+        }
+
+    calibration["generated_at"] = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).isoformat()
+    calibration["window_days"] = WINDOW_DAYS
+    calibration["timezone"] = LOCAL_TIMEZONE
+
+    path = Path(FORECAST_CALIBRATION_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(calibration, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    logger.info(f"[CALIBRATION] Saved forecast calibration to {path}")
+    for period in PERIODS:
+        period_cal = calibration["periods"][period]
+        logger.info(
+            "[CALIBRATION] "
+            f"{period}: multiplier={period_cal['power_multiplier']:.3f}, "
+            f"headroom_frac={period_cal['headroom_fraction']:.3f}, "
+            f"lead_buffer={period_cal['export_lead_buffer_multiplier']:.3f}, "
+            f"samples={period_cal['telemetry_samples']}, "
+            f"clipping_rate={period_cal['clipping_rate']:.3f}"
+        )
+
+    return calibration
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    build_and_save_forecast_calibration()

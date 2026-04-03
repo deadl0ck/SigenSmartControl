@@ -126,6 +126,24 @@ QUARTZ_FORECAST_API_URL: Final[str] = os.getenv(
 ).strip()
 QUARTZ_SITE_CAPACITY_KWP: Final[float] = float(os.getenv("QUARTZ_SITE_CAPACITY_KWP", "8.9"))
 
+# Local archive file for side-by-side ESB vs Quartz comparison snapshots.
+FORECAST_COMPARISON_ARCHIVE_PATH: Final[str] = os.getenv(
+    "FORECAST_COMPARISON_ARCHIVE_PATH",
+    "data/forecast_comparisons.jsonl",
+).strip()
+
+# Local archive file for raw inverter telemetry snapshots.
+INVERTER_TELEMETRY_ARCHIVE_PATH: Final[str] = os.getenv(
+    "INVERTER_TELEMETRY_ARCHIVE_PATH",
+    "data/inverter_telemetry.jsonl",
+).strip()
+
+# Local artifact storing bounded daily forecast calibration derived from telemetry.
+FORECAST_CALIBRATION_PATH: Final[str] = os.getenv(
+    "FORECAST_CALIBRATION_PATH",
+    "data/forecast_calibration.json",
+).strip()
+
 # Numeric weights used to score whether the day is considered good for solar.
 RED_VAL: Final[int] = 0
 AMBER_VAL: Final[float] = 0.5

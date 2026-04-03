@@ -16,3 +16,6 @@ env/
 # Local test/IDE artifacts
 .coverage
 .vscode/settings.json
+data/forecast_comparisons.jsonl
+data/inverter_telemetry.jsonl
+data/forecast_calibration.json

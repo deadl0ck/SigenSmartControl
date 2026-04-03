@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+import json
 import logging
+from pathlib import Path
 from typing import Protocol, TypeAlias
 from zoneinfo import ZoneInfo
 
@@ -23,6 +25,7 @@ from constants import (
     ESB_FORECAST_API_BASE_URL,
     ESB_FORECAST_API_ENDPOINT,
     ESB_FORECAST_API_SUBSCRIPTION_KEY,
+    FORECAST_COMPARISON_ARCHIVE_PATH,
     FORECAST_PROVIDER,
     GOOD_DAY_THRESHOLD,
     GREEN_VAL,
@@ -365,6 +368,38 @@ class ComparingSolarForecastProvider:
         periods = set(left) | set(right)
         return sorted(periods, key=lambda period: self._period_order.get(period, 99))
 
+    def _merge_primary_status_with_secondary_values(
+        self,
+        primary: PeriodForecast,
+        secondary: PeriodForecast,
+    ) -> PeriodForecast:
+        """Keep primary statuses while borrowing secondary watts when available.
+
+        This preserves ESB as the decision/status source while letting the
+        scheduler use site-level numeric forecasts for headroom and clipping
+        calculations. If the secondary provider is missing a period, fall back
+        to the primary tuple unchanged.
+        """
+        merged: PeriodForecast = {}
+        for period, (primary_value, primary_status) in primary.items():
+            secondary_value = secondary.get(period)
+            if secondary_value is None:
+                merged[period] = (primary_value, primary_status)
+                continue
+
+            merged[period] = (secondary_value[0], primary_status)
+
+        return merged
+
+    @staticmethod
+    def _serialize_period_value(value_status: tuple[int, str] | None) -> dict[str, int | str] | None:
+        """Convert a forecast tuple into JSON-serializable structure."""
+        if value_status is None:
+            return None
+
+        value_w, status = value_status
+        return {"value_w": value_w, "status": status}
+
     @staticmethod
     def _format_period_value(provider_name: str, value: int, status: str) -> str:
         """Format comparison output so synthetic ESB values are clearly labelled."""
@@ -378,6 +413,83 @@ class ComparingSolarForecastProvider:
             return f"{status} (site avg={value}W, {pct_capacity}% of {capacity_kw:g}kWp)"
 
         return f"{status} ({value}W)"
+
+    def _build_day_snapshot(self, left: PeriodForecast, right: PeriodForecast) -> dict[str, object]:
+        """Build a serializable comparison payload for one forecast day."""
+        periods: dict[str, object] = {}
+        match_count = 0
+        mismatch_count = 0
+        missing_count = 0
+
+        for period in self._ordered_periods(left, right):
+            left_val = left.get(period)
+            right_val = right.get(period)
+            match: bool | None
+            if left_val is None or right_val is None:
+                missing_count += 1
+                match = None
+            else:
+                match = left_val[1] == right_val[1]
+                if match:
+                    match_count += 1
+                else:
+                    mismatch_count += 1
+
+            periods[period] = {
+                "primary": self._serialize_period_value(left_val),
+                "secondary": self._serialize_period_value(right_val),
+                "status_match": match,
+            }
+
+        return {
+            "periods": periods,
+            "summary": {
+                "matches": match_count,
+                "mismatches": mismatch_count,
+                "missing": missing_count,
+            },
+        }
+
+    def _persist_comparison_snapshot(
+        self,
+        today_primary: PeriodForecast,
+        today_secondary: PeriodForecast,
+        tomorrow_primary: PeriodForecast,
+        tomorrow_secondary: PeriodForecast,
+    ) -> None:
+        """Append one normalized comparison snapshot to the local JSONL archive."""
+        archive_path = Path(FORECAST_COMPARISON_ARCHIVE_PATH)
+        snapshot = {
+            "captured_at": datetime.now(ZoneInfo(LOCAL_TIMEZONE)).isoformat(),
+            "timezone": LOCAL_TIMEZONE,
+            "primary_provider": self._primary_name,
+            "secondary_provider": self._secondary_name,
+            "county": COUNTY,
+            "latitude": LATITUDE,
+            "longitude": LONGITUDE,
+            "quartz_site_capacity_kwp": QUARTZ_SITE_CAPACITY_KWP,
+            "normalization": {
+                "quartz_period_timezone": LOCAL_TIMEZONE,
+                "quartz_red_lt_fraction": QuartzSolarForecast._red_capacity_fraction,
+                "quartz_amber_lt_fraction": QuartzSolarForecast._green_capacity_fraction,
+                "esb_values_are_synthetic": True,
+            },
+            "today": self._build_day_snapshot(today_primary, today_secondary),
+            "tomorrow": self._build_day_snapshot(tomorrow_primary, tomorrow_secondary),
+        }
+
+        try:
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive_path.open("a", encoding="utf-8") as archive_file:
+                json.dump(snapshot, archive_file, sort_keys=True)
+                archive_file.write("\n")
+            self.logger.info(
+                f"[FORECAST-COMPARE] Saved comparison snapshot to {archive_path}"
+            )
+        except OSError as exc:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Failed to save comparison snapshot to {archive_path}: {exc}"
+            )
 
     def _log_day_comparison(
         self,
@@ -435,6 +547,10 @@ class ComparingSolarForecastProvider:
             f"{self._secondary_name} is comparison-only and does not drive inverter decisions."
         )
         self.logger.info(
+            f"[FORECAST-COMPARE] Scheduler calculations keep {self._primary_name} statuses "
+            f"but use {self._secondary_name} site-level watts when available to estimate clipping risk."
+        )
+        self.logger.info(
             "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
             f"({LOCAL_TIMEZONE}) and capacity-based thresholds: "
             f"Red < {int(QuartzSolarForecast._red_capacity_fraction * 100)}%, "
@@ -453,12 +569,24 @@ class ComparingSolarForecastProvider:
             f"matches={total_matches}, mismatches={total_mismatches}, missing={total_missing}. "
             "Use mismatch trends to evaluate whether Quartz should replace or supplement ESB later."
         )
+        self._persist_comparison_snapshot(
+            today_primary,
+            today_secondary,
+            tomorrow_primary,
+            tomorrow_secondary,
+        )
 
     def get_todays_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_todays_period_forecast()
+        return self._merge_primary_status_with_secondary_values(
+            self._primary.get_todays_period_forecast(),
+            self._secondary.get_todays_period_forecast(),
+        )
 
     def get_tomorrows_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_tomorrows_period_forecast()
+        return self._merge_primary_status_with_secondary_values(
+            self._primary.get_tomorrows_period_forecast(),
+            self._secondary.get_tomorrows_period_forecast(),
+        )
 
     def get_todays_solar_values(self) -> list[str]:
         return self._primary.get_todays_solar_values()
