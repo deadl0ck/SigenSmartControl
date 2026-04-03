@@ -175,6 +175,23 @@ Why keep Quartz as secondary while ESB is primary:
 - Quartz provides independent site-level predictions, useful for validating trends and potential future migration.
 - Running both lets you quantify match/mismatch over time before changing decision source.
 
+How the comparison is normalized:
+
+- ESB and Quartz are not naturally comparable. ESB is county-level and categorical (`Red`/`Amber`/`Green`), while Quartz is site-level and numeric (predicted power by timestamp).
+- Quartz timestamps are first converted into the local tariff timezone (`Europe/Dublin`) before grouping into project periods (`Morn`, `Aftn`, `Eve`, `NIGHT`). This avoids false mismatches caused by comparing UTC buckets to local scheduler windows.
+- Quartz period status is derived from average predicted output as a share of configured array size (`QUARTZ_SITE_CAPACITY_KWP`), not from the old fixed 200W/400W thresholds. Current normalization is:
+	- `Red`: less than 15% of array capacity
+	- `Amber`: 15% to less than 30% of array capacity
+	- `Green`: 30% or more of array capacity
+- ESB still exposes synthetic placeholder watts (`Red=100W`, `Amber=300W`, `Green=500W`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic, not real site output.
+
+Why the normalization exists:
+
+- Without local-time bucketing, Quartz can look wrong simply because its morning energy lands in the wrong scheduler period.
+- Without capacity-based thresholds, Quartz will look unrealistically optimistic for a larger array because even modest output easily exceeds tiny fixed watt cutoffs.
+- Without labelling ESB values as synthetic, the logs can make county statuses look like real measured watts, which is misleading.
+- The goal is not to force perfect agreement. The goal is to make ESB-vs-Quartz differences interpretable enough to judge whether Quartz is a credible future decision source.
+
 ### Mode mappings
 
 `SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config.py`.

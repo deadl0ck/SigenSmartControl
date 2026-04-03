@@ -8,10 +8,11 @@ Centralizes simulation mode handling for all write operations.
 from typing import Any, Protocol
 
 from sigen_auth import get_sigen_instance
-from config import FULL_SIMULATION_MODE
+from config import FULL_SIMULATION_MODE, SIGEN_MODES
 import logging
 
 logger = logging.getLogger(__name__)
+MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
 
 
 class SigenApiProtocol(Protocol):
@@ -54,17 +55,18 @@ class SigenInteraction:
         Set the operational mode. In FULL_SIMULATION_MODE, logs the action
         but does not send the command to the inverter.
         """
+        mode_label = MODE_NAMES.get(mode, f"UNKNOWN({mode})")
         try:
             logger.info("************************************************************************************************")
             logger.info("************************************************************************************************")
             if FULL_SIMULATION_MODE:
                 logger.info(
-                    f"[SIMULATION] set_operational_mode(mode={mode}) "
+                    f"[SIMULATION] set_operational_mode(mode={mode_label}, value={mode}) "
                     f"- command suppressed in simulation mode"
                 )
                 return {"simulated": True, "mode": mode}
             else:
-                logger.info(f"Setting operational mode to {mode}")
+                logger.info(f"Setting operational mode to {mode_label} (value={mode})")
             return await self._client.set_operational_mode(mode)
         finally:
             logger.info("************************************************************************************************")

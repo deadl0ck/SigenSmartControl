@@ -11,9 +11,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
 from typing import Protocol, TypeAlias
+from zoneinfo import ZoneInfo
 
 import requests
 
+from config import LOCAL_TIMEZONE
 from constants import (
     AMBER_VAL,
     COUNTY,
@@ -244,21 +246,45 @@ class SolarForecast(_BaseSolarForecast):
 class QuartzSolarForecast(_BaseSolarForecast):
     """Optional Open Quartz provider using site latitude/longitude and capacity."""
 
+    _red_capacity_fraction = 0.15
+    _green_capacity_fraction = 0.30
+
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Open Quartz API."""
         super().__init__(logger)
         self._load_quartz_table()
 
     @staticmethod
-    def _period_from_hour(hour_utc: int) -> str:
-        """Map UTC hour to project period labels."""
-        if 7 <= hour_utc < 12:
+    def _period_from_hour(hour_local: int) -> str:
+        """Map local hour to project period labels."""
+        if 7 <= hour_local < 12:
             return "Morn"
-        if 12 <= hour_utc < 16:
+        if 12 <= hour_local < 16:
             return "Aftn"
-        if 16 <= hour_utc < 20:
+        if 16 <= hour_local < 20:
             return "Eve"
         return "NIGHT"
+
+    @staticmethod
+    def _local_timezone() -> ZoneInfo:
+        """Return the configured local timezone for period bucketing."""
+        return ZoneInfo(LOCAL_TIMEZONE)
+
+    @classmethod
+    def _status_from_avg_kw(cls, avg_kw: float) -> str:
+        """Map Quartz period-average output to Red/Amber/Green.
+
+        Quartz returns site-level power in kW, so normalize against the configured
+        array size rather than using the legacy fixed-watt thresholds that were
+        designed around ESB's synthetic status placeholders.
+        """
+        capacity_kw = max(QUARTZ_SITE_CAPACITY_KWP, 0.1)
+        output_fraction = avg_kw / capacity_kw
+        if output_fraction < cls._red_capacity_fraction:
+            return "Red"
+        if output_fraction < cls._green_capacity_fraction:
+            return "Amber"
+        return "Green"
 
     def _load_quartz_table(self) -> None:
         """Load and normalize Quartz forecast output into project period rows."""
@@ -278,11 +304,13 @@ class QuartzSolarForecast(_BaseSolarForecast):
             raise ValueError("Quartz forecast response did not include predictions.power_kw")
 
         grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
+        local_tz = self._local_timezone()
         for timestamp, kw_value in power_by_timestamp.items():
             try:
                 dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-                period = self._period_from_hour(dt.hour)
-                day_label = dt.strftime("%a").capitalize()
+                local_dt = dt.astimezone(local_tz)
+                period = self._period_from_hour(local_dt.hour)
+                day_label = local_dt.strftime("%a").capitalize()
                 grouped[(day_label, period)].append(float(kw_value))
             except Exception:
                 continue
@@ -291,7 +319,7 @@ class QuartzSolarForecast(_BaseSolarForecast):
         for (day_label, period), kw_values in grouped.items():
             avg_kw = sum(kw_values) / len(kw_values)
             value = int(round(avg_kw * 1000.0))
-            status = self._status_from_value(value)
+            status = self._status_from_avg_kw(avg_kw)
             normalized_rows.append((day_label, period, value, status))
 
         if not normalized_rows:
@@ -337,6 +365,20 @@ class ComparingSolarForecastProvider:
         periods = set(left) | set(right)
         return sorted(periods, key=lambda period: self._period_order.get(period, 99))
 
+    @staticmethod
+    def _format_period_value(provider_name: str, value: int, status: str) -> str:
+        """Format comparison output so synthetic ESB values are clearly labelled."""
+        if provider_name == "esb_api":
+            return f"{status} (county status, synthetic={value}W)"
+
+        if provider_name == "quartz":
+            capacity_kw = max(QUARTZ_SITE_CAPACITY_KWP, 0.1)
+            avg_kw = value / 1000.0
+            pct_capacity = int(round((avg_kw / capacity_kw) * 100.0))
+            return f"{status} (site avg={value}W, {pct_capacity}% of {capacity_kw:g}kWp)"
+
+        return f"{status} ({value}W)"
+
     def _log_day_comparison(
         self,
         day_label: str,
@@ -376,8 +418,8 @@ class ComparingSolarForecastProvider:
 
             self.logger.info(
                 f"[FORECAST-COMPARE]   {period}: {verdict} | "
-                f"{self._primary_name}={left_status} ({left_w}W) | "
-                f"{self._secondary_name}={right_status} ({right_w}W)"
+                f"{self._primary_name}={self._format_period_value(self._primary_name, left_w, left_status)} | "
+                f"{self._secondary_name}={self._format_period_value(self._secondary_name, right_w, right_status)}"
             )
 
         return match_count, mismatch_count, missing_count
@@ -391,6 +433,13 @@ class ComparingSolarForecastProvider:
         self.logger.info(
             f"[FORECAST-COMPARE] Decision provider is {self._primary_name}. "
             f"{self._secondary_name} is comparison-only and does not drive inverter decisions."
+        )
+        self.logger.info(
+            "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
+            f"({LOCAL_TIMEZONE}) and capacity-based thresholds: "
+            f"Red < {int(QuartzSolarForecast._red_capacity_fraction * 100)}%, "
+            f"Amber < {int(QuartzSolarForecast._green_capacity_fraction * 100)}%, "
+            "Green >= that share of configured array output."
         )
 
         today_counts = self._log_day_comparison("Today", today_primary, today_secondary)
