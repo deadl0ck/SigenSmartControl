@@ -54,19 +54,21 @@ class SigenInteraction:
         Set the operational mode. In FULL_SIMULATION_MODE, logs the action
         but does not send the command to the inverter.
         """
-        logger.info("************************************************************************************************")
-        logger.info("************************************************************************************************")
-        if FULL_SIMULATION_MODE:
-            logger.info(
-                f"[SIMULATION] set_operational_mode(mode={mode}) "
-                f"- command suppressed in simulation mode"
-            )
-            return {"simulated": True, "mode": mode}
-        else:
-            logger.info(f"Setting operational mode to {mode}")
-        logger.info("************************************************************************************************")
-        logger.info("************************************************************************************************")
-        return await self._client.set_operational_mode(mode)
+        try:
+            logger.info("************************************************************************************************")
+            logger.info("************************************************************************************************")
+            if FULL_SIMULATION_MODE:
+                logger.info(
+                    f"[SIMULATION] set_operational_mode(mode={mode}) "
+                    f"- command suppressed in simulation mode"
+                )
+                return {"simulated": True, "mode": mode}
+            else:
+                logger.info(f"Setting operational mode to {mode}")
+            return await self._client.set_operational_mode(mode)
+        finally:
+            logger.info("************************************************************************************************")
+            logger.info("************************************************************************************************")
 
     async def get_energy_flow(self) -> dict[str, Any]:
         return await self._client.get_energy_flow()

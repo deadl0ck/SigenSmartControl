@@ -18,7 +18,8 @@
 
 This project provides a locally run control system for a Sigen inverter using:
 
-- Met Eireann solar forecast data
+- ESB county API forecast data (primary decision source)
+- Optional Open Quartz forecast data (secondary comparison source)
 - Battery state of charge from the Sigen API
 - Configurable operational mode mappings
 - A self-contained scheduler that evaluates conditions throughout the day
@@ -136,6 +137,11 @@ Meaning:
 - `SELL_RATE_CENTS_PER_KWH`: export unit rate used for arbitrage analysis and simulation notes
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
+- `FORECAST_PROVIDER`: active provider (`esb_api` or `quartz`)
+- `ESB_FORECAST_COUNTY`: county name used for ESB county API lookup (e.g., `Westmeath`)
+- `ESB_FORECAST_API_URL`: derived ESB endpoint for selected county id
+- `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
+- `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
 - `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
 - `SOC_HIGH_THRESHOLD`: if forecast is Green and SOC is at or above this threshold, export to grid
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
@@ -153,6 +159,21 @@ The tariff schedule currently captured in `config.py` is:
 - `19:00-23:00`: Day at `26.596 c/kWh`
 - `23:00-08:00`: Night at `13.462 c/kWh`
 - **Sell rate**: `18.5 c/kWh` (used when exporting to grid; enables arbitrage between sell and cheap-rate recharge)
+
+### Forecast providers (ESB primary, Quartz secondary)
+
+Forecast ingestion is abstracted behind a stable provider interface in `weather.py`.
+
+- Default runtime mode (`FORECAST_PROVIDER=esb_api`) uses ESB county API data for decisions.
+- In ESB mode, the app also pulls Quartz and logs a period-by-period comparison summary each refresh.
+- Quartz is comparison-only in this mode; inverter decisions still follow ESB-derived forecasts.
+- If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
+
+Why keep Quartz as secondary while ESB is primary:
+
+- ESB county statuses align with the public county forecast users already see.
+- Quartz provides independent site-level predictions, useful for validating trends and potential future migration.
+- Running both lets you quantify match/mismatch over time before changing decision source.
 
 ### Mode mappings
 

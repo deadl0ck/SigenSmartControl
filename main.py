@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from weather import SolarForecast
+from weather import SolarForecastProvider, create_solar_forecast_provider
 from sigen_interaction import SigenInteraction
 from config import (
     SIGEN_MODES,
@@ -253,7 +253,7 @@ async def main() -> None:
     sigen = await SigenInteraction.create()
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
     await log_current_mode_on_startup(sigen, mode_names)
-    forecast = SolarForecast(logger)
+    forecast: SolarForecastProvider = create_solar_forecast_provider(logger)
     period_forecast = forecast.get_todays_period_forecast()
 
 
@@ -395,7 +395,7 @@ async def run_scheduler() -> None:
         nonlocal today_period_forecast, tomorrow_period_forecast
         nonlocal today_sunrise_utc, today_sunset_utc, tomorrow_sunrise_utc, day_state
         logger.info("[SCHEDULER] Refreshing daily forecast and sunrise/sunset data.")
-        forecast_obj = SolarForecast(logger)
+        forecast_obj: SolarForecastProvider = create_solar_forecast_provider(logger)
         today_period_forecast = forecast_obj.get_todays_period_forecast()
         tomorrow_period_forecast = forecast_obj.get_tomorrows_period_forecast()
         logger.info(f"[SCHEDULER] Today's forecast: {today_period_forecast}")
@@ -513,17 +513,34 @@ async def run_scheduler() -> None:
         """
         mode_label = mode_names.get(mode, mode) if mode is not None else "N/A"
         export_by_label = export_by_utc.isoformat() if export_by_utc is not None else "N/A"
+        base_period = period.split(" ", 1)[0]
+        base_period = base_period.split("->")[-1]
+        period_labels = {
+            "Morn": "MORNING",
+            "Aftn": "AFTERNOON",
+            "Eve": "EVENING",
+            "NIGHT": "NIGHT",
+        }
+        period_display = period_labels.get(base_period, base_period.upper())
+        period_start_local = period_start_utc.astimezone(LOCAL_TZ).strftime("%H:%M")
         logger.info(
-            f"[{period}] {stage} CHECK | now={now_utc.isoformat()} | "
-            f"period_start={period_start_utc.isoformat()} | forecast_w={solar_value} | "
-            f"status={status} | expected_solar_kwh={period_solar_kwh:.2f} | "
-            f"soc={soc if soc is not None else 'N/A'} | "
-            f"headroom_kwh={f'{headroom_kwh:.2f}' if headroom_kwh is not None else 'N/A'} | "
-            f"headroom_target_kwh={headroom_target_kwh:.2f} | "
-            f"headroom_deficit_kwh={headroom_deficit_kwh:.2f} | "
-            f"export_by={export_by_label} | decision_mode={mode_label} | "
-            f"outcome={outcome} | reason={reason}"
+            f"[{period}] {stage} CHECK FOR {period_display} (Starts at {period_start_local}):"
         )
+        logger.info(f"[{period}]     -> now={now_utc.isoformat()}")
+        logger.info(f"[{period}]     -> period_start={period_start_utc.isoformat()}")
+        logger.info(f"[{period}]     -> forecast_w={solar_value}")
+        logger.info(f"[{period}]     -> status={status}")
+        logger.info(f"[{period}]     -> expected_solar_kwh={period_solar_kwh:.2f}")
+        logger.info(f"[{period}]     -> soc={soc if soc is not None else 'N/A'}")
+        logger.info(
+            f"[{period}]     -> headroom_kwh={f'{headroom_kwh:.2f}' if headroom_kwh is not None else 'N/A'}"
+        )
+        logger.info(f"[{period}]     -> headroom_target_kwh={headroom_target_kwh:.2f}")
+        logger.info(f"[{period}]     -> headroom_deficit_kwh={headroom_deficit_kwh:.2f}")
+        logger.info(f"[{period}]     -> export_by={export_by_label}")
+        logger.info(f"[{period}]     -> decision_mode={mode_label}")
+        logger.info(f"[{period}]     -> outcome={outcome}")
+        logger.info(f"[{period}]     -> reason={reason}")
 
     def get_active_night_context(now_utc: datetime) -> dict[str, Any] | None:
         """Determine whether a night window is currently active and return scheduling context.
