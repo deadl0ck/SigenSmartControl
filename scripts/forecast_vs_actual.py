@@ -289,7 +289,7 @@ def print_report(
     print("=" * 130)
     print("  FORECAST ACCURACY REPORT")
     print("  ESB = county-level synthetic | Quartz = site-level | Buf = ESB × power_multiplier")
-    print("  Percentages show (Actual - Forecast) / Forecast: negative=overestimated, positive=underestimated")
+    print("  Percentages show (Forecast - Actual) / Actual: negative=forecast too low, positive=forecast too high")
     print("=" * 130)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
@@ -316,14 +316,14 @@ def print_report(
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
-        # Calculate percentage differences
+        # Calculate percentage differences (forecast relative to actual)
         esb_pct = None
-        if esb_kw is not None and esb_kw > 0:
-            esb_pct = round(((avg_actual - esb_kw) / esb_kw) * 100)
+        if esb_kw is not None and avg_actual > 0:
+            esb_pct = round(((esb_kw - avg_actual) / avg_actual) * 100)
 
         quartz_pct = None
-        if quartz_kw is not None and quartz_kw > 0:
-            quartz_pct = round(((avg_actual - quartz_kw) / quartz_kw) * 100)
+        if quartz_kw is not None and avg_actual > 0:
+            quartz_pct = round(((quartz_kw - avg_actual) / avg_actual) * 100)
 
         cal = calibration.get(period, {})
         multiplier = cal.get("power_multiplier", 1.0)
