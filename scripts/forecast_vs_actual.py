@@ -31,7 +31,7 @@ from typing import Any
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from config import (
+from config.settings import (
     CALIBRATION_LOG_PATH,
     FORECAST_COMPARISONS_LOG_PATH,
     INVERTER_KW,

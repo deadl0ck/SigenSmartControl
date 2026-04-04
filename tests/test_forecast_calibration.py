@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
-import forecast_calibration
+import telemetry.forecast_calibration as forecast_calibration
 
 
 def test_build_and_save_forecast_calibration_adjusts_period_settings(tmp_path, monkeypatch) -> None:

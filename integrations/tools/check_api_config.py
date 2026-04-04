@@ -8,7 +8,7 @@ including optimization settings like profit-max.
 import asyncio
 import json
 import logging
-from sigen_interaction import SigenInteraction
+from integrations.sigen_interaction import SigenInteraction
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

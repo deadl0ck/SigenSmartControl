@@ -8,8 +8,8 @@ fetching from the real Sigen inverter. Allows users to explore different forecas
 battery states, and system configurations without live hardware.
 """
 
-from config import SIGEN_MODES
-from decision_logic import (
+from config.settings import SIGEN_MODES
+from logic.decision_logic import (
     decide_operational_mode,
     decide_night_preparation_mode,
     calc_headroom_kwh,

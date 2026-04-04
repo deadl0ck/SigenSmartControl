@@ -15,7 +15,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from config import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
+from config.settings import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
 from web.simulate_logic import simulate_sigen_decision
 
 app = Flask(__name__, static_folder='static')

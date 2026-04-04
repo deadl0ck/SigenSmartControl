@@ -9,9 +9,9 @@ import json
 import sys
 import logging
 import pytest
-import weather as weather_module
-from weather import ComparingSolarForecastProvider, SolarForecast
-from config import FORECAST_TO_MODE, SIGEN_MODES
+import weather.forecast as weather_module
+from weather.forecast import ComparingSolarForecastProvider, SolarForecast
+from config.settings import FORECAST_TO_MODE, SIGEN_MODES
 import logging
 logger = logging.getLogger(__name__)
 import os

@@ -1,5 +1,5 @@
 def test_system_specs_imported():
-    from config import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
+    from config.settings import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH
     logger.info(f"[TEST] SOLAR_PV_KW: {SOLAR_PV_KW}, INVERTER_KW: {INVERTER_KW}, BATTERY_KWH: {BATTERY_KWH}")
     assert SOLAR_PV_KW > 0
     assert INVERTER_KW > 0
@@ -20,7 +20,7 @@ Tests forecast-to-mode decision flow with mocked forecast providers and alerts.
 """
 
 import pytest
-from config import FORECAST_TO_MODE, SIGEN_MODES
+from config.settings import FORECAST_TO_MODE, SIGEN_MODES
 import logging
 logger = logging.getLogger(__name__)
 import os

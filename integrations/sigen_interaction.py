@@ -7,8 +7,8 @@ Centralizes simulation mode handling for all write operations.
 
 from typing import Any, Protocol
 
-from sigen_auth import get_sigen_instance
-from config import FULL_SIMULATION_MODE, SIGEN_MODES
+from integrations.sigen_auth import get_sigen_instance
+from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
 import logging
 
 logger = logging.getLogger(__name__)

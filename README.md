@@ -45,20 +45,29 @@ see exactly what values were used and why each decision was made.
 ## Key Files
 
 ```text
-config.py             Runtime configuration and mode mappings
-constants.py          Environment-backed location constants
-decision_logic.py     Shared decision logic used by runtime and web simulator
-sigen_auth.py         Authentication and singleton creation for Sigen API client
-sigen_interaction.py  SigenInteraction wrapper for all Sigen API calls
-main.py               Self-contained scheduler and runtime control loop
-weather.py            Solar forecast parsing
-sunrise_sunset.py     Sunrise/sunset lookup used to derive period windows
-forecast_calibration.py Daily bounded calibration generation from telemetry
-scripts/forecast_vs_actual.py Forecast-vs-actual reporting and status analysis
-web/app.py            Flask web simulator backend
-web/simulate_logic.py Web simulator wrapper around shared decision logic
-web/static/           Simulator UI
-tests/                Test suite
+.
+├── main.py                           # Self-contained scheduler and runtime control loop
+├── config/
+│   ├── settings.py                   # Runtime configuration and mode mappings
+│   └── constants.py                  # Environment-backed location constants
+├── logic/
+│   └── decision_logic.py             # Shared decision logic used by runtime and web simulator
+├── integrations/
+│   ├── sigen_auth.py                 # Authentication and singleton creation for Sigen API client
+│   ├── sigen_interaction.py          # SigenInteraction wrapper for Sigen API calls
+│   └── tools/                        # Sigen diagnostics scripts (mode listing and API config checks)
+├── weather/
+│   ├── forecast.py                   # Solar forecast parsing
+│   └── sunrise_sunset.py             # Sunrise/sunset lookup used to derive period windows
+├── telemetry/
+│   └── forecast_calibration.py       # Daily bounded calibration generation from telemetry
+├── scripts/
+│   └── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
+├── web/
+│   ├── app.py                        # Flask web simulator backend
+│   ├── simulate_logic.py             # Web simulator wrapper around shared decision logic
+│   └── static/                       # Simulator UI
+└── tests/                            # Test suite
 ```
 
 ## Setup
@@ -86,11 +95,11 @@ SIGEN_LATITUDE=53.3498
 SIGEN_LONGITUDE=-6.2603
 ```
 
-4. Edit `config.py` for your hardware and scheduler settings.
+4. Edit `config/settings.py` for your hardware and scheduler settings.
 
 ## Configuration
 
-The core runtime settings live in `config.py`.
+The core runtime settings live in `config/settings.py`.
 
 ### Hardware
 
@@ -155,7 +164,7 @@ Meaning:
 
 ### Tariff schedule currently configured
 
-The tariff schedule currently captured in `config.py` is:
+The tariff schedule currently captured in `config/settings.py` is:
 
 - `08:00-17:00`: Day at `26.596 c/kWh`
 - `17:00-19:00`: Peak at `32.591 c/kWh`
@@ -165,7 +174,7 @@ The tariff schedule currently captured in `config.py` is:
 
 ### Forecast providers (ESB primary, Quartz secondary)
 
-Forecast ingestion is abstracted behind a stable provider interface in `weather.py`.
+Forecast ingestion is abstracted behind a stable provider interface in `weather/forecast.py`.
 
 - Default runtime mode (`FORECAST_PROVIDER=esb_api`) uses ESB county API data for decisions.
 - In ESB mode, the app also pulls Quartz and logs a period-by-period comparison summary each refresh.
@@ -211,11 +220,11 @@ Daily bounded calibration is also applied from that telemetry:
 	- `export_lead_buffer_multiplier`: starts pre-export slightly earlier when clipping risk has been recurring
 - Changes are deliberately bounded per day so the system cannot swing too far overnight.
 - The rule structure does not self-rewrite. It keeps the existing decision logic, but feeds it better period-specific numeric inputs.
-- Manual rebuild is also available with `python forecast_calibration.py`.
+- Manual rebuild is also available with `python telemetry/forecast_calibration.py`.
 
 ### Mode mappings
 
-`SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config.py`.
+`SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config/settings.py`.
 
 ### Mode mappings in plain English
 
@@ -285,9 +294,9 @@ For night:
 
 ### Shared decision logic
 
-The export and mode-selection logic is centralized in `decision_logic.py`.
+The export and mode-selection logic is centralized in `logic/decision_logic.py`.
 
-All direct Sigen API calls are centralized in `sigen_interaction.py` via `SigenInteraction`.
+All direct Sigen API calls are centralized in `integrations/sigen_interaction.py` via `SigenInteraction`.
 
 Both of these use the same shared code path:
 
@@ -340,8 +349,7 @@ $$
 $$
 
 If:
-
-
+$$
 \text{headroom\_kwh} < \text{headroom\_target\_kwh}
 $$
 
@@ -447,7 +455,7 @@ For AI Mode profit-max to work correctly, you must:
 
 1. **Set tariffs in mySigen app**: Configure day, peak, night, and sell rates in the device settings
 2. **Enable profit-max mode**: In mySigen app settings, activate "Profit Max" or "Export Optimization" mode
-3. **Set sell rate in config.py**: Document the sell rate for reference and simulation
+3. **Set sell rate in config/settings.py**: Document the sell rate for reference and simulation
 4. **Verify discharge cut-off SOC**: Ensure the discharge cut-off in mySigen app is low enough (typically 10-20%) to allow significant discharge before cheap rates start
 
 #### Why this scheduler uses TOU → AI transition at night
@@ -481,7 +489,7 @@ That is why the scheduler supports an Evening AI transition instead of hard-codi
 
 ### Full simulation mode (dry run)
 
-Set `FULL_SIMULATION_MODE = True` in `config.py` to run safely without changing inverter state.
+Set `FULL_SIMULATION_MODE = True` in `config/settings.py` to run safely without changing inverter state.
 
 When enabled:
 
@@ -517,7 +525,7 @@ The scheduler:
 
 ## Logging
 
-Logging is controlled by `LOG_LEVEL` in `config.py`.
+Logging is controlled by `LOG_LEVEL` in `config/settings.py`.
 
 Recommended values:
 

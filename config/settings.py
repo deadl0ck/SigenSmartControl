@@ -132,7 +132,7 @@ TARIFF_TO_MODE = {
 PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
-# from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
 
 # ==============================
 # Data File Paths

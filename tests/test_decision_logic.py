@@ -3,8 +3,8 @@
 Tests mode selection algorithms under various battery, solar, and tariff conditions.
 """
 
-from config import SIGEN_MODES, TARIFF_TO_MODE
-from decision_logic import decide_night_preparation_mode, decide_operational_mode
+from config.settings import SIGEN_MODES, TARIFF_TO_MODE
+from logic.decision_logic import decide_night_preparation_mode, decide_operational_mode
 from datetime import datetime, timezone
 from main import is_cheap_rate_window
 

@@ -17,8 +17,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from config import LOCAL_TIMEZONE
-from constants import (
+from config.settings import LOCAL_TIMEZONE
+from config.constants import (
     AMBER_VAL,
     COUNTY,
     ESB_COUNTY_ID_MAP,

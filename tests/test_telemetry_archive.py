@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
-import telemetry_archive
+import telemetry.telemetry_archive as telemetry_archive
 
 
 def test_append_inverter_telemetry_snapshot(tmp_path, monkeypatch) -> None:

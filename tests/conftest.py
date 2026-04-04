@@ -46,14 +46,14 @@ def pytest_configure() -> None:
 		else:
 			logger.info(f"[TEST] ENV {k} = {mask(v, k)}")
 	try:
-		constants = importlib.import_module("constants")
-		logger.info("[TEST] Loaded constants from constants.py:")
+		constants = importlib.import_module("config.constants")
+		logger.info("[TEST] Loaded constants from config/constants.py:")
 		for k in dir(constants):
 			if k.isupper():
 				v = getattr(constants, k)
 				logger.info(f"[TEST] {k} = {mask(v)}")
 	except Exception as e:
-		logger.warning(f"[TEST] Could not load constants.py for logging: {e}")
+		logger.warning(f"[TEST] Could not load config.constants for logging: {e}")
 
 # Shared pytest fixtures can go here
 

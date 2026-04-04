@@ -26,7 +26,7 @@ positive, and structured correctly.
 
 import pytest
 
-import config
+import config.settings as config
 import logging
 logger = logging.getLogger(__name__)
 import os

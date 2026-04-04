@@ -5,7 +5,7 @@ import pytest
 Tests mode setting, simulation mode, and API wrapper behavior.
 """
 
-from sigen_interaction import SigenInteraction
+from integrations.sigen_interaction import SigenInteraction
 
 
 class DummyClient:
@@ -29,7 +29,7 @@ class DummyClient:
 @pytest.mark.asyncio
 async def test_sigen_interaction_from_client_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch FULL_SIMULATION_MODE to False to test pass-through behavior
-    import sigen_interaction
+    import integrations.sigen_interaction as sigen_interaction
     monkeypatch.setattr(sigen_interaction, "FULL_SIMULATION_MODE", False)
     
     dummy = DummyClient()
@@ -51,7 +51,7 @@ async def test_sigen_interaction_create_uses_auth_factory(monkeypatch: pytest.Mo
     async def fake_get_sigen_instance():
         return dummy
 
-    monkeypatch.setattr("sigen_interaction.get_sigen_instance", fake_get_sigen_instance)
+    monkeypatch.setattr("integrations.sigen_interaction.get_sigen_instance", fake_get_sigen_instance)
 
     interaction = await SigenInteraction.create()
     assert await interaction.get_operational_mode() == {"mode": 1}
@@ -62,7 +62,7 @@ async def test_sigen_interaction_set_operational_mode_respects_simulation_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Test that set_operational_mode respects FULL_SIMULATION_MODE
-    import sigen_interaction
+    import integrations.sigen_interaction as sigen_interaction
     monkeypatch.setattr(sigen_interaction, "FULL_SIMULATION_MODE", True)
     
     dummy = DummyClient()

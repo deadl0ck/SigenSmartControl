@@ -13,7 +13,7 @@ Implements a hierarchical decision tree:
 6. Peak tariff self-powered override
 """
 
-from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
 
 
 def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:

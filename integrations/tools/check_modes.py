@@ -9,7 +9,7 @@ Safe to run: does not change any inverter settings.
 import asyncio
 import logging
 from typing import Any
-from sigen_interaction import SigenInteraction
+from integrations.sigen_interaction import SigenInteraction
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

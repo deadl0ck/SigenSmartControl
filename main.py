@@ -13,9 +13,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from weather import SolarForecastProvider, create_solar_forecast_provider
-from sigen_interaction import SigenInteraction
-from config import (
+from weather.forecast import SolarForecastProvider, create_solar_forecast_provider
+from integrations.sigen_interaction import SigenInteraction
+from config.settings import (
+    LOG_LEVEL as CONFIG_LOG_LEVEL,
     SIGEN_MODES,
     TARIFF_TO_MODE,
     PRE_CHEAP_RATE_MODE,
@@ -45,12 +46,12 @@ from config import (
     INVERTER_KW,
     BATTERY_KWH,
 )
-from decision_logic import (
+from logic.decision_logic import (
     decide_operational_mode,
     decide_night_preparation_mode,
     calc_headroom_kwh,
 )
-from tariff_utils import (
+from logic.tariff_utils import (
     _parse_utc,
     derive_period_windows,
     get_first_period_info,
@@ -61,19 +62,19 @@ from tariff_utils import (
     suppress_elapsed_periods_except_latest,
     LOCAL_TZ,
 )
-from mode_control import (
+from logic.mode_control import (
     should_use_ai_mode_for_evening,
     extract_mode_value,
     mode_matches_target,
     ACTION_DIVIDER,
 )
-from sunrise_sunset import get_sunrise_sunset
-from constants import LATITUDE, LONGITUDE
-from forecast_calibration import build_and_save_forecast_calibration, get_period_calibration
-from telemetry_archive import append_inverter_telemetry_snapshot
+from weather.sunrise_sunset import get_sunrise_sunset
+from config.constants import LATITUDE, LONGITUDE
+from telemetry.forecast_calibration import build_and_save_forecast_calibration, get_period_calibration
+from telemetry.telemetry_archive import append_inverter_telemetry_snapshot
 
 # --- Logging configuration ---
-LOG_LEVEL = getattr(logging, __import__('config').LOG_LEVEL, logging.INFO)
+LOG_LEVEL = getattr(logging, CONFIG_LOG_LEVEL, logging.INFO)
 logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("sigen_control")
 

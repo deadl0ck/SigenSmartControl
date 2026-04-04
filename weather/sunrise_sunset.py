@@ -7,7 +7,7 @@ Fetches sunrise and sunset times for a given latitude and longitude using the su
 import requests
 from datetime import datetime
 from typing import Tuple
-from constants import SUNRISE_SUNSET_API_URL
+from config.constants import SUNRISE_SUNSET_API_URL
 import logging
 
 logger = logging.getLogger("sunrise_sunset")

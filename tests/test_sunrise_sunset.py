@@ -12,10 +12,10 @@ Tests time parsing and API response handling.
 
 import pytest
 from unittest.mock import patch
-from sunrise_sunset import get_sunrise_sunset
+from weather.sunrise_sunset import get_sunrise_sunset
 import logging
 logger = logging.getLogger(__name__)
-import constants
+import config.constants as constants
 
 def mask(val):
     if isinstance(val, str) and ("PASS" in val or "SECRET" in val or "TOKEN" in val):
@@ -32,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("test")
 
-@patch("sunrise_sunset.requests.get")
+@patch("weather.sunrise_sunset.requests.get")
 def test_get_sunrise_sunset(mock_get):
     # Mock API response
     mock_get.return_value.status_code = 200

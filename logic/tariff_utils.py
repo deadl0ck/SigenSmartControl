@@ -10,7 +10,7 @@ hours until rate changes, and dividing solar days into scheduling periods.
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from config import (
+from config.settings import (
     CHEAP_RATE_START_HOUR,
     CHEAP_RATE_END_HOUR,
     DAY_RATE_EVENING_START_HOUR,

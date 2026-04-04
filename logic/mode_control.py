@@ -10,13 +10,13 @@ and coordinating mode changes with idempotency checks.
 import logging
 from typing import Any
 
-from sigen_interaction import SigenInteraction
-from config import (
+from integrations.sigen_interaction import SigenInteraction
+from config.settings import (
     ENABLE_EVENING_AI_MODE_TRANSITION,
     EVENING_AI_MODE_START_HOUR,
     SIGEN_MODES,
 )
-from tariff_utils import LOCAL_TZ
+from logic.tariff_utils import LOCAL_TZ
 
 logger = logging.getLogger("sigen_control")
 ACTION_DIVIDER = "=" * 100
@@ -219,7 +219,7 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
     Raises:
         Exception: If API initialization fails and not in simulation mode.
     """
-    from config import FULL_SIMULATION_MODE
+    from config.settings import FULL_SIMULATION_MODE
     
     try:
         sigen = await SigenInteraction.create()
