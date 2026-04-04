@@ -6,13 +6,16 @@ Run from the project root:
     python scripts/forecast_vs_actual.py
 
 For each date/period that has telemetry data, prints:
-  - Raw forecast kW (as received from the weather provider)
-  - Calibrated/buffered forecast kW (raw × power_multiplier from calibration file)
+  - ESB forecast kW (primary provider, county-level synthetic)
+  - Quartz forecast kW (secondary provider, site-level actual calculation)
+  - Calibrated/buffered forecast kW (ESB × power_multiplier from calibration file)
   - Actual average and peak kW measured by the inverter
-  - Number of clipping events flagged in that window
-  - Plain-language verdict explaining how accurate the forecast was
+  - Clipping events flagged in that window
+  - Sample count (number of 15-min poll intervals)
+  - Plain-language verdict explaining how accurate the forecasts were
 
-Data file locations are read from config.py (TELEMETRY_LOG_PATH, CALIBRATION_LOG_PATH).
+Data file locations are read from config.py (TELEMETRY_LOG_PATH, CALIBRATION_LOG_PATH,
+FORECAST_COMPARISONS_LOG_PATH).
 """
 
 import json
@@ -25,7 +28,12 @@ from typing import Any
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from config import CALIBRATION_LOG_PATH, INVERTER_KW, TELEMETRY_LOG_PATH
+from config import (
+    CALIBRATION_LOG_PATH,
+    FORECAST_COMPARISONS_LOG_PATH,
+    INVERTER_KW,
+    TELEMETRY_LOG_PATH,
+)
 
 # Period hour boundaries — must stay in sync with telemetry_archive.py
 _PERIOD_WINDOWS: dict[str, tuple[int, int]] = {
@@ -84,6 +92,24 @@ def load_telemetry_rows(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def load_forecast_comparisons(path: Path) -> list[dict[str, Any]]:
+    """Read all records from the forecast comparison JSONL archive.
+
+    Args:
+        path: Absolute path to forecast_comparisons.jsonl.
+
+    Returns:
+        List of parsed comparison records. Returns an empty list if the file does not exist.
+    """
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def classify_accuracy(ratio: float) -> str:
     """Return a short accuracy label for a raw forecast/actual ratio.
 
@@ -106,8 +132,8 @@ def classify_accuracy(ratio: float) -> str:
 
 def describe_period(
     period: str,
-    status: str,
-    forecast_kw: float,
+    esb_kw: float | None,
+    quartz_kw: float | None,
     buffered_kw: float,
     avg_actual_kw: float,
     max_actual_kw: float,
@@ -116,15 +142,15 @@ def describe_period(
 ) -> str:
     """Build a plain-language summary sentence for one date/period.
 
-    Describes how the raw forecast compared to actuals, whether calibration
-    brought the estimate closer, and whether clipping was observed.
+    Describes how ESB and Quartz forecasts compared to actuals, whether calibration
+    helped, and whether clipping was observed.
 
     Args:
         period: Period name ('Morn', 'Aftn', 'Eve').
-        status: Forecast colour status ('Red', 'Amber', 'Green').
-        forecast_kw: Raw forecast from the weather provider, in kW.
-        buffered_kw: Calibration-adjusted forecast (raw × power_multiplier), in kW.
-        avg_actual_kw: Mean measured solar output across all telemetry samples, in kW.
+        esb_kw: ESB forecast in kW, or None if unavailable.
+        quartz_kw: Quartz forecast in kW, or None if unavailable.
+        buffered_kw: ESB forecast × power_multiplier, in kW.
+        avg_actual_kw: Mean measured solar output across all samples, in kW.
         max_actual_kw: Peak measured solar output in the period, in kW.
         clipping_count: Number of samples flagged as likely clipping.
         n: Total telemetry samples in this period.
@@ -132,44 +158,40 @@ def describe_period(
     Returns:
         Human-readable description string.
     """
-    raw_ratio = avg_actual_kw / forecast_kw if forecast_kw > 0 else 0.0
-    buf_ratio = avg_actual_kw / buffered_kw if buffered_kw > 0 else 0.0
-    raw_label = classify_accuracy(raw_ratio)
-    buf_label = classify_accuracy(buf_ratio)
+    parts: list[str] = [f"{period}:"]
 
-    parts: list[str] = [f"{period} was {status.lower()}."]
-
-    if raw_label == "on target":
-        parts.append("Raw forecast was accurate.")
-    elif "under" in raw_label:
+    # Compare ESB and Quartz to actual
+    if esb_kw is not None:
+        esb_ratio = avg_actual_kw / esb_kw if esb_kw > 0 else 0.0
+        esb_label = classify_accuracy(esb_ratio)
         parts.append(
-            f"Raw forecast underestimated generation"
-            f" (actual was {raw_ratio:.1f}× forecast)."
-        )
-    else:
-        parts.append(
-            f"Raw forecast overestimated generation"
-            f" (actual was {raw_ratio:.1f}× forecast)."
+            f"ESB {esb_label} (actual was {esb_ratio:.1f}× ESB's {esb_kw:.2f}kW)"
         )
 
-    if abs(buffered_kw - forecast_kw) > 0.01:
-        if buf_label == "on target":
-            parts.append("Calibration brought the estimate on target.")
-        elif "under" in buf_label:
+    if quartz_kw is not None:
+        quartz_ratio = avg_actual_kw / quartz_kw if quartz_kw > 0 else 0.0
+        quartz_label = classify_accuracy(quartz_ratio)
+        parts.append(
+            f"Quartz {quartz_label} (actual was {quartz_ratio:.1f}× Quartz's {quartz_kw:.2f}kW)"
+        )
+
+    # Did calibration help?
+    if esb_kw is not None:
+        buf_ratio = avg_actual_kw / buffered_kw if buffered_kw > 0 else 0.0
+        if buf_ratio <= 1.25:
+            parts.append("Calibration brought ESB on target.")
+        elif "under" in classify_accuracy(buf_ratio):
             parts.append(
-                f"Even after calibration, actual was {buf_ratio:.1f}× the buffered"
-                f" figure — calibration may need more data."
-            )
-        else:
-            parts.append(
-                f"Calibration overcorrected (actual was {buf_ratio:.1f}× buffered figure)."
+                f"Even with calibration, actual was {buf_ratio:.1f}×"
+                f" the buffered figure — calibration needs more data."
             )
 
+    # Clipping?
     if clipping_count > 0:
         clip_pct = round(100 * clipping_count / n)
         parts.append(
-            f"Clipping detected in {clipping_count}/{n} samples ({clip_pct}%)"
-            f" — the inverter hit its {INVERTER_KW} kW ceiling."
+            f"Clipping in {clipping_count}/{n} samples ({clip_pct}%)"
+            f" — inverter hit its {INVERTER_KW}kW ceiling."
         )
 
     return " ".join(parts)
@@ -186,17 +208,10 @@ def build_period_rows(
     Returns:
         Dict keyed by (date, period). Each value contains:
           - actual_kw: list of per-sample solar kW readings
-          - forecast_kw: raw forecast in kW (first seen per period)
-          - forecast_status: colour label (first seen per period)
           - clipping_count: number of samples with likely_clipping=True
     """
     rows: dict[tuple[str, str], dict[str, Any]] = defaultdict(
-        lambda: {
-            "actual_kw": [],
-            "forecast_kw": None,
-            "forecast_status": None,
-            "clipping_count": 0,
-        }
+        lambda: {"actual_kw": [], "clipping_count": 0}
     )
     for rec in records:
         ts = rec.get("captured_at", "")
@@ -218,17 +233,51 @@ def build_period_rows(
         if (rec.get("derived") or {}).get("likely_clipping"):
             rows[key]["clipping_count"] += 1
 
-        if rows[key]["forecast_kw"] is None:
-            fentry = (rec.get("forecast_today") or {}).get(period)
-            if fentry:
-                rows[key]["forecast_kw"] = round(fentry[0] / 1000, 3)
-                rows[key]["forecast_status"] = fentry[1]
+    return rows
+
+
+def build_forecast_rows(
+    records: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, float | None]]:
+    """Extract ESB and Quartz forecasts by (date, period) from comparison archive.
+
+    Args:
+        records: All forecast comparison records from the archive.
+
+    Returns:
+        Dict keyed by (date, period). Each value contains:
+          - esb_w: ESB forecast in watts (or None)
+          - quartz_w: Quartz forecast in watts (or None)
+    """
+    rows: dict[tuple[str, str], dict[str, float | None]] = defaultdict(
+        lambda: {"esb_w": None, "quartz_w": None}
+    )
+    for rec in records:
+        ts = rec.get("captured_at", "")
+        if len(ts) < 10:
+            continue
+        date = ts[:10]
+
+        today_periods = (rec.get("today") or {}).get("periods", {})
+        for period_name, period_data in today_periods.items():
+            if period_name not in _PERIOD_WINDOWS:
+                continue
+            key = (date, period_name)
+
+            primary = (period_data or {}).get("primary")
+            if primary and primary.get("value_w") is not None:
+                rows[key]["esb_w"] = primary.get("value_w")
+
+            secondary = (period_data or {}).get("secondary")
+            if secondary and secondary.get("value_w") is not None:
+                rows[key]["quartz_w"] = secondary.get("value_w")
 
     return rows
 
 
 def print_report(
-    rows: dict[tuple[str, str], dict[str, Any]],
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | None]],
     calibration: dict[str, dict[str, float]],
 ) -> None:
     """Print the forecast accuracy report to stdout.
@@ -236,57 +285,62 @@ def print_report(
     Outputs a numeric table followed by a plain-language summary section.
 
     Args:
-        rows: Aggregated period rows from build_period_rows().
+        telemetry_rows: Aggregated period telemetry from build_period_rows().
+        forecast_rows: ESB and Quartz forecasts from build_forecast_rows().
         calibration: Per-period calibration data from load_calibration().
     """
     print()
-    print("=" * 95)
+    print("=" * 115)
     print("  FORECAST ACCURACY REPORT")
-    print("  Fcst kW = raw provider forecast  |  Buf kW = calibration-adjusted forecast")
-    print("=" * 95)
+    print("  ESB kW = county-level synthetic  |  Quartz kW = site-level  |  Buf kW = ESB × power_multiplier")
+    print("=" * 115)
     header = (
-        f"  {'Date':<12}  {'Period':<6}  {'Status':<7}"
-        f"  {'Fcst kW':>8}  {'Buf kW':>8}  {'Avg Act kW':>10}"
-        f"  {'Max Act kW':>10}  {'Ratio(raw)':>10}  {'Clips':>5}  {'n':>4}"
+        f"  {'Date':<12}  {'Period':<6}  "
+        f"{'ESB kW':>8}  {'Quartz kW':>10}  {'Buf kW':>8}  "
+        f"{'Avg Act kW':>10}  {'Max Act kW':>10}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
-    print("-" * 95)
+    print("-" * 115)
 
     verdicts: list[str] = []
 
-    for (date, period), v in sorted(rows.items()):
-        actuals = v["actual_kw"]
+    for (date, period), telem in sorted(telemetry_rows.items()):
+        actuals = telem["actual_kw"]
         if not actuals:
             continue
         avg_actual = round(sum(actuals) / len(actuals), 2)
         max_actual = round(max(actuals), 2)
-        forecast_kw = v["forecast_kw"]
-        status = v["forecast_status"] or "N/A"
         n = len(actuals)
-        clipping_count = v["clipping_count"]
+        clipping_count = telem["clipping_count"]
+
+        forecast = forecast_rows.get((date, period), {})
+        esb_w = forecast.get("esb_w")
+        quartz_w = forecast.get("quartz_w")
+
+        esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
+        quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
         cal = calibration.get(period, {})
         multiplier = cal.get("power_multiplier", 1.0)
-        buffered_kw = round(forecast_kw * multiplier, 3) if forecast_kw is not None else None
+        buffered_kw = round(esb_kw * multiplier, 3) if esb_kw is not None else None
 
-        raw_ratio = round(avg_actual / forecast_kw, 2) if forecast_kw else None
-        fkw_s = f"{forecast_kw:.3f}" if forecast_kw is not None else "N/A"
+        esb_s = f"{esb_kw:.3f}" if esb_kw is not None else "N/A"
+        quartz_s = f"{quartz_kw:.3f}" if quartz_kw is not None else "N/A"
         buf_s = f"{buffered_kw:.3f}" if buffered_kw is not None else "N/A"
-        ratio_s = f"{raw_ratio:.2f}" if raw_ratio is not None else "N/A"
 
         print(
-            f"  {date:<12}  {period:<6}  {status:<7}"
-            f"  {fkw_s:>8}  {buf_s:>8}  {avg_actual:>10.2f}"
-            f"  {max_actual:>10.2f}  {ratio_s:>10}  {clipping_count:>5}  {n:>4}"
+            f"  {date:<12}  {period:<6}  "
+            f"{esb_s:>8}  {quartz_s:>10}  {buf_s:>8}  "
+            f"{avg_actual:>10.2f}  {max_actual:>10.2f}  {clipping_count:>5}  {n:>5}"
         )
 
-        if forecast_kw is not None and buffered_kw is not None:
+        if esb_kw is not None and buffered_kw is not None:
             verdicts.append(
                 f"  {date} {period}: "
                 + describe_period(
                     period=period,
-                    status=status,
-                    forecast_kw=forecast_kw,
+                    esb_kw=esb_kw,
+                    quartz_kw=quartz_kw,
                     buffered_kw=buffered_kw,
                     avg_actual_kw=avg_actual,
                     max_actual_kw=max_actual,
@@ -296,9 +350,9 @@ def print_report(
             )
 
     print()
-    print("=" * 95)
+    print("=" * 115)
     print("  PLAIN LANGUAGE SUMMARY")
-    print("=" * 95)
+    print("=" * 115)
     if verdicts:
         for verdict in verdicts:
             print(verdict)
@@ -312,15 +366,20 @@ def main() -> None:
     """Entry point: load data from config-specified paths and print the accuracy report."""
     telemetry_path = _ROOT / TELEMETRY_LOG_PATH
     calibration_path = _ROOT / CALIBRATION_LOG_PATH
+    forecast_path = _ROOT / FORECAST_COMPARISONS_LOG_PATH
 
-    records = load_telemetry_rows(telemetry_path)
-    if not records:
+    telemetry_records = load_telemetry_rows(telemetry_path)
+    if not telemetry_records:
         print(f"No telemetry records found at {telemetry_path}")
         sys.exit(1)
 
     calibration = load_calibration(calibration_path)
-    rows = build_period_rows(records)
-    print_report(rows, calibration)
+    forecast_records = load_forecast_comparisons(forecast_path)
+
+    telemetry_rows = build_period_rows(telemetry_records)
+    forecast_rows = build_forecast_rows(forecast_records)
+
+    print_report(telemetry_rows, forecast_rows, calibration)
 
 
 if __name__ == "__main__":
