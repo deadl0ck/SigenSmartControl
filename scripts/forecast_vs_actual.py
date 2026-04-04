@@ -133,10 +133,11 @@ def classify_accuracy(ratio: float) -> str:
 def describe_period(
     period: str,
     esb_kw: float | None,
+    esb_pct: int | None,
     quartz_kw: float | None,
+    quartz_pct: int | None,
     buffered_kw: float,
     avg_actual_kw: float,
-    max_actual_kw: float,
     clipping_count: int,
     n: int,
 ) -> str:
@@ -148,10 +149,11 @@ def describe_period(
     Args:
         period: Period name ('Morn', 'Aftn', 'Eve').
         esb_kw: ESB forecast in kW, or None if unavailable.
+        esb_pct: ESB percentage difference (actual-forecast)/forecast*100, or None.
         quartz_kw: Quartz forecast in kW, or None if unavailable.
+        quartz_pct: Quartz percentage difference, or None.
         buffered_kw: ESB forecast × power_multiplier, in kW.
         avg_actual_kw: Mean measured solar output across all samples, in kW.
-        max_actual_kw: Peak measured solar output in the period, in kW.
         clipping_count: Number of samples flagged as likely clipping.
         n: Total telemetry samples in this period.
 
@@ -161,26 +163,20 @@ def describe_period(
     parts: list[str] = [f"{period}:"]
 
     # Compare ESB and Quartz to actual
-    if esb_kw is not None:
-        esb_ratio = avg_actual_kw / esb_kw if esb_kw > 0 else 0.0
-        esb_label = classify_accuracy(esb_ratio)
-        parts.append(
-            f"ESB {esb_label} (actual was {esb_ratio:.1f}× ESB's {esb_kw:.2f}kW)"
-        )
+    if esb_kw is not None and esb_pct is not None:
+        esb_label = classify_accuracy(avg_actual_kw / esb_kw if esb_kw > 0 else 0.0)
+        parts.append(f"ESB {esb_label} ({esb_pct:+d}%)")
 
-    if quartz_kw is not None:
-        quartz_ratio = avg_actual_kw / quartz_kw if quartz_kw > 0 else 0.0
-        quartz_label = classify_accuracy(quartz_ratio)
-        parts.append(
-            f"Quartz {quartz_label} (actual was {quartz_ratio:.1f}× Quartz's {quartz_kw:.2f}kW)"
-        )
+    if quartz_kw is not None and quartz_pct is not None:
+        quartz_label = classify_accuracy(avg_actual_kw / quartz_kw if quartz_kw > 0 else 0.0)
+        parts.append(f"Quartz {quartz_label} ({quartz_pct:+d}%)")
 
     # Did calibration help?
     if esb_kw is not None:
         buf_ratio = avg_actual_kw / buffered_kw if buffered_kw > 0 else 0.0
         if buf_ratio <= 1.25:
             parts.append("Calibration brought ESB on target.")
-        elif "under" in classify_accuracy(buf_ratio):
+        elif buf_ratio > 2.0:
             parts.append(
                 f"Even with calibration, actual was {buf_ratio:.1f}×"
                 f" the buffered figure — calibration needs more data."
@@ -190,7 +186,7 @@ def describe_period(
     if clipping_count > 0:
         clip_pct = round(100 * clipping_count / n)
         parts.append(
-            f"Clipping in {clipping_count}/{n} samples ({clip_pct}%)"
+            f"Clipping in {clipping_count}/{n} ({clip_pct}%)"
             f" — inverter hit its {INVERTER_KW}kW ceiling."
         )
 
@@ -290,17 +286,18 @@ def print_report(
         calibration: Per-period calibration data from load_calibration().
     """
     print()
-    print("=" * 115)
+    print("=" * 130)
     print("  FORECAST ACCURACY REPORT")
-    print("  ESB kW = county-level synthetic  |  Quartz kW = site-level  |  Buf kW = ESB × power_multiplier")
-    print("=" * 115)
+    print("  ESB = county-level synthetic | Quartz = site-level | Buf = ESB × power_multiplier")
+    print("  Percentages show (Actual - Forecast) / Forecast: negative=overestimated, positive=underestimated")
+    print("=" * 130)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
-        f"{'ESB kW':>8}  {'Quartz kW':>10}  {'Buf kW':>8}  "
-        f"{'Avg Act kW':>10}  {'Max Act kW':>10}  {'Clips':>5}  {'n':>5}"
+        f"{'ESB kW':>16}  {'Quartz kW':>18}  {'Buf kW':>8}  "
+        f"{'Avg Act kW':>10}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
-    print("-" * 115)
+    print("-" * 130)
 
     verdicts: list[str] = []
 
@@ -309,7 +306,6 @@ def print_report(
         if not actuals:
             continue
         avg_actual = round(sum(actuals) / len(actuals), 2)
-        max_actual = round(max(actuals), 2)
         n = len(actuals)
         clipping_count = telem["clipping_count"]
 
@@ -320,18 +316,28 @@ def print_report(
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
+        # Calculate percentage differences
+        esb_pct = None
+        if esb_kw is not None and esb_kw > 0:
+            esb_pct = round(((avg_actual - esb_kw) / esb_kw) * 100)
+
+        quartz_pct = None
+        if quartz_kw is not None and quartz_kw > 0:
+            quartz_pct = round(((avg_actual - quartz_kw) / quartz_kw) * 100)
+
         cal = calibration.get(period, {})
         multiplier = cal.get("power_multiplier", 1.0)
         buffered_kw = round(esb_kw * multiplier, 3) if esb_kw is not None else None
 
-        esb_s = f"{esb_kw:.3f}" if esb_kw is not None else "N/A"
-        quartz_s = f"{quartz_kw:.3f}" if quartz_kw is not None else "N/A"
+        # Format columns with percentages
+        esb_s = f"{esb_kw:.3f} ({esb_pct:+d}%)" if esb_kw is not None and esb_pct is not None else "N/A"
+        quartz_s = f"{quartz_kw:.3f} ({quartz_pct:+d}%)" if quartz_kw is not None and quartz_pct is not None else "N/A"
         buf_s = f"{buffered_kw:.3f}" if buffered_kw is not None else "N/A"
 
         print(
             f"  {date:<12}  {period:<6}  "
-            f"{esb_s:>8}  {quartz_s:>10}  {buf_s:>8}  "
-            f"{avg_actual:>10.2f}  {max_actual:>10.2f}  {clipping_count:>5}  {n:>5}"
+            f"{esb_s:>16}  {quartz_s:>18}  {buf_s:>8}  "
+            f"{avg_actual:>10.2f}  {clipping_count:>5}  {n:>5}"
         )
 
         if esb_kw is not None and buffered_kw is not None:
@@ -340,19 +346,20 @@ def print_report(
                 + describe_period(
                     period=period,
                     esb_kw=esb_kw,
+                    esb_pct=esb_pct,
                     quartz_kw=quartz_kw,
+                    quartz_pct=quartz_pct,
                     buffered_kw=buffered_kw,
                     avg_actual_kw=avg_actual,
-                    max_actual_kw=max_actual,
                     clipping_count=clipping_count,
                     n=n,
                 )
             )
 
     print()
-    print("=" * 115)
+    print("=" * 130)
     print("  PLAIN LANGUAGE SUMMARY")
-    print("=" * 115)
+    print("=" * 130)
     if verdicts:
         for verdict in verdicts:
             print(verdict)
