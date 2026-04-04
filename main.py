@@ -364,6 +364,11 @@ async def run_scheduler() -> None:
         f"[SCHEDULER] System specs: Solar PV={SOLAR_PV_KW} kW, "
         f"Inverter={INVERTER_KW} kW, Battery={BATTERY_KWH} kWh"
     )
+    logger.info(
+        "[SCHEDULER] Telemetry grid exchange parsing: prefer buySellPower, then "
+        "gridExportPower/feedInPower/exportPower/netGridPower/gridPower. "
+        "Sign convention: positive=export, negative=import."
+    )
 
     simulated_soc_raw = os.getenv("SIMULATED_SOC_PERCENT", "80")
     try:

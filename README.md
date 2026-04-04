@@ -10,9 +10,10 @@
 6. [How It Works](#how-it-works)
 7. [Scheduler Behavior](#scheduler-behavior)
 8. [Logging](#logging)
-9. [Web Simulator](#web-simulator)
-10. [Tests](#tests)
-11. [Notes](#notes)
+9. [Forecast Accuracy Report](#forecast-accuracy-report)
+10. [Web Simulator](#web-simulator)
+11. [Tests](#tests)
+12. [Notes](#notes)
 
 ## Overview
 
@@ -52,6 +53,8 @@ sigen_interaction.py  SigenInteraction wrapper for all Sigen API calls
 main.py               Self-contained scheduler and runtime control loop
 weather.py            Solar forecast parsing
 sunrise_sunset.py     Sunrise/sunset lookup used to derive period windows
+forecast_calibration.py Daily bounded calibration generation from telemetry
+scripts/forecast_vs_actual.py Forecast-vs-actual reporting and status analysis
 web/app.py            Flask web simulator backend
 web/simulate_logic.py Web simulator wrapper around shared decision logic
 web/static/           Simulator UI
@@ -338,10 +341,6 @@ $$
 
 If:
 
-$$
-#### Why AI is preferred for Evening in this project
-
-Evening can still have some usable solar, but in most real-world days it is lower and less reliable than daytime generation. The bigger financial lever near cheap-rate start is battery state, not late solar peak.
 
 \text{headroom\_kwh} < \text{headroom\_target\_kwh}
 $$
@@ -553,6 +552,58 @@ expected_solar_kwh=1.50 | soc=82.0 | headroom_kwh=4.32 | headroom_target_kwh=0.3
 headroom_deficit_kwh=0.00 | export_by=... | decision_mode=SELF_POWERED |
 outcome=waiting until export window opens | reason=Default mapping for Green.
 ```
+
+## Forecast Accuracy Report
+
+Run:
+
+```sh
+python scripts/forecast_vs_actual.py
+```
+
+This report compares ESB, Quartz, and measured inverter telemetry by daytime period.
+
+Columns include:
+
+- `ESB Forecast`: ESB period status only (`Red`/`Amber`/`Green`)
+- `Quartz kW`: Quartz period forecast in kW with `(Forecast / Actual) %`
+- `Quartz Status`: Quartz status derived from configured capacity thresholds
+- `Calibrated kW`: ESB kW adjusted by a fitted multiplier from observed telemetry
+- `Avg Act kW`: average measured solar for that date/period
+- `Actual Basis`: denominator used for measured classification (`Array` or `Inverter`)
+- `Actual Reading`: measured status (`Red`/`Amber`/`Green`)
+
+### Status rules used in the report
+
+`ESB Forecast` and `Quartz Status` use site-capacity thresholds:
+
+- `Red`: <20% of `SOLAR_PV_KW`
+- `Amber`: 20% to <40% of `SOLAR_PV_KW`
+- `Green`: >=40% of `SOLAR_PV_KW`
+
+`Actual Reading` is SOC-aware and can switch basis:
+
+- If period max SOC >=99.5%, basis is `Inverter` (`INVERTER_KW`)
+- Otherwise basis is `Array` (`SOLAR_PV_KW`)
+
+Measured thresholds by basis:
+
+- `Inverter` basis: `Red` <30%, `Amber` 30% to <60%, `Green` >=60%
+- `Array` basis: `Red` <20%, `Amber` 20% to <40%, `Green` >=40%
+
+Clipping-aware promotion:
+
+- If clipping rate >=20% and utilization >=55%, measured status is promoted to `Green`
+
+### Calibrated kW note
+
+`Calibrated kW` in this report is:
+
+- ESB period kW multiplied by a fitted period multiplier
+- fitted multiplier = median of observed `(Avg Actual kW / ESB kW)` for matching periods
+
+This report-fit calibration is intentionally analysis-oriented so you can see whether ESB can be
+brought closer to observed generation in each period.
 
 ## Web Simulator
 

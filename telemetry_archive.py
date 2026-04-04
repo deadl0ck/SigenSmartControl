@@ -82,6 +82,25 @@ def _normalize_power_to_kw(value: float) -> float:
     return value
 
 
+def _split_grid_exchange_power_kw(value_kw: float | None) -> tuple[float | None, float | None]:
+    """Split signed grid exchange power into export/import components.
+
+    Positive values are treated as export to grid, and negative values are
+    treated as import from grid.
+
+    Args:
+        value_kw: Signed net grid exchange in kW.
+
+    Returns:
+        Tuple of (grid_export_kw, grid_import_kw), each non-negative when present.
+    """
+    if value_kw is None:
+        return None, None
+    if value_kw >= 0:
+        return value_kw, 0.0
+    return 0.0, abs(value_kw)
+
+
 def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     """Infer likely clipping from raw inverter telemetry.
 
@@ -100,9 +119,16 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
         energy_flow,
         ("batteryPower", "batPower", "chargePower", "batteryChargePower"),
     )
-    grid_export_metric = _extract_numeric_metric(
+    grid_exchange_metric = _extract_numeric_metric(
         energy_flow,
-        ("gridExportPower", "feedInPower", "exportPower"),
+        (
+            "buySellPower",
+            "gridExportPower",
+            "feedInPower",
+            "exportPower",
+            "netGridPower",
+            "gridPower",
+        ),
     )
 
     solar_kw = _normalize_power_to_kw(solar_metric[1]) if solar_metric is not None else None
@@ -110,9 +136,10 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     battery_power_kw = (
         _normalize_power_to_kw(battery_power_metric[1]) if battery_power_metric is not None else None
     )
-    grid_export_kw = (
-        _normalize_power_to_kw(grid_export_metric[1]) if grid_export_metric is not None else None
+    grid_exchange_kw = (
+        _normalize_power_to_kw(grid_exchange_metric[1]) if grid_exchange_metric is not None else None
     )
+    grid_export_kw, grid_import_kw = _split_grid_exchange_power_kw(grid_exchange_kw)
 
     reasons: list[str] = []
     confidence = "low"
@@ -169,8 +196,11 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
             "battery_soc_source": battery_soc_metric[0] if battery_soc_metric is not None else None,
             "battery_power_kw": battery_power_kw,
             "battery_power_source": battery_power_metric[0] if battery_power_metric is not None else None,
+            "grid_exchange_kw": grid_exchange_kw,
+            "grid_exchange_source": grid_exchange_metric[0] if grid_exchange_metric is not None else None,
             "grid_export_kw": grid_export_kw,
-            "grid_export_source": grid_export_metric[0] if grid_export_metric is not None else None,
+            "grid_import_kw": grid_import_kw,
+            "grid_export_source": grid_exchange_metric[0] if grid_exchange_metric is not None else None,
         },
     }
 
