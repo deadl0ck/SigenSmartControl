@@ -149,9 +149,9 @@ def describe_period(
     Args:
         period: Period name ('Morn', 'Aftn', 'Eve').
         esb_kw: ESB forecast in kW, or None if unavailable.
-        esb_pct: ESB percentage difference (actual-forecast)/forecast*100, or None.
+        esb_pct: ESB percentage of actual (forecast/actual*100), or None.
         quartz_kw: Quartz forecast in kW, or None if unavailable.
-        quartz_pct: Quartz percentage difference, or None.
+        quartz_pct: Quartz percentage of actual, or None.
         buffered_kw: ESB forecast × power_multiplier, in kW.
         avg_actual_kw: Mean measured solar output across all samples, in kW.
         clipping_count: Number of samples flagged as likely clipping.
@@ -164,12 +164,30 @@ def describe_period(
 
     # Compare ESB and Quartz to actual
     if esb_kw is not None and esb_pct is not None:
-        esb_label = classify_accuracy(avg_actual_kw / esb_kw if esb_kw > 0 else 0.0)
-        parts.append(f"ESB {esb_label} ({esb_pct:+d}%)")
+        if esb_pct < 50:
+            label = "severely underestimated"
+        elif esb_pct < 80:
+            label = "underestimated"
+        elif esb_pct <= 120:
+            label = "on target"
+        elif esb_pct < 200:
+            label = "overestimated"
+        else:
+            label = "severely overestimated"
+        parts.append(f"ESB {label} ({esb_pct}%)")
 
     if quartz_kw is not None and quartz_pct is not None:
-        quartz_label = classify_accuracy(avg_actual_kw / quartz_kw if quartz_kw > 0 else 0.0)
-        parts.append(f"Quartz {quartz_label} ({quartz_pct:+d}%)")
+        if quartz_pct < 50:
+            label = "severely underestimated"
+        elif quartz_pct < 80:
+            label = "underestimated"
+        elif quartz_pct <= 120:
+            label = "on target"
+        elif quartz_pct < 200:
+            label = "overestimated"
+        else:
+            label = "severely overestimated"
+        parts.append(f"Quartz {label} ({quartz_pct}%)")
 
     # Did calibration help?
     if esb_kw is not None:
@@ -289,7 +307,7 @@ def print_report(
     print("=" * 130)
     print("  FORECAST ACCURACY REPORT")
     print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × power_multiplier")
-    print("  Percentages show (Forecast - Actual) / Actual: negative=forecast too low, positive=forecast too high")
+    print("  Percentages show (Forecast / Actual) × 100: <100% means underestimated, >100% means overestimated")
     print("=" * 130)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
@@ -316,22 +334,22 @@ def print_report(
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
-        # Calculate percentage differences (forecast relative to actual)
+        # Calculate percentage of actual (forecast as % of actual)
         esb_pct = None
         if esb_kw is not None and avg_actual > 0:
-            esb_pct = round(((esb_kw - avg_actual) / avg_actual) * 100)
+            esb_pct = round((esb_kw / avg_actual) * 100)
 
         quartz_pct = None
         if quartz_kw is not None and avg_actual > 0:
-            quartz_pct = round(((quartz_kw - avg_actual) / avg_actual) * 100)
+            quartz_pct = round((quartz_kw / avg_actual) * 100)
 
         cal = calibration.get(period, {})
         multiplier = cal.get("power_multiplier", 1.0)
         buffered_kw = round(esb_kw * multiplier, 3) if esb_kw is not None else None
 
         # Format columns with percentages
-        esb_s = f"{esb_kw:.3f} ({esb_pct:+d}%)" if esb_kw is not None and esb_pct is not None else "N/A"
-        quartz_s = f"{quartz_kw:.3f} ({quartz_pct:+d}%)" if quartz_kw is not None and quartz_pct is not None else "N/A"
+        esb_s = f"{esb_kw:.3f} ({esb_pct}%)" if esb_kw is not None and esb_pct is not None else "N/A"
+        quartz_s = f"{quartz_kw:.3f} ({quartz_pct}%)" if quartz_kw is not None and quartz_pct is not None else "N/A"
         buf_s = f"{buffered_kw:.3f}" if buffered_kw is not None else "N/A"
 
         print(
