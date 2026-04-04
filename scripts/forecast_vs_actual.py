@@ -130,6 +130,31 @@ def classify_accuracy(ratio: float) -> str:
     return "severely under-forecast"
 
 
+def derive_status_from_actual(avg_actual_kw: float, capacity_kwp: float = 8.9) -> str:
+    """Derive Red/Amber/Green status from actual measured solar power.
+
+    Uses capacity-based thresholds (same as Quartz):
+    - Red: < 15% of capacity
+    - Amber: 15-30% of capacity
+    - Green: > 30% of capacity
+
+    Args:
+        avg_actual_kw: Average measured solar power in kW.
+        capacity_kwp: Array capacity in kW (default 8.9).
+
+    Returns:
+        Status string: 'Red', 'Amber', or 'Green'.
+    """
+    red_threshold = capacity_kwp * 0.15
+    green_threshold = capacity_kwp * 0.30
+    
+    if avg_actual_kw < red_threshold:
+        return "Red"
+    if avg_actual_kw < green_threshold:
+        return "Amber"
+    return "Green"
+
+
 def describe_period(
     period: str,
     esb_kw: float | None,
@@ -304,18 +329,18 @@ def print_report(
         calibration: Per-period calibration data from load_calibration().
     """
     print()
-    print("=" * 130)
+    print("=" * 145)
     print("  FORECAST ACCURACY REPORT")
-    print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × power_multiplier")
+    print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × power_multiplier | Actual Status = derived from measured output")
     print("  Percentages show (Forecast / Actual) × 100: <100% means underestimated, >100% means overestimated")
-    print("=" * 130)
+    print("=" * 145)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
         f"{'ESB kW':>8}  {'Quartz kW':>10}  {'Calibrated kW':>12}  "
-        f"{'Avg Act kW':>10}  {'Clips':>5}  {'n':>5}"
+        f"{'Avg Act kW':>10}  {'Actual Status':>13}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
-    print("-" * 130)
+    print("-" * 145)
 
     verdicts: list[str] = []
 
@@ -352,10 +377,13 @@ def print_report(
         quartz_s = f"{quartz_kw:.3f} ({quartz_pct}%)" if quartz_kw is not None and quartz_pct is not None else "N/A"
         buf_s = f"{buffered_kw:.3f}" if buffered_kw is not None else "N/A"
 
+        # Derive status from actual measured power
+        derived_status = derive_status_from_actual(avg_actual)
+
         print(
             f"  {date:<12}  {period:<6}  "
             f"{esb_s:>8}  {quartz_s:>10}  {buf_s:>12}  "
-            f"{avg_actual:>10.2f}  {clipping_count:>5}  {n:>5}"
+            f"{avg_actual:>10.2f}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
 
         if esb_kw is not None and buffered_kw is not None:
@@ -375,9 +403,9 @@ def print_report(
             )
 
     print()
-    print("=" * 130)
+    print("=" * 145)
     print("  PLAIN LANGUAGE SUMMARY")
-    print("=" * 130)
+    print("=" * 145)
     if verdicts:
         for verdict in verdicts:
             print(verdict)
