@@ -8,7 +8,7 @@ Run from the project root:
 For each date/period that has telemetry data, prints:
   - ESB forecast kW (primary provider, county-level synthetic)
   - Quartz forecast kW (secondary provider, site-level actual calculation)
-  - Calibrated/buffered forecast kW (ESB × power_multiplier from calibration file)
+  - Calibrated forecast kW (ESB × power_multiplier from calibration file)
   - Actual average and peak kW measured by the inverter
   - Clipping events flagged in that window
   - Sample count (number of 15-min poll intervals)
@@ -179,7 +179,7 @@ def describe_period(
         elif buf_ratio > 2.0:
             parts.append(
                 f"Even with calibration, actual was {buf_ratio:.1f}×"
-                f" the buffered figure — calibration needs more data."
+                f" the calibrated figure — calibration needs more data."
             )
 
     # Clipping?
@@ -288,12 +288,12 @@ def print_report(
     print()
     print("=" * 130)
     print("  FORECAST ACCURACY REPORT")
-    print("  ESB = county-level synthetic | Quartz = site-level | Buf = ESB × power_multiplier")
+    print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × power_multiplier")
     print("  Percentages show (Forecast - Actual) / Actual: negative=forecast too low, positive=forecast too high")
     print("=" * 130)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
-        f"{'ESB kW':>16}  {'Quartz kW':>18}  {'Buf kW':>8}  "
+        f"{'ESB kW':>8}  {'Quartz kW':>10}  {'Calibrated kW':>12}  "
         f"{'Avg Act kW':>10}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
@@ -336,7 +336,7 @@ def print_report(
 
         print(
             f"  {date:<12}  {period:<6}  "
-            f"{esb_s:>16}  {quartz_s:>18}  {buf_s:>8}  "
+            f"{esb_s:>8}  {quartz_s:>10}  {buf_s:>12}  "
             f"{avg_actual:>10.2f}  {clipping_count:>5}  {n:>5}"
         )
 
