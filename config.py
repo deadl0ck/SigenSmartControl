@@ -133,3 +133,14 @@ PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
 # from config import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+
+# ==============================
+# Data File Paths
+# ==============================
+# Paths are relative to the project root directory.
+# Telemetry archive: one JSONL record per scheduler poll cycle.
+TELEMETRY_LOG_PATH = "data/inverter_telemetry.jsonl"
+# Calibration artifact: learned per-period multipliers used to adjust raw forecasts.
+CALIBRATION_LOG_PATH = "data/forecast_calibration.json"
+# Forecast comparison log: historical forecast-vs-actual entries written by calibration.
+FORECAST_COMPARISONS_LOG_PATH = "data/forecast_comparisons.jsonl"
