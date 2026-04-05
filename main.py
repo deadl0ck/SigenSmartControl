@@ -8,6 +8,7 @@ grid arbitrage, and cost-minimization based on real-time conditions.
 
 import asyncio
 from collections import deque
+import math
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -48,6 +49,9 @@ from config.settings import (
     LIVE_SOLAR_AVERAGE_SAMPLE_COUNT,
     MIN_EFFECTIVE_BATTERY_EXPORT_KW,
     DEFAULT_SIMULATED_SOC_PERCENT,
+    CLIPPING_BATTERY_SOC_HIGH_PERCENT,
+    CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW,
+    MAX_TIMED_EXPORT_MINUTES,
 )
 from logic.decision_logic import (
     decide_operational_mode,
@@ -93,27 +97,113 @@ MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
 
 # --- Scheduler interaction and mode control ---
 
+def _format_tree_leaf(value: Any) -> str:
+    """Format a scalar value for tree logging.
+
+    Args:
+        value: Scalar value to format.
+
+    Returns:
+        String-safe representation suitable for log output.
+    """
+    return repr(value)
+
+
+def _iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
+    """Convert nested dict/list payloads into ASCII tree lines.
+
+    Args:
+        payload: Value to render, usually dict/list from API responses.
+        prefix: Internal indentation prefix used during recursion.
+
+    Returns:
+        List of formatted tree lines.
+    """
+    lines: list[str] = []
+
+    if isinstance(payload, dict):
+        items = list(payload.items())
+        for index, (key, value) in enumerate(items):
+            is_last = index == len(items) - 1
+            branch = "`- " if is_last else "|- "
+            child_prefix = prefix + ("   " if is_last else "|  ")
+
+            if isinstance(value, (dict, list)):
+                lines.append(f"{prefix}{branch}{key}:")
+                lines.extend(_iter_tree_lines(value, child_prefix))
+            else:
+                lines.append(f"{prefix}{branch}{key}: {_format_tree_leaf(value)}")
+        return lines
+
+    if isinstance(payload, list):
+        for index, value in enumerate(payload):
+            is_last = index == len(payload) - 1
+            branch = "`- " if is_last else "|- "
+            child_prefix = prefix + ("   " if is_last else "|  ")
+            label = f"[{index}]"
+
+            if isinstance(value, (dict, list)):
+                lines.append(f"{prefix}{branch}{label}:")
+                lines.extend(_iter_tree_lines(value, child_prefix))
+            else:
+                lines.append(f"{prefix}{branch}{label}: {_format_tree_leaf(value)}")
+        return lines
+
+    lines.append(f"{prefix}`- {_format_tree_leaf(payload)}")
+    return lines
+
+
+def log_payload_tree(title: str, payload: Any) -> None:
+    """Log nested payload data as a readable multi-line tree.
+
+    Args:
+        title: Human-readable section title for this payload.
+        payload: Structured payload value from the inverter API.
+    """
+    logger.info("%s:", title)
+    for line in _iter_tree_lines(payload):
+        logger.info("  %s", line)
+
 async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
-    """Log the inverter's current operational mode during startup.
+    """Log all retrievable inverter startup data.
     
     Args:
         sigen: SigenInteraction instance for API calls.
         mode_names: Mapping from numeric mode to human-readable label.
     """
+    logger.info(ACTION_DIVIDER)
+    logger.info("STARTUP CHECK: fetching retrievable inverter data")
+
     try:
         current_mode_raw = await sigen.get_operational_mode()
         current_mode = extract_mode_value(current_mode_raw)
-        logger.info(ACTION_DIVIDER)
-        logger.info("STARTUP CHECK: fetched current inverter mode")
         if current_mode is not None:
             logger.info(
-                f"Current mode is {mode_names.get(current_mode, current_mode)} (value={current_mode})"
+                "Startup current mode: %s (value=%s)",
+                mode_names.get(current_mode, current_mode),
+                current_mode,
             )
         else:
-            logger.info(f"Current mode response (unparsed): {current_mode_raw}")
-        logger.info(ACTION_DIVIDER)
+            logger.info("Startup current mode response (unparsed): %s", current_mode_raw)
     except Exception as e:
-        logger.error(f"Failed to fetch current inverter mode on startup: {e}")
+        logger.error("Failed to fetch current inverter mode on startup: %s", e)
+
+    try:
+        energy_flow = await sigen.get_energy_flow()
+        log_payload_tree("Startup energy flow payload", energy_flow)
+    except Exception as e:
+        logger.error("Failed to fetch energy flow payload on startup: %s", e)
+
+    try:
+        operational_modes = await sigen.get_operational_modes()
+        log_payload_tree(
+            "Startup supported operational modes payload",
+            operational_modes,
+        )
+    except Exception as e:
+        logger.error("Failed to fetch supported operational modes on startup: %s", e)
+
+    logger.info(ACTION_DIVIDER)
 
 
 async def apply_mode_change(
@@ -123,6 +213,7 @@ async def apply_mode_change(
     period: str,
     reason: str,
     mode_names: dict[int, str],
+    export_duration_minutes: int | None = None,
 ) -> bool:
     """Attempt to change the inverter operational mode with idempotency checks.
     
@@ -135,6 +226,7 @@ async def apply_mode_change(
         period: Human-readable period/context label for logging.
         reason: Explanation of why this mode change is being made.
         mode_names: Mapping from numeric mode to human-readable label.
+        export_duration_minutes: Optional override window when forcing GRID_EXPORT.
         
     Returns:
         True if mode was set or already at target, False if set operation failed.
@@ -142,6 +234,32 @@ async def apply_mode_change(
     mode_label = mode_names.get(mode, mode)
     current_mode_raw: Any = None
     if sigen is None:
+        if FULL_SIMULATION_MODE:
+            logger.info(ACTION_DIVIDER)
+            logger.info(ACTION_DIVIDER)
+            logger.info(
+                f"[SIMULATION] set_operational_mode(mode={mode_label}, value={mode}) "
+                "- command suppressed in simulation mode"
+            )
+            logger.info(ACTION_DIVIDER)
+            logger.info(ACTION_DIVIDER)
+            append_mode_change_event(
+                scheduler_now_utc=datetime.now(timezone.utc),
+                period=period,
+                requested_mode=mode,
+                requested_mode_label=str(mode_label),
+                reason=reason,
+                simulated=True,
+                success=True,
+                current_mode=None,
+                response={
+                    "simulated": True,
+                    "mode": mode,
+                    "note": "Sigen interaction unavailable; simulated fallback path.",
+                },
+            )
+            return True
+
         logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
         return False
 
@@ -170,7 +288,10 @@ async def apply_mode_change(
 
     event_time = datetime.now(timezone.utc)
     try:
-        response = await sigen.set_operational_mode(mode)
+        if mode == SIGEN_MODES["GRID_EXPORT"] and export_duration_minutes is not None:
+            response = await sigen.export_to_grid(export_duration_minutes)
+        else:
+            response = await sigen.set_operational_mode(mode)
         logger.info(f"Set mode response for {period}: {response}")
         append_mode_change_event(
             scheduler_now_utc=event_time,
@@ -204,31 +325,57 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
     """Create and validate the Sigen API interaction wrapper.
     
     Attempts to initialize API connection and logs current inverter mode on startup.
-    If authentication fails but FULL_SIMULATION_MODE is enabled, returns None for
-    dry-run operation; otherwise re-raises the exception.
+    Retries authentication twice on failure (three total attempts). If all attempts
+    fail, exits the process with a non-zero status.
     
     Args:
         mode_names: Mapping from numeric mode to human-readable label.
         
     Returns:
-        SigenInteraction instance if successful, or None in simulation mode if auth fails.
-        
+        SigenInteraction instance if successful.
+
     Raises:
-        Exception: If API initialization fails and not in simulation mode.
+        SystemExit: If authentication fails after all retry attempts.
     """
-    try:
-        sigen = await SigenInteraction.create()
-        await log_current_mode_on_startup(sigen, mode_names)
-        return sigen
-    except Exception as e:
-        if FULL_SIMULATION_MODE:
-            logger.warning(
-                "[SCHEDULER] Inverter authentication failed, but FULL_SIMULATION_MODE is enabled. "
-                "Continuing in offline dry-run mode with simulated SOC values. "
-                f"Reason: {e}"
+    max_attempts = 3  # initial attempt + two retries
+    retry_delay_seconds = 2
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.info(
+                "[SCHEDULER] Initializing inverter interaction (attempt %s/%s).",
+                attempt,
+                max_attempts,
             )
-            return None
-        raise
+            sigen = await SigenInteraction.create()
+            logger.info(
+                "[SCHEDULER] Inverter interaction created successfully: %s",
+                type(sigen).__name__,
+            )
+            await log_current_mode_on_startup(sigen, mode_names)
+            return sigen
+        except Exception as e:
+            logger.warning(
+                "[SCHEDULER] Inverter authentication/initialization failed on attempt %s/%s. "
+                "FULL_SIMULATION_MODE=%s. Reason: %r",
+                attempt,
+                max_attempts,
+                FULL_SIMULATION_MODE,
+                e,
+            )
+            if attempt < max_attempts:
+                logger.warning(
+                    "[SCHEDULER] Retrying inverter authentication in %s seconds...",
+                    retry_delay_seconds,
+                )
+                await asyncio.sleep(retry_delay_seconds)
+
+    logger.error(
+        "[SCHEDULER] Unable to authenticate with inverter after %s attempts. "
+        "Exiting process.",
+        max_attempts,
+    )
+    raise SystemExit(1)
 
 
 async def main() -> None:
@@ -434,7 +581,201 @@ async def run_scheduler() -> None:
         "mode_phase": None,
         "prep_set_for": None,
     }
+    timed_export_override: dict[str, Any] = {
+        "active": False,
+        "started_at": None,
+        "restore_at": None,
+        "restore_mode": None,
+        "restore_mode_label": None,
+        "trigger_period": None,
+        "duration_minutes": None,
+    }
     live_solar_kw_samples: deque[float] = deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)
+
+    async def start_timed_grid_export(
+        *,
+        period: str,
+        reason: str,
+        duration_minutes: int,
+        now_utc: datetime,
+    ) -> bool:
+        """Switch to GRID_EXPORT for a bounded duration, then restore prior mode later.
+
+        Args:
+            period: Human-readable period label that triggered export.
+            reason: Decision explanation for audit logs.
+            duration_minutes: Requested export duration in minutes.
+            now_utc: Current scheduler timestamp in UTC.
+
+        Returns:
+            True when timed export is activated, False otherwise.
+        """
+        nonlocal timed_export_override
+        if timed_export_override["active"]:
+            logger.info(
+                "[TIMED EXPORT] Requested by %s but override already active until %s. "
+                "Keeping current override and skipping new request.",
+                period,
+                timed_export_override["restore_at"],
+            )
+            return False
+
+        requested_minutes = max(1, duration_minutes)
+        clamped_minutes = min(requested_minutes, MAX_TIMED_EXPORT_MINUTES)
+        if clamped_minutes < requested_minutes:
+            logger.warning(
+                "[TIMED EXPORT] Requested duration %s minutes exceeds safety cap of %s minutes. "
+                "Clamping to %s minutes.",
+                requested_minutes,
+                MAX_TIMED_EXPORT_MINUTES,
+                clamped_minutes,
+            )
+        restore_at = now_utc + timedelta(minutes=clamped_minutes)
+
+        restore_mode: int | None = None
+        restore_label = "UNKNOWN"
+        if sigen is not None:
+            try:
+                current_mode_raw = await sigen.get_operational_mode()
+                restore_mode = extract_mode_value(current_mode_raw)
+                if restore_mode is None:
+                    logger.warning(
+                        "[TIMED EXPORT] Could not parse current mode before timed export; "
+                        "refusing override to avoid unsafe restore target. raw=%s",
+                        current_mode_raw,
+                    )
+                    return False
+                restore_label = str(mode_names.get(restore_mode, restore_mode))
+            except Exception as exc:
+                logger.warning(
+                    "[TIMED EXPORT] Failed to read current mode before timed export: %s",
+                    exc,
+                )
+                return False
+
+        logger.info(ACTION_DIVIDER)
+        logger.info(
+            "[TIMED EXPORT] Switching to GRID_EXPORT now. Trigger period=%s, duration=%s min, "
+            "active_until=%s, will_restore_to=%s",
+            period,
+            clamped_minutes,
+            restore_at.isoformat(),
+            restore_label,
+        )
+        logger.info(ACTION_DIVIDER)
+
+        apply_reason = (
+            f"{reason} Timed export override active for {clamped_minutes} minutes "
+            f"(until {restore_at.isoformat()}) before restoring previous mode {restore_label}."
+        )
+        ok = await apply_mode_change(
+            sigen=sigen,
+            mode=SIGEN_MODES["GRID_EXPORT"],
+            period=f"{period} (timed-export-start)",
+            reason=apply_reason,
+            mode_names=mode_names,
+            export_duration_minutes=clamped_minutes,
+        )
+        if not ok:
+            return False
+
+        timed_export_override = {
+            "active": True,
+            "started_at": now_utc,
+            "restore_at": restore_at,
+            "restore_mode": restore_mode,
+            "restore_mode_label": restore_label,
+            "trigger_period": period,
+            "duration_minutes": clamped_minutes,
+        }
+        return True
+
+    async def maybe_restore_timed_grid_export(now_utc: datetime) -> bool:
+        """Restore pre-export mode when active timed export window has elapsed.
+
+        Args:
+            now_utc: Current scheduler timestamp in UTC.
+
+        Returns:
+            True when an override is active and normal scheduler decisions should be skipped.
+        """
+        nonlocal timed_export_override
+        if not timed_export_override["active"]:
+            return False
+
+        restore_at = timed_export_override["restore_at"]
+        if restore_at is None:
+            logger.warning("[TIMED EXPORT] Override state missing restore_at; clearing state.")
+            timed_export_override = {
+                "active": False,
+                "started_at": None,
+                "restore_at": None,
+                "restore_mode": None,
+                "restore_mode_label": None,
+                "trigger_period": None,
+                "duration_minutes": None,
+            }
+            return False
+
+        if now_utc < restore_at:
+            return True
+
+        restore_mode = timed_export_override["restore_mode"]
+        restore_label = timed_export_override["restore_mode_label"]
+        trigger_period = timed_export_override["trigger_period"]
+        duration_minutes = timed_export_override["duration_minutes"]
+        if restore_mode is None:
+            logger.warning(
+                "[TIMED EXPORT] Restore mode unavailable after timed export window from %s. "
+                "Leaving scheduler control enabled without automated restore.",
+                trigger_period,
+            )
+            timed_export_override = {
+                "active": False,
+                "started_at": None,
+                "restore_at": None,
+                "restore_mode": None,
+                "restore_mode_label": None,
+                "trigger_period": None,
+                "duration_minutes": None,
+            }
+            return False
+
+        logger.info(ACTION_DIVIDER)
+        logger.info(
+            "[TIMED EXPORT] Export window completed. Restoring prior mode %s now. "
+            "Triggered_by=%s, configured_duration=%s min, restore_due_at=%s",
+            restore_label,
+            trigger_period,
+            duration_minutes,
+            restore_at.isoformat(),
+        )
+        logger.info(ACTION_DIVIDER)
+
+        restore_ok = await apply_mode_change(
+            sigen=sigen,
+            mode=restore_mode,
+            period=f"{trigger_period} (timed-export-restore)",
+            reason=(
+                "Timed grid export window complete; restoring mode active before override "
+                f"({restore_label})."
+            ),
+            mode_names=mode_names,
+        )
+        if restore_ok:
+            timed_export_override = {
+                "active": False,
+                "started_at": None,
+                "restore_at": None,
+                "restore_mode": None,
+                "restore_mode_label": None,
+                "trigger_period": None,
+                "duration_minutes": None,
+            }
+            return False
+
+        logger.warning("[TIMED EXPORT] Restore attempt failed; will retry next scheduler tick.")
+        return True
 
     async def refresh_daily_data() -> None:
         """Fetch and cache solar forecast and sunrise/sunset times for today and tomorrow.
@@ -592,6 +933,52 @@ async def run_scheduler() -> None:
         adjusted_watts = solar_value * period_calibration["power_multiplier"]
         kw = min(adjusted_watts / 1000.0, SOLAR_PV_KW)
         return kw * 3.0  # assume 3-hour period
+
+    def promote_status_for_live_clipping_risk(
+        period: str,
+        status: str,
+        soc: float | None,
+        avg_live_solar_kw: float | None,
+    ) -> tuple[str, str | None]:
+        """Promote Amber forecast status to Green when live clipping risk is high.
+
+        This runtime correction handles cases where forecast underestimates irradiance.
+        If live solar is already near inverter ceiling and battery SOC is high, we
+        treat the period as Green for decision purposes so headroom export logic can
+        run preemptively.
+
+        Args:
+            period: Current period name (e.g., Morn/Aftn/Eve).
+            status: Forecast status for the period.
+            soc: Current battery SOC percentage.
+            avg_live_solar_kw: Rolling live solar average in kW.
+
+        Returns:
+            Tuple of (effective_status, override_reason). override_reason is None
+            when no promotion is applied.
+        """
+        status_key = (status or "").upper()
+        period_key = (period or "").upper()
+
+        if period_key not in {"MORN", "AFTN"}:
+            return status, None
+        if status_key != "AMBER":
+            return status, None
+        if soc is None or soc < CLIPPING_BATTERY_SOC_HIGH_PERCENT:
+            return status, None
+        if avg_live_solar_kw is None:
+            return status, None
+
+        trigger_kw = INVERTER_KW - CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW
+        if avg_live_solar_kw < trigger_kw:
+            return status, None
+
+        reason = (
+            "Live clipping-risk override: promoting AMBER to GREEN because "
+            f"SOC={soc:.1f}% and avg live solar={avg_live_solar_kw:.2f} kW is near "
+            f"inverter ceiling ({INVERTER_KW:.1f} kW)."
+        )
+        return "Green", reason
 
     def log_check(
         period: str,
@@ -772,6 +1159,20 @@ async def run_scheduler() -> None:
 
         await sample_live_solar_power(now)
 
+        override_active = await maybe_restore_timed_grid_export(now)
+        if override_active:
+            logger.info(
+                "[TIMED EXPORT] Override active until %s; skipping normal mode decisions this tick.",
+                timed_export_override["restore_at"],
+            )
+            logger.info(
+                f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "
+                f"Next check in {POLL_INTERVAL_SECONDS // 60} minutes."
+            )
+            await archive_inverter_telemetry("scheduler_tick", now)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            continue
+
         if night_state["mode_set_for"] is not None and night_state["mode_set_for"] < today:
             night_state["mode_set_for"] = None
             night_state["mode_phase"] = None
@@ -915,6 +1316,12 @@ async def run_scheduler() -> None:
                     headroom_target_kwh = HEADROOM_TARGET_KWH
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     solar_avg_kw_3 = get_live_solar_average_kw()
+                    decision_status, status_override_reason = promote_status_for_live_clipping_risk(
+                        period,
+                        status,
+                        soc,
+                        solar_avg_kw_3,
+                    )
                     effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
                     lead_time_hours_adjusted = 0.0
                     if headroom_deficit > 0:
@@ -933,7 +1340,7 @@ async def run_scheduler() -> None:
 
                     mode, reason = decide_operational_mode(
                         period=period,
-                        status=status,
+                        status=decision_status,
                         soc=soc,
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
@@ -945,17 +1352,23 @@ async def run_scheduler() -> None:
                         bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
                         enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
                     )
+                    if status_override_reason is not None:
+                        reason = f"{status_override_reason} {reason}"
 
                     if now >= export_by:
                         outcome = "pre-period export triggered"
                         if mode == SIGEN_MODES["GRID_EXPORT"]:
+                            duration_minutes = max(
+                                1,
+                                math.ceil((period_start - now).total_seconds() / 60),
+                            )
                             log_check(
                                 period,
                                 "PRE-PERIOD",
                                 now_utc=now,
                                 period_start_utc=period_start,
                                 solar_value=solar_value,
-                                status=status,
+                                status=decision_status,
                                 period_solar_kwh=period_solar_kwh,
                                 soc=soc,
                                 headroom_kwh=headroom_kwh,
@@ -969,13 +1382,19 @@ async def run_scheduler() -> None:
                                 reason=reason,
                                 outcome=outcome,
                             )
-                            await apply_mode_change(
-                                sigen=sigen,
-                                mode=mode,
-                                period=f"{period} (pre-period)",
+                            override_started = await start_timed_grid_export(
+                                period=period,
                                 reason=reason,
-                                mode_names=mode_names,
+                                duration_minutes=duration_minutes,
+                                now_utc=now,
                             )
+                            if not override_started:
+                                logger.warning(
+                                    "[%s] Timed export activation did not start; leaving pre-period "
+                                    "check eligible for retry on next tick.",
+                                    period,
+                                )
+                                continue
                         else:
                             log_check(
                                 period,
@@ -983,7 +1402,7 @@ async def run_scheduler() -> None:
                                 now_utc=now,
                                 period_start_utc=period_start,
                                 solar_value=solar_value,
-                                status=status,
+                                status=decision_status,
                                 period_solar_kwh=period_solar_kwh,
                                 soc=soc,
                                 headroom_kwh=headroom_kwh,
@@ -1005,7 +1424,7 @@ async def run_scheduler() -> None:
                             now_utc=now,
                             period_start_utc=period_start,
                             solar_value=solar_value,
-                            status=status,
+                            status=decision_status,
                             period_solar_kwh=period_solar_kwh,
                             soc=soc,
                             headroom_kwh=headroom_kwh,
@@ -1024,12 +1443,19 @@ async def run_scheduler() -> None:
             if not s["start_set"] and now >= period_start:
                 soc = await fetch_soc(period)
                 if soc is not None:
+                    solar_avg_kw_3 = get_live_solar_average_kw()
+                    decision_status, status_override_reason = promote_status_for_live_clipping_risk(
+                        period,
+                        status,
+                        soc,
+                        solar_avg_kw_3,
+                    )
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
                     headroom_target_kwh = HEADROOM_TARGET_KWH
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     mode, reason = decide_operational_mode(
                         period=period,
-                        status=status,
+                        status=decision_status,
                         soc=soc,
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
@@ -1041,6 +1467,8 @@ async def run_scheduler() -> None:
                         bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
                         enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
                     )
+                    if status_override_reason is not None:
+                        reason = f"{status_override_reason} {reason}"
                     
                     # Check if Evening period should use AI Mode for profit-max arbitrage
                     use_ai_mode, ai_mode_reason = should_use_ai_mode_for_evening(period, now)
@@ -1054,7 +1482,7 @@ async def run_scheduler() -> None:
                         now_utc=now,
                         period_start_utc=period_start,
                         solar_value=solar_value,
-                        status=status,
+                        status=decision_status,
                         period_solar_kwh=period_solar_kwh,
                         soc=soc,
                         headroom_kwh=headroom_kwh,

@@ -1,0 +1,3 @@
+This chapter is mainly used to obtain information about authorized power stations and equipment. For service providers with keys, they mainly obtain data of power stations that have undergone the onboard process but not the offboard process. For service providers using accounts, the data of power stations within the account's authority are obtained.
+
+It should be noted that these two processes are isolated from each other. If a service provider has both of these authorization methods, it cannot cross-access the power station data under the corresponding authorities.

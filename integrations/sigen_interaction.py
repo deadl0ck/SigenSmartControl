@@ -89,6 +89,28 @@ class SigenInteraction:
             logger.info("************************************************************************************************")
             logger.info("************************************************************************************************")
 
+    async def export_to_grid(self, num_mins: int) -> Any:
+        """Switch the inverter to fully fed-to-grid mode.
+
+        This method only performs the mode switch. The scheduler controls how long
+        export stays active and when to restore the previous mode.
+
+        Args:
+            num_mins: Intended active export duration in minutes, used for logging.
+
+        Returns:
+            Response dict from the API or simulator.
+        """
+        duration_minutes = max(1, int(num_mins))
+        logger.info(
+            "[TIMED EXPORT] Requesting GRID_EXPORT for %s minutes (scheduler-managed restore).",
+            duration_minutes,
+        )
+        response = await self.set_operational_mode(SIGEN_MODES["GRID_EXPORT"])
+        if isinstance(response, dict):
+            response.setdefault("timed_export_minutes", duration_minutes)
+        return response
+
     async def get_energy_flow(self) -> dict[str, Any]:
         """Get current energy flow telemetry from the inverter.
         

@@ -51,31 +51,43 @@ def test_suppress_elapsed_periods_except_latest_noop_when_single_or_none_elapsed
 
 
 @pytest.mark.asyncio
-async def test_create_scheduler_interaction_returns_none_in_full_sim_on_auth_failure(
+async def test_create_scheduler_interaction_exits_after_retries_in_full_sim_on_auth_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    calls = {"count": 0}
+
     async def fake_create():
+        calls["count"] += 1
         raise Exception("auth failed")
 
     monkeypatch.setattr(main, "FULL_SIMULATION_MODE", True)
     monkeypatch.setattr(main.SigenInteraction, "create", fake_create)
 
-    result = await main.create_scheduler_interaction({})
-    assert result is None
+    with pytest.raises(SystemExit) as exc:
+        await main.create_scheduler_interaction({})
+
+    assert exc.value.code == 1
+    assert calls["count"] == 3
 
 
 @pytest.mark.asyncio
-async def test_create_scheduler_interaction_raises_when_not_in_simulation(
+async def test_create_scheduler_interaction_exits_after_retries_when_not_in_simulation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    calls = {"count": 0}
+
     async def fake_create():
+        calls["count"] += 1
         raise Exception("auth failed")
 
     monkeypatch.setattr(main, "FULL_SIMULATION_MODE", False)
     monkeypatch.setattr(main.SigenInteraction, "create", fake_create)
 
-    with pytest.raises(Exception, match="auth failed"):
+    with pytest.raises(SystemExit) as exc:
         await main.create_scheduler_interaction({})
+
+    assert exc.value.code == 1
+    assert calls["count"] == 3
 
 
 @pytest.mark.asyncio

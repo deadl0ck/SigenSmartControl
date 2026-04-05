@@ -55,6 +55,7 @@ see exactly what values were used and why each decision was made.
 │   └── decision_logic.py             # Shared decision logic used by runtime and web simulator
 ├── integrations/
 │   ├── sigen_auth.py                 # Authentication and singleton creation for Sigen API client
+│   ├── sigen_official.py             # Official OpenAPI client (account/key auth, endpoint overrides)
 │   ├── sigen_interaction.py          # SigenInteraction wrapper for Sigen API calls
 │   └── tools/                        # Sigen diagnostics scripts (mode listing and API config checks)
 ├── weather/
@@ -300,6 +301,33 @@ The export and mode-selection logic is centralized in `logic/decision_logic.py`.
 
 All direct Sigen API calls are centralized in `integrations/sigen_interaction.py` via `SigenInteraction`.
 
+### Official OpenAPI integration (`integrations/sigen_official.py`)
+
+The project includes an official API client implementation that can be used by the
+interaction layer when running against OpenAPI endpoints:
+
+- Supports both account auth and app key/secret auth
+- Auto-discovers `system_id` from the system list when not explicitly configured
+- Allows endpoint path overrides via environment variables so path changes can be
+	handled without code edits
+- Keeps a compatibility mode for account auth payload variants observed across
+	different tenants/regions
+
+Important constraints:
+
+- We do not currently have access to every official API capability in all environments.
+- Some endpoints documented in the official markdown may be unavailable or permission-
+	restricted depending on tenant, app type, and account scopes.
+- Observed mode values can include legacy/account values beyond the small public enum
+	subset, so the client preserves both officially documented and observed values.
+
+Operational recommendation:
+
+- Treat `.github/reference/Sigen API/API Documentation/` as source of truth for
+	endpoint semantics.
+- Validate endpoint availability against your own account credentials before assuming
+	a documented endpoint can be used in production.
+
 Both of these use the same shared code path:
 
 - `main.py` runtime scheduler
@@ -312,7 +340,7 @@ That ensures the simulator and the live runtime cannot drift apart.
 Battery headroom is the free storage space remaining in the battery:
 
 $$
-\text{headroom\_kwh} = \text{battery\_kwh} \times \left(1 - \frac{\text{soc}}{100}\right)
+	ext{headroom} = \text{battery capacity} \times \left(1 - \frac{\text{SOC}}{100}\right)
 $$
 
 Example:
@@ -329,13 +357,13 @@ $$
 For the web simulator, expected solar for a period is:
 
 $$
-\text{period\_solar\_kwh} = \min(\text{solar\_pv\_kw}, \text{inverter\_kw}) \times 3.0
+	ext{period solar} = \min(\text{solar PV kW}, \text{inverter kW}) \times 3.0
 $$
 
 For the runtime scheduler, the period forecast value is read in watts and converted to kWh over an assumed 3-hour period:
 
 $$
-\text{period\_solar\_kwh} = \min\left(\frac{\text{forecast\_watts}}{1000}, \text{solar\_pv\_kw}, \text{inverter\_kw}\right) \times 3.0
+	ext{period solar} = \min\left(\frac{\text{forecast watts}}{1000}, \text{solar PV kW}, \text{inverter kW}\right) \times 3.0
 $$
 
 ### Export-to-grid rules
@@ -347,14 +375,14 @@ The system exports to grid under these conditions.
 The target free headroom is derived from hardware surplus capacity multiplied by a 3-hour reserve window:
 
 $$
-\text{headroom\_target\_kwh} = (\text{solar\_pv\_kw} - \text{inverter\_kw}) \times 3.0 = (8.9 - 5.5) \times 3.0 = 10.2 \text{ kWh}
+	ext{headroom target} = (\text{solar PV kW} - \text{inverter kW}) \times 3.0 = (8.9 - 5.5) \times 3.0 = 10.2 \text{ kWh}
 $$
 
 This fixed target ensures the battery can absorb 3 hours of maximum surplus generation (3.4 kW) without clipping, independent of forecast quality or period.
 
 If:
 $$
-\text{headroom\_kwh} < \text{headroom\_target\_kwh}
+	ext{headroom} < \text{headroom target}
 $$
 
 then the system selects `GRID_EXPORT` to create battery space ahead of the solar period.
@@ -385,21 +413,21 @@ If more battery headroom is needed before the upcoming period, the scheduler est
 Headroom deficit:
 
 $$
-\text{headroom\_deficit\_kwh} = \max(0, \text{headroom\_target\_kwh} - \text{headroom\_kwh})
+	ext{headroom deficit} = \max(0, \text{headroom target} - \text{headroom})
 $$
 
 Lead time before the period:
 
 $$
-	ext{solar\_avg\_kw\_3} = \text{average of latest 3 live solar readings}
+	ext{solar avg kW (latest 3)} = \text{average of latest 3 live solar readings}
 $$
 
 $$
-	ext{effective\_battery\_export\_kw} = \max(0.2, \text{inverter\_kw} - \text{solar\_avg\_kw\_3})
+	ext{effective battery export kW} = \max(0.2, \text{inverter kW} - \text{solar avg kW (latest 3)})
 $$
 
 $$
-	ext{lead\_time\_hours} = \frac{\text{headroom\_deficit\_kwh} \times \text{export\_lead\_buffer\_multiplier}}{\text{effective\_battery\_export\_kw}}
+	ext{lead time hours} = \frac{\text{headroom deficit} \times \text{export lead buffer multiplier}}{\text{effective battery export kW}}
 $$
 
 This causes earlier export start when live solar is already high (because less inverter headroom remains for battery discharge).
@@ -407,7 +435,7 @@ This causes earlier export start when live solar is already high (because less i
 The scheduler then calculates:
 
 $$
-\text{export\_by} = \text{period\_start} - \text{lead\_time}
+	ext{export by} = \text{period start} - \text{lead time}
 $$
 
 When current time is at or after `export_by`, it can trigger the pre-period export decision.
@@ -710,3 +738,7 @@ python -m pytest -q --cov=. --cov-report=term-missing
 - The runtime scheduler is self-contained and does not require cron.
 - The decision logic is centralized so runtime and simulator stay aligned.
 - Sunrise/sunset times are used to derive dynamic daytime period boundaries.
+- The official client in `integrations/sigen_official.py` includes fallback auth
+	behavior because endpoint and payload acceptance can vary by environment.
+- Not all official API endpoints are currently accessible in every tenant/account;
+	docs may describe capabilities that your credentials cannot invoke.

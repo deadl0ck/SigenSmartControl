@@ -36,6 +36,9 @@ DEFAULT_SIMULATED_SOC_PERCENT = 80.0
 # Full simulation mode: reads data and logs intended actions but never sends
 # inverter mode-change commands.
 FULL_SIMULATION_MODE = True
+# Maximum allowed duration for timed grid export override (minutes) — prevents accidental
+# over-discharge or excessive grid arbitrage cycles.
+MAX_TIMED_EXPORT_MINUTES = 240
 # Whether the scheduler should explicitly apply the configured night mode.
 NIGHT_MODE_ENABLED = True
 # Whether the scheduler should perform a night-before pre-check for the next morning.
@@ -169,8 +172,8 @@ FORECAST_TO_MODE = {
     "GREEN": SIGEN_MODES["SELF_POWERED"],
     # Amber: Moderate solar, let AI optimize
     "AMBER": SIGEN_MODES["AI"],
-    # Red: Poor solar, use TOU to optimize for tariffs
-    "RED": SIGEN_MODES["TOU"],
+    # Red: Poor solar, let AI handle low-generation periods
+    "RED": SIGEN_MODES["AI"],
 }
 
 # ==============================
@@ -178,8 +181,8 @@ FORECAST_TO_MODE = {
 # ==============================
 # Map schedule period (NIGHT/DAY/PEAK) to Sigen operational mode.
 PERIOD_TO_MODE = {
-    # Night: cheap-rate window, charge battery if needed
-    "NIGHT": SIGEN_MODES["TOU"],
+    # Night: cheap-rate window behavior (set to AI since no TOU profiles are defined)
+    "NIGHT": SIGEN_MODES["AI"],
     # Day: normal solar hours, let AI or self-powered logic decide
     "DAY": SIGEN_MODES["AI"],
     # Peak: high-demand hours, maximize self-consumption
@@ -187,7 +190,7 @@ PERIOD_TO_MODE = {
 }
 
 # Mode used before cheap-rate starts overnight.
-# This prevents the system from moving into charge-oriented TOU mode too early.
+# This prevents the system from moving into cheap-rate night behavior too early.
 PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:

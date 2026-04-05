@@ -74,7 +74,7 @@ async def test_control_loop():
     assert sigen.set_modes == [
         SIGEN_MODES["SELF_POWERED"],
         SIGEN_MODES["AI"],
-        SIGEN_MODES["TOU"],
+        SIGEN_MODES["AI"],
     ]
     logger.info("[RESULT] test_control_loop: PASSED - Control loop selected correct modes for each period and called set_operational_mode as expected.")
     logger.info(f"[TEST] Control loop assertions passed.")

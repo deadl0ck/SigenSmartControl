@@ -133,7 +133,7 @@ def get_night_schedule_mode(now_utc: datetime) -> tuple[int, str, str]:
         "pre-cheap-rate",
         (
             f"Local time {local_now.strftime('%H:%M')} is outside the cheap-rate window "
-            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding pre-cheap-rate mode to avoid charging before cheap rates."
+            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding pre-cheap-rate mode until cheap-rate window opens."
         ),
     )
 

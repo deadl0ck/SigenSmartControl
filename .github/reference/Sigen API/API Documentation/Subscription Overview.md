@@ -1,0 +1,6 @@
+For service providers who have a passive need to obtain power station data, we offer three data push methods: periodic push, push upon change, and alarm push.
+- **Periodic Push**: It mainly pushes data with a high frequency of change, such as electricity quantity, power, current, voltage, etc.
+- **Change Push**: It mainly pushes data with a low frequency of change, such as rated data, system configuration data, etc.
+- **Alarm Push**: When an alarm occurs in the power station, relevant alarm information will be pushed.
+
+Service providers can obtain the data by executing the following subscription interface. If they no longer need the data, they can cancel the subscription. It should be noted that for the power stations where the interfaces in this chapter are executed, the service providers are required to have the execution authority for these power stations. If the service providers do not have the authority, customers with keys need to perform the onboard operation on the power stations.

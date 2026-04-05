@@ -7,6 +7,13 @@ description: "Use when: writing or refactoring Python code for the Sigen inverte
 
 This document defines the coding practices and preferences for the Sigen inverter control system project. All code contributions should follow these conventions.
 
+## Official API Reference Priority
+
+- For any question or implementation work involving the Sigen official API, consult the markdown files under `.github/reference/Sigen API/API Documentation/` first.
+- Treat those files as the source of truth for authentication flows, endpoints, payload/response fields, enums, modes, telemetry signals, and command semantics.
+- If code assumptions conflict with the official API docs, call out the mismatch clearly and align implementation with the official docs unless explicitly told otherwise.
+- When relevant, also consult `.github/reference/Sigen API/User Manual/` for onboarding and workflow context.
+
 ## File Organization & Structure
 
 ### File Length

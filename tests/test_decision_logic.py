@@ -111,7 +111,7 @@ def test_evening_red_uses_self_powered_when_battery_can_bridge_to_cheap_rate():
     assert "Evening bridge rule" in reason
 
 
-def test_evening_red_falls_back_to_tou_when_bridge_energy_is_insufficient():
+def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
     mode, reason = decide_operational_mode(
         period="Eve",
         status="Red",
@@ -126,5 +126,5 @@ def test_evening_red_falls_back_to_tou_when_bridge_energy_is_insufficient():
         enable_pre_cheap_rate_battery_bridge=True,
     )
 
-    assert mode == SIGEN_MODES["TOU"]
+    assert mode == SIGEN_MODES["AI"]
     assert "Default mapping for Red" in reason

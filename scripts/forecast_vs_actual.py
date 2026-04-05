@@ -2,14 +2,21 @@
 ---------------------------------
 Utility script: compare solar forecast predictions against actual logged generation.
 
+Forecast data sources:
+    - ESB: Solar forecast INDEX (not watts)
+      - Red: 100 (low solar)
+      - Amber: 300 (medium solar)
+      - Green: 500 (high solar)
+    - Quartz: Power forecast in WATTS (actual power estimate)
+
 Run from the project root:
     python scripts/forecast_vs_actual.py
 
 For each date/period that has telemetry data, prints:
-    - ESB forecast status (primary provider, county-level synthetic)
-    - Quartz forecast kW and accuracy percentage versus measured average
-    - Quartz status derived from configured site-capacity thresholds
-    - Calibrated forecast kW (ESB × fitted period multiplier from observed data)
+    - ESB solar forecast index + status (primary provider, county-level synthetic)
+    - Quartz power forecast in watts + status (secondary provider, site-level)
+    - Forecast accuracy percentage versus measured average
+    - Calibrated forecast equivalent (ESB index × fitted period multiplier)
     - Actual average kW measured by the inverter
     - Actual classification with explicit basis (Array or Inverter)
     - Clipping events flagged in that window
@@ -350,19 +357,38 @@ def build_period_rows(
 
 def build_forecast_rows(
     records: list[dict[str, Any]],
-) -> dict[tuple[str, str], dict[str, float | None]]:
-    """Extract ESB and Quartz forecasts by (date, period) from comparison archive.
+) -> dict[tuple[str, str], dict[str, float | str | None]]:
+    """Extract ESB solar forecast indices and Quartz power forecasts by (date, period).
+
+    ESB provides a solar forecast INDEX (not watts):
+    - Red: 100 (low solar)
+    - Amber: 300 (medium solar)
+    - Green: 500 (high solar)
+
+    Quartz provides power forecast in WATTS.
+
+    Uses the EARLIEST record for each (date, period), which represents the forecast
+    closest to the decision-making time. This allows comparison against the forecasts
+    that actually drove scheduling decisions.
 
     Args:
         records: All forecast comparison records from the archive.
 
     Returns:
         Dict keyed by (date, period). Each value contains:
-          - esb_w: ESB forecast in watts (or None)
-          - quartz_w: Quartz forecast in watts (or None)
+          - esb_w: ESB solar forecast index (or None). Values: 100 (Red), 300 (Amber), 500 (Green).
+          - esb_status: ESB status string Red/Amber/Green (or None)
+          - quartz_w: Quartz power forecast in watts (or None)
+          - quartz_status: Quartz status string Red/Amber/Green (or None)
     """
-    rows: dict[tuple[str, str], dict[str, float | None]] = defaultdict(
-        lambda: {"esb_w": None, "quartz_w": None}
+    rows: dict[tuple[str, str], dict[str, float | str | None]] = defaultdict(
+        lambda: {
+            "esb_w": None,
+            "esb_status": None,
+            "quartz_w": None,
+            "quartz_status": None,
+            "captured_at": None,
+        }
     )
     for rec in records:
         ts = rec.get("captured_at", "")
@@ -376,20 +402,26 @@ def build_forecast_rows(
                 continue
             key = (date, period_name)
 
-            primary = (period_data or {}).get("primary")
-            if primary and primary.get("value_w") is not None:
-                rows[key]["esb_w"] = primary.get("value_w")
+            # Only update if this is the first record for this period (earliest = closest to decision)
+            if rows[key]["captured_at"] is None or ts < rows[key]["captured_at"]:
+                rows[key]["captured_at"] = ts
 
-            secondary = (period_data or {}).get("secondary")
-            if secondary and secondary.get("value_w") is not None:
-                rows[key]["quartz_w"] = secondary.get("value_w")
+                primary = (period_data or {}).get("primary")
+                if primary and primary.get("value_w") is not None:
+                    rows[key]["esb_w"] = primary.get("value_w")
+                    rows[key]["esb_status"] = primary.get("status")
+
+                secondary = (period_data or {}).get("secondary")
+                if secondary and secondary.get("value_w") is not None:
+                    rows[key]["quartz_w"] = secondary.get("value_w")
+                    rows[key]["quartz_status"] = secondary.get("status")
 
     return rows
 
 
 def print_report(
     telemetry_rows: dict[tuple[str, str], dict[str, Any]],
-    forecast_rows: dict[tuple[str, str], dict[str, float | None]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
     calibration: dict[str, dict[str, float]],
 ) -> None:
     """Print the forecast accuracy report to stdout.
@@ -422,7 +454,20 @@ def print_report(
 
     verdicts: list[str] = []
 
-    for (date, period), telem in sorted(telemetry_rows.items()):
+    # Sort by date, then by period in time order (Morn, Aftn, Eve)
+    period_order = {"Morn": 0, "Aftn": 1, "Eve": 2}
+    sorted_items = sorted(
+        telemetry_rows.items(),
+        key=lambda x: (x[0][0], period_order.get(x[0][1], 999))
+    )
+
+    previous_date = None
+    for (date, period), telem in sorted_items:
+        # Add blank line between different days
+        if previous_date is not None and date != previous_date:
+            print()
+        previous_date = date
+        
         actuals = telem["actual_kw"]
         if not actuals:
             continue
@@ -439,8 +484,13 @@ def print_report(
 
         forecast = forecast_rows.get((date, period), {})
         esb_w = forecast.get("esb_w")
+        esb_status = forecast.get("esb_status")  # Use stored status from archive
         quartz_w = forecast.get("quartz_w")
+        quartz_status = forecast.get("quartz_status")  # Use stored status from archive
 
+        # Convert ESB forecast index to kW equivalent (for reporting purposes)
+        # ESB indices: Red=100, Amber=300, Green=500
+        # Quartz is already in watts, convert to kW
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
@@ -454,16 +504,9 @@ def print_report(
         buffered_kw = round(esb_kw * multiplier, 3) if esb_kw is not None else None
 
         # Format columns with percentages
-        esb_status = None
-        if esb_kw is not None:
-            esb_status = derive_status_from_power(esb_kw, SOLAR_PV_KW)
-            esb_s = esb_status
-        else:
-            esb_s = "N/A"
+        esb_s = esb_status if esb_status is not None else "N/A"
 
-        quartz_status = (
-            derive_status_from_power(quartz_kw, SOLAR_PV_KW) if quartz_kw is not None else "N/A"
-        )
+        quartz_s_status = quartz_status if quartz_status is not None else "N/A"
         quartz_s = (
             f"{quartz_kw:.3f} ({quartz_pct}%)"
             if quartz_kw is not None and quartz_pct is not None
@@ -483,7 +526,7 @@ def print_report(
 
         print(
             f"  {date:<12}  {period:<6}  "
-            f"{esb_s:>12}  {quartz_s:>12}  {quartz_status:>13}  {buf_s:>12}  "
+            f"{esb_s:>12}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
             f"{avg_actual:>10.2f}  {actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
 
