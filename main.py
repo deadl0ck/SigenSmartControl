@@ -35,8 +35,7 @@ from config.settings import (
     DAY_RATE_EVENING_END_HOUR,
     CHEAP_RATE_START_HOUR,
     CHEAP_RATE_END_HOUR,
-    HEADROOM_FRAC,
-    SOC_HIGH_THRESHOLD,
+    HEADROOM_TARGET_KWH,
     ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     ESTIMATED_HOME_LOAD_KW,
     BRIDGE_BATTERY_RESERVE_KWH,
@@ -292,8 +291,7 @@ async def main() -> None:
             headroom_kwh=headroom_kwh,
             period_solar_kwh=period_solar_kwh,
             tariff_period=get_tariff_period_for_time(datetime.now(timezone.utc)),
-            headroom_frac=HEADROOM_FRAC,
-            soc_high_threshold=SOC_HIGH_THRESHOLD,
+            headroom_target_kwh=HEADROOM_TARGET_KWH,
             battery_kwh=BATTERY_KWH,
             hours_until_cheap_rate=get_hours_until_cheap_rate(datetime.now(timezone.utc)),
             estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
@@ -636,7 +634,7 @@ async def run_scheduler() -> None:
     logger.info(
         f"[SCHEDULER] Starting. Will poll every {POLL_INTERVAL_MINUTES} minutes. "
         f"Max pre-period window: {MAX_PRE_PERIOD_WINDOW_MINUTES} minutes. "
-        f"Headroom fraction: {HEADROOM_FRAC:.2f}. SOC export threshold: {SOC_HIGH_THRESHOLD}%."
+        f"Headroom target: {HEADROOM_TARGET_KWH:.1f} kWh (surplus capacity × 3 h)."
     )
 
     while True:
@@ -685,10 +683,7 @@ async def run_scheduler() -> None:
                 night_context["target_period"],
                 night_context["solar_value"],
             )
-            night_headroom_target_kwh = (
-                night_period_solar_kwh
-                * get_period_calibration(forecast_calibration, night_context["target_period"])["headroom_fraction"]
-            )
+            night_headroom_target_kwh = HEADROOM_TARGET_KWH
             night_mode, night_phase, night_mode_reason = get_night_tariff_mode(now)
 
             if (
@@ -746,8 +741,7 @@ async def run_scheduler() -> None:
                             soc=soc,
                             headroom_kwh=headroom_kwh,
                             period_solar_kwh=night_period_solar_kwh,
-                            headroom_frac=HEADROOM_FRAC,
-                            soc_high_threshold=SOC_HIGH_THRESHOLD,
+                            headroom_target_kwh=HEADROOM_TARGET_KWH,
                         )
                         if mode == TARIFF_TO_MODE["NIGHT"] and not is_cheap_rate_window(now):
                             mode = PRE_CHEAP_RATE_MODE
@@ -816,7 +810,7 @@ async def run_scheduler() -> None:
                 soc = await fetch_soc(period)
                 if soc is not None:
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = period_solar_kwh * period_calibration["headroom_fraction"]
+                    headroom_target_kwh = HEADROOM_TARGET_KWH
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     if headroom_deficit > 0:
                         # Time needed = deficit (kWh) / inverter export capacity (kW), +10% buffer.
@@ -837,8 +831,7 @@ async def run_scheduler() -> None:
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
                         tariff_period=get_tariff_period_for_time(period_start),
-                        headroom_frac=period_calibration["headroom_fraction"],
-                        soc_high_threshold=SOC_HIGH_THRESHOLD,
+                        headroom_target_kwh=HEADROOM_TARGET_KWH,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),
                         estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
@@ -916,7 +909,7 @@ async def run_scheduler() -> None:
                 soc = await fetch_soc(period)
                 if soc is not None:
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = period_solar_kwh * period_calibration["headroom_fraction"]
+                    headroom_target_kwh = HEADROOM_TARGET_KWH
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     mode, reason = decide_operational_mode(
                         period=period,
@@ -925,8 +918,7 @@ async def run_scheduler() -> None:
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
                         tariff_period=get_tariff_period_for_time(period_start),
-                        headroom_frac=period_calibration["headroom_fraction"],
-                        soc_high_threshold=SOC_HIGH_THRESHOLD,
+                        headroom_target_kwh=HEADROOM_TARGET_KWH,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),
                         estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,

@@ -16,8 +16,7 @@ def test_night_preparation_uses_grid_export_when_headroom_is_insufficient():
         soc=90,
         headroom_kwh=0.2,
         period_solar_kwh=3.0,
-        headroom_frac=0.25,
-        soc_high_threshold=95,
+        headroom_target_kwh=10.2,
     )
 
     assert mode == SIGEN_MODES["GRID_EXPORT"]
@@ -31,8 +30,7 @@ def test_night_preparation_uses_night_mode_when_export_not_required():
         soc=40,
         headroom_kwh=10.0,
         period_solar_kwh=1.0,
-        headroom_frac=0.25,
-        soc_high_threshold=95,
+        headroom_target_kwh=10.2,
     )
 
     assert mode == TARIFF_TO_MODE["NIGHT"]
@@ -72,6 +70,7 @@ def test_peak_tariff_overrides_default_forecast_mode_to_self_powered():
         headroom_kwh=8.0,
         period_solar_kwh=1.0,
         tariff_period="PEAK",
+        headroom_target_kwh=10.2,
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
@@ -86,6 +85,7 @@ def test_peak_tariff_does_not_override_grid_export_rule():
         headroom_kwh=0.1,
         period_solar_kwh=3.0,
         tariff_period="PEAK",
+        headroom_target_kwh=10.2,
     )
 
     assert mode == SIGEN_MODES["GRID_EXPORT"]

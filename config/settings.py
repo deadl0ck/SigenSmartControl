@@ -60,10 +60,12 @@ CHEAP_RATE_END_HOUR = 8
 # ==============================
 # Decision Thresholds
 # ==============================
-# Fraction of expected solar energy to keep free in the battery as headroom.
-HEADROOM_FRAC = 0.25
-# If SOC is already above this threshold during a Green forecast, export to grid.
-SOC_HIGH_THRESHOLD = 95
+# Surplus solar capacity that cannot be stored when the inverter is at its AC ceiling.
+# This is the energy that would be clipped if the battery were already full.
+SURPLUS_CAPACITY_KW = SOLAR_PV_KW - INVERTER_KW  # e.g. 8.9 - 5.5 = 3.4 kW
+# Target free battery headroom before a Green period, sized to absorb the full
+# surplus output across one 3-hour period.
+HEADROOM_TARGET_KWH = SURPLUS_CAPACITY_KW * 3.0  # e.g. 3.4 × 3 = 10.2 kWh
 # Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
 # if current battery energy is sufficient to cover expected household demand.
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True

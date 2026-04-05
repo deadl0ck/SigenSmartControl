@@ -8,7 +8,7 @@ fetching from the real Sigen inverter. Allows users to explore different forecas
 battery states, and system configurations without live hardware.
 """
 
-from config.settings import SIGEN_MODES
+from config.settings import SIGEN_MODES, HEADROOM_TARGET_KWH
 from logic.decision_logic import (
     decide_operational_mode,
     decide_night_preparation_mode,
@@ -62,8 +62,7 @@ def simulate_sigen_decision(
             soc=soc,
             headroom_kwh=headroom_kwh,
             period_solar_kwh=period_solar_kwh,
-            headroom_frac=HEADROOM_FRAC,
-            soc_high_threshold=SOC_HIGH_THRESHOLD,
+            headroom_target_kwh=HEADROOM_TARGET_KWH,
         )
         results[period] = {
             "mode": mode,
@@ -79,8 +78,7 @@ def simulate_sigen_decision(
         soc=soc,
         headroom_kwh=calc_headroom_kwh(battery_kwh, soc),
         period_solar_kwh=next_morn_solar_kwh,
-        headroom_frac=HEADROOM_FRAC,
-        soc_high_threshold=SOC_HIGH_THRESHOLD,
+        headroom_target_kwh=HEADROOM_TARGET_KWH,
     )
     results["NightPrep"] = {
         "mode": prep_mode,

@@ -5,12 +5,11 @@ Core decision engine for operational mode selection based on solar forecast, bat
 and tariff periods. Used by both the scheduler (main.py) and web simulator.
 
 Implements a hierarchical decision tree:
-1. Headroom-based export rules (battery too low for forecast)
+1. Headroom-based export rule (battery space below physics-derived target)
 2. Night period detection
-3. SOC-based grid export rules
-4. Evening battery bridge rule (prevent premature charging)
-5. Forecast-to-mode mapping with tariff overrides
-6. Peak tariff self-powered override
+3. Evening battery bridge rule (prevent premature charging)
+4. Forecast-to-mode mapping with tariff overrides
+5. Peak tariff self-powered override
 """
 
 from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
@@ -37,8 +36,7 @@ def decide_operational_mode(
     period_solar_kwh: float,
     *,
     tariff_period: str | None = None,
-    headroom_frac: float = 0.25,
-    soc_high_threshold: float = 95,
+    headroom_target_kwh: float = 0.0,
     battery_kwh: float | None = None,
     hours_until_cheap_rate: float | None = None,
     estimated_home_load_kw: float | None = None,
@@ -48,22 +46,21 @@ def decide_operational_mode(
     """Determine the optimal inverter operational mode for current conditions.
     
     Implements a hierarchical decision tree:
-    1. Export if headroom is insufficient for forecast solar
+    1. Export if headroom is below the physics-derived target before a Green period
     2. Use tariff mode if night period
-    3. Export if SOC is high (>= soc_high_threshold) and forecast is Green
-    4. Evening bridge: use self-powered if battery can cover load until cheap rate
-    5. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
-    6. Peak tariff override: prioritize self-powered during expensive hours
+    3. Evening bridge: use self-powered if battery can cover load until cheap rate
+    4. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
+    5. Peak tariff override: prioritize self-powered during expensive hours
     
     Args:
         period: Current period name (e.g., 'Morn', 'Aftn', 'Eve', 'Night').
         status: Solar forecast status ('GREEN', 'AMBER', 'RED').
         soc: Current battery state-of-charge (0-100), or None if unavailable.
         headroom_kwh: Available battery headroom for charging, or None if SOC unavailable.
-        period_solar_kwh: Estimated solar energy available in this period.
+        period_solar_kwh: Estimated solar energy available in this period (used in reason text).
         tariff_period: Current tariff period ('NIGHT', 'PEAK', 'DAY'), or None.
-        headroom_frac: Fraction of period solar energy to reserve as headroom (default 0.25).
-        soc_high_threshold: SOC percentage at which to trigger grid export (default 95).
+        headroom_target_kwh: Required free headroom in kWh before a Green period. Derived
+            from hardware surplus capacity: (SOLAR_PV_KW - INVERTER_KW) × period_hours.
         battery_kwh: Total battery capacity, needed for evening bridge rule.
         hours_until_cheap_rate: Hours until cheap-rate tariff starts, needed for bridge rule.
         estimated_home_load_kw: Average household load in kW, needed for bridge rule.
@@ -81,23 +78,18 @@ def decide_operational_mode(
         soc is not None
         and status_key == "GREEN"
         and headroom_kwh is not None
-        and headroom_kwh < period_solar_kwh * headroom_frac
+        and headroom_kwh < headroom_target_kwh
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
         reason = (
-            f"Headroom ({headroom_kwh:.2f} kWh) < {headroom_frac*100:.0f}% of expected solar "
-            f"({period_solar_kwh:.2f} kWh). Preemptively exporting to grid."
+            f"Headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
+            "Preemptively exporting to grid."
         )
         return mode, reason
 
     if period_key == "NIGHT":
         mode = TARIFF_TO_MODE["NIGHT"]
         reason = "Night period detected. Using tariff-based mode."
-        return mode, reason
-
-    if soc is not None and soc >= soc_high_threshold and status_key == "GREEN":
-        mode = SIGEN_MODES["GRID_EXPORT"]
-        reason = f"SOC >= {soc_high_threshold}% and forecast is Green. Exporting to grid."
         return mode, reason
 
     # Before cheap-rate starts, prefer battery usage over charge-oriented behavior
@@ -144,26 +136,24 @@ def decide_night_preparation_mode(
     headroom_kwh: float | None,
     period_solar_kwh: float,
     *,
-    headroom_frac: float = 0.25,
-    soc_high_threshold: float = 95,
+    headroom_target_kwh: float = 0.0,
 ) -> tuple[int, str]:
     """Determine the mode to prepare battery for the next daytime period.
     
-    Called during night-time pre-check phase to decide whether to charge the battery
-    in preparation for tomorrow's solar generation, or stay in a holding mode.
+    Called during night-time pre-check phase to decide whether to export ahead of
+    tomorrow's solar generation, or stay in a holding mode.
     
     Args:
         target_period: Next daytime period to prepare for (e.g., 'Morn').
         status: Tomorrow's solar forecast status ('GREEN', 'AMBER', 'RED').
         soc: Current battery state-of-charge (0-100).
         headroom_kwh: Available battery headroom for charging.
-        period_solar_kwh: Estimated solar energy in the target period.
-        headroom_frac: Fraction of period solar to reserve as headroom (default 0.25).
-        soc_high_threshold: SOC percentage at which grid export is triggered (default 95).
+        period_solar_kwh: Estimated solar energy in the target period (used in reason text).
+        headroom_target_kwh: Required free headroom in kWh before the target period.
         
     Returns:
         Tuple of (mode_value: int, reason: str). If tomorrow's forecast requires export,
-        returns GRID_EXPORT to begin charging now; otherwise returns NIGHT tariff mode.
+        returns GRID_EXPORT; otherwise returns NIGHT tariff mode.
     """
     if not target_period or not status:
         mode = TARIFF_TO_MODE["NIGHT"]
@@ -175,8 +165,7 @@ def decide_night_preparation_mode(
         soc=soc,
         headroom_kwh=headroom_kwh,
         period_solar_kwh=period_solar_kwh,
-        headroom_frac=headroom_frac,
-        soc_high_threshold=soc_high_threshold,
+        headroom_target_kwh=headroom_target_kwh,
     )
     if mode == SIGEN_MODES["GRID_EXPORT"]:
         return mode, f"Next-day preparation for {target_period}: {reason}"

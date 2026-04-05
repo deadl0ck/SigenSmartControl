@@ -15,7 +15,7 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config.settings import HEADROOM_FRAC, LOCAL_TIMEZONE
+from config.settings import LOCAL_TIMEZONE
 from config.constants import FORECAST_CALIBRATION_PATH, INVERTER_TELEMETRY_ARCHIVE_PATH
 from telemetry.telemetry_archive import derive_clipping_metrics
 
@@ -32,7 +32,6 @@ def _default_period_calibration() -> dict[str, float]:
     """Return baseline calibration values for one daytime period."""
     return {
         "power_multiplier": DEFAULT_POWER_MULTIPLIER,
-        "headroom_fraction": HEADROOM_FRAC,
         "export_lead_buffer_multiplier": DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
         "telemetry_samples": 0,
         "ratios_used": 0,
@@ -197,10 +196,6 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         else:
             target_multiplier = prior_period["power_multiplier"]
 
-        target_headroom_fraction = max(
-            HEADROOM_FRAC,
-            min(0.45, HEADROOM_FRAC + (0.10 * clipping_rate) + (0.05 * max(0.0, target_multiplier - 1.0))),
-        )
         target_lead_buffer = max(
             DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
             min(
@@ -219,16 +214,6 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
                     max_step=0.08,
                     minimum=0.85,
                     maximum=1.5,
-                ),
-                3,
-            ),
-            "headroom_fraction": round(
-                _bounded_step(
-                    float(prior_period["headroom_fraction"]),
-                    float(target_headroom_fraction),
-                    max_step=0.03,
-                    minimum=HEADROOM_FRAC,
-                    maximum=0.45,
                 ),
                 3,
             ),
@@ -262,7 +247,6 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         logger.info(
             "[CALIBRATION] "
             f"{period}: multiplier={period_cal['power_multiplier']:.3f}, "
-            f"headroom_frac={period_cal['headroom_fraction']:.3f}, "
             f"lead_buffer={period_cal['export_lead_buffer_multiplier']:.3f}, "
             f"samples={period_cal['telemetry_samples']}, "
             f"clipping_rate={period_cal['clipping_rate']:.3f}"

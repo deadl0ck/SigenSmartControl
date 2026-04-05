@@ -125,8 +125,7 @@ NIGHT_RATE_CENTS_PER_KWH = 13.462
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
 SELL_RATE_CENTS_PER_KWH = 18.5
-HEADROOM_FRAC = 0.25
-SOC_HIGH_THRESHOLD = 95
+HEADROOM_TARGET_KWH = 10.2
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
@@ -154,8 +153,13 @@ Meaning:
 - `ESB_FORECAST_API_URL`: derived ESB endpoint for selected county id
 - `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
-- `HEADROOM_FRAC`: required free battery headroom as a fraction of expected solar energy for that period
-- `SOC_HIGH_THRESHOLD`: if forecast is Green and SOC is at or above this threshold, export to grid
+```python
+HEADROOM_TARGET_KWH = 10.2
+```
+
+Meaning:
+
+- `HEADROOM_TARGET_KWH`: fixed battery headroom target (10.2 kWh = surplus capacity × 3 hours)
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
@@ -214,12 +218,11 @@ Actual inverter telemetry is also archived locally for later analysis:
 Daily bounded calibration is also applied from that telemetry:
 
 - On daily forecast refresh, the scheduler reads recent telemetry from `data/inverter_telemetry.jsonl` and writes a bounded calibration artifact to `data/forecast_calibration.json`.
-- The calibration adjusts three numeric inputs per daytime period (`Morn`, `Aftn`, `Eve`):
+- The calibration adjusts two numeric inputs per daytime period (`Morn`, `Aftn`, `Eve`):
 	- `power_multiplier`: inflates forecast watts when recent actual PV has been consistently higher than forecast
-	- `headroom_fraction`: increases reserved battery headroom when clipping has been observed
 	- `export_lead_buffer_multiplier`: starts pre-export slightly earlier when clipping risk has been recurring
 - Changes are deliberately bounded per day so the system cannot swing too far overnight.
-- The rule structure does not self-rewrite. It keeps the existing decision logic, but feeds it better period-specific numeric inputs.
+- The rule structure does not self-rewrite. It keeps the existing decision logic with fixed hardware-based headroom targets.
 - Manual rebuild is also available with `python telemetry/forecast_calibration.py`.
 
 ### Mode mappings
@@ -286,7 +289,8 @@ For night:
 
 ### Quick examples
 
-- Green + high SOC -> `GRID_EXPORT` (headroom protection wins).
+- Green + headroom < 10.2 kWh -> `GRID_EXPORT` (insufficient space for incoming solar).
+- Green + headroom >= 10.2 kWh -> Follow forecast mode (battery can absorb the solar).
 - Amber + Peak tariff -> `SELF_POWERED` (peak override wins).
 - Red + normal Day tariff -> `TOU` (default forecast mapping).
 
@@ -338,15 +342,17 @@ $$
 
 ### Export-to-grid rules
 
-The system exports to grid under either of these conditions.
+The system exports to grid under these conditions.
 
 #### Rule 1: Insufficient headroom before a Green period
 
-The target free headroom is:
+The target free headroom is derived from hardware surplus capacity multiplied by a 3-hour reserve window:
 
 $$
-\text{headroom\_target\_kwh} = \text{period\_solar\_kwh} \times \text{HEADROOM\_FRAC}
+\text{headroom\_target\_kwh} = (\text{solar\_pv\_kw} - \text{inverter\_kw}) \times 3.0 = (8.9 - 5.5) \times 3.0 = 10.2 \text{ kWh}
 $$
+
+This fixed target ensures the battery can absorb 3 hours of maximum surplus generation (3.4 kW) without clipping, independent of forecast quality or period.
 
 If:
 $$
@@ -355,15 +361,7 @@ $$
 
 then the system selects `GRID_EXPORT` to create battery space ahead of the solar period.
 
-#### Rule 2: High SOC on a Green forecast
-
-If:
-
-$$
-\text{soc} \ge \text{SOC\_HIGH\_THRESHOLD}
-$$
-
-and the forecast status is `Green`, the system selects `GRID_EXPORT`.
+**Why this model is superior:** The old fraction-based model (0.25 × forecast) was fundamentally broken because it relied on ESB synthetic forecast categories (500W "Green" label) rather than real solar predictions. This led to ultra-small targets (0.375 kWh at SOC=100%) and essentially no early lead time. The physics model instead grounds the target in actual hardware constraints: *how much surplus power can the inverter not distribute?* This is deterministic, testable, and produces realistic lead times (~2 hours at SOC=100% for Green periods).
 
 ### Day and peak tariff influence
 
