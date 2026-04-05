@@ -16,7 +16,7 @@ from config.settings import (
     EVENING_AI_MODE_START_HOUR,
     SIGEN_MODES,
 )
-from logic.tariff_utils import LOCAL_TZ
+from logic.schedule_utils import LOCAL_TZ
 
 logger = logging.getLogger("sigen_control")
 ACTION_DIVIDER = "=" * 100

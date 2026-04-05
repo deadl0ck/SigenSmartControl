@@ -19,7 +19,7 @@ from integrations.sigen_interaction import SigenInteraction
 from config.settings import (
     LOG_LEVEL as CONFIG_LOG_LEVEL,
     SIGEN_MODES,
-    TARIFF_TO_MODE,
+    PERIOD_TO_MODE,
     PRE_CHEAP_RATE_MODE,
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
@@ -28,12 +28,12 @@ from config.settings import (
     NEXT_DAY_PRECHECK_ENABLED,
     NIGHT_PRECHECK_DELAY_MINUTES,
     LOCAL_TIMEZONE,
-    DAY_RATE_MORNING_START_HOUR,
-    DAY_RATE_MORNING_END_HOUR,
-    PEAK_RATE_START_HOUR,
-    PEAK_RATE_END_HOUR,
-    DAY_RATE_EVENING_START_HOUR,
-    DAY_RATE_EVENING_END_HOUR,
+    MORNING_START_HOUR,
+    MORNING_END_HOUR,
+    PEAK_START_HOUR,
+    PEAK_END_HOUR,
+    EVENING_START_HOUR,
+    EVENING_END_HOUR,
     CHEAP_RATE_START_HOUR,
     CHEAP_RATE_END_HOUR,
     HEADROOM_TARGET_KWH,
@@ -54,14 +54,14 @@ from logic.decision_logic import (
     decide_night_preparation_mode,
     calc_headroom_kwh,
 )
-from logic.tariff_utils import (
+from logic.schedule_utils import (
     _parse_utc,
     derive_period_windows,
     get_first_period_info,
     is_cheap_rate_window,
-    get_night_tariff_mode,
+    get_night_schedule_mode,
     get_hours_until_cheap_rate,
-    get_tariff_period_for_time,
+    get_schedule_period_for_time,
     suppress_elapsed_periods_except_latest,
     LOCAL_TZ,
 )
@@ -322,7 +322,7 @@ async def main() -> None:
             soc=soc,
             headroom_kwh=headroom_kwh,
             period_solar_kwh=period_solar_kwh,
-            tariff_period=get_tariff_period_for_time(datetime.now(timezone.utc)),
+            schedule_period=get_schedule_period_for_time(datetime.now(timezone.utc)),
             headroom_target_kwh=HEADROOM_TARGET_KWH,
             battery_kwh=BATTERY_KWH,
             hours_until_cheap_rate=get_hours_until_cheap_rate(datetime.now(timezone.utc)),
@@ -786,7 +786,7 @@ async def run_scheduler() -> None:
                 night_context["solar_value"],
             )
             night_headroom_target_kwh = HEADROOM_TARGET_KWH
-            night_mode, night_phase, night_mode_reason = get_night_tariff_mode(now)
+            night_mode, night_phase, night_mode_reason = get_night_schedule_mode(now)
 
             if (
                 night_state["mode_set_for"] != night_context["target_date"]
@@ -845,7 +845,7 @@ async def run_scheduler() -> None:
                             period_solar_kwh=night_period_solar_kwh,
                             headroom_target_kwh=HEADROOM_TARGET_KWH,
                         )
-                        if mode == TARIFF_TO_MODE["NIGHT"] and not is_cheap_rate_window(now):
+                        if mode == PERIOD_TO_MODE["NIGHT"] and not is_cheap_rate_window(now):
                             mode = PRE_CHEAP_RATE_MODE
                             reason = (
                                 f"{reason} Cheap-rate window has not opened yet, so using pre-cheap-rate mode "
@@ -937,7 +937,7 @@ async def run_scheduler() -> None:
                         soc=soc,
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
-                        tariff_period=get_tariff_period_for_time(period_start),
+                        schedule_period=get_schedule_period_for_time(period_start),
                         headroom_target_kwh=HEADROOM_TARGET_KWH,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),
@@ -1033,7 +1033,7 @@ async def run_scheduler() -> None:
                         soc=soc,
                         headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
-                        tariff_period=get_tariff_period_for_time(period_start),
+                        schedule_period=get_schedule_period_for_time(period_start),
                         headroom_target_kwh=HEADROOM_TARGET_KWH,
                         battery_kwh=BATTERY_KWH,
                         hours_until_cheap_rate=get_hours_until_cheap_rate(now),

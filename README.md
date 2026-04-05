@@ -224,7 +224,7 @@ Daily bounded calibration is also applied from that telemetry:
 
 ### Mode mappings
 
-`SIGEN_MODES`, `FORECAST_TO_MODE`, and `TARIFF_TO_MODE` are all defined in `config/settings.py`.
+`SIGEN_MODES`, `FORECAST_TO_MODE`, and `PERIOD_TO_MODE` are all defined in `config/settings.py`.
 
 ### Mode mappings in plain English
 
@@ -232,7 +232,7 @@ The easiest way to read this is:
 
 - `SIGEN_MODES` = the list of available inverter modes.
 - `FORECAST_TO_MODE` = your default weather rules.
-- `TARIFF_TO_MODE` = your default price-period rules.
+- `PERIOD_TO_MODE` = your default price-period rules.
 
 Current defaults in this project:
 
@@ -279,7 +279,7 @@ For daytime periods, read it like this:
 
 For night:
 
-1. Use night tariff behavior (`TARIFF_TO_MODE["NIGHT"]`) during cheap-rate hours.
+1. Use night tariff behavior (`PERIOD_TO_MODE["NIGHT"]`) during cheap-rate hours.
 2. Before cheap-rate starts, hold `PRE_CHEAP_RATE_MODE` to avoid early charge behavior.
 3. Optional next-day pre-check can prepare for tomorrow morning, but still respects pre-cheap-rate protection.
 
@@ -425,7 +425,7 @@ During the active night window it can do two separate things:
 For example, with cheap rates from 11pm to 8am:
 
 - after sunset but before 11pm, the system stays in pre-cheap-rate mode so it does not start charge-oriented night behavior too early
-- from 11pm to 8am local time, it can use `TARIFF_TO_MODE["NIGHT"]`
+- from 11pm to 8am local time, it can use `PERIOD_TO_MODE["NIGHT"]`
 - after 8am, if the first daytime period has not started yet, it falls back out of the cheap-rate night mode again
 
 The next-day pre-check uses the upcoming first daytime period, normally `Morn`.

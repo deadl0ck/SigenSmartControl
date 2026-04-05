@@ -1,21 +1,37 @@
+"""schedule_utils.py
+-----------------
+Time-based schedule period detection and cheap-rate window calculations.
+
+Provides helper functions for determining cheap-rate windows, schedule periods,
+hours until the cheap-rate window opens, and dividing solar days into scheduling periods.
 """
-"""Backward-compatibility shim — import from logic.schedule_utils instead."""
-from logic.schedule_utils import (  # noqa: F401
-    _parse_utc,
-    derive_period_windows,
-    get_first_period_info,
-    is_cheap_rate_window,
-    get_night_schedule_mode as get_night_tariff_mode,
-    get_hours_until_cheap_rate,
-    get_schedule_period_for_time as get_tariff_period_for_time,
-    suppress_elapsed_periods_except_latest,
-    LOCAL_TZ,
+
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from config.settings import (
+    CHEAP_RATE_START_HOUR,
+    CHEAP_RATE_END_HOUR,
+    EVENING_END_HOUR,
+    EVENING_START_HOUR,
+    MORNING_END_HOUR,
+    MORNING_START_HOUR,
+    PEAK_END_HOUR,
+    PEAK_START_HOUR,
+    PERIOD_TO_MODE,
+    PRE_CHEAP_RATE_MODE,
+    LOCAL_TIMEZONE,
 )
+
+LOCAL_TZ = ZoneInfo(LOCAL_TIMEZONE)
+
+
+def _parse_utc(iso_str: str) -> datetime:
     """Parse an ISO 8601 timestamp, ensuring it carries UTC tzinfo.
-    
+
     Args:
         iso_str: ISO 8601 formatted timestamp string.
-        
+
     Returns:
         Timezone-aware datetime with UTC tzinfo.
     """
@@ -31,15 +47,15 @@ def derive_period_windows(
     period_names: list[str],
 ) -> dict[str, datetime]:
     """Divide the solar day into equal windows and return each period's start time (UTC).
-    
+
     With the default three periods (Morn/Aftn/Eve) the solar day is split into thirds
     starting at sunrise.
-    
+
     Args:
         sunrise_utc: Sunrise time in UTC.
         sunset_utc: Sunset time in UTC.
         period_names: List of period names to create (e.g., ['Morn', 'Aftn', 'Eve']).
-        
+
     Returns:
         Dict mapping period names to their UTC start times.
     """
@@ -56,11 +72,11 @@ def get_first_period_info(
     period_forecast: dict[str, tuple[int, str]],
 ) -> tuple[str, datetime, int, str] | None:
     """Retrieve the earliest period from a collection of periods.
-    
+
     Args:
         period_windows: Mapping of period names to their start times (UTC).
         period_forecast: Mapping of period names to (solar_watts, status) tuples.
-        
+
     Returns:
         Tuple of (period_name, start_time, solar_value, status) for the earliest period,
         or None if no periods are available.
@@ -76,11 +92,11 @@ def get_first_period_info(
 
 
 def is_cheap_rate_window(now_utc: datetime) -> bool:
-    """Determine whether the current time falls within the cheap-rate tariff window.
-    
+    """Determine whether the current time falls within the cheap-rate window.
+
     Args:
         now_utc: Current time in UTC.
-        
+
     Returns:
         True if now_utc is within the configured cheap-rate window (CHEAP_RATE_START_HOUR
         to CHEAP_RATE_END_HOUR in local timezone), False otherwise.
@@ -91,25 +107,25 @@ def is_cheap_rate_window(now_utc: datetime) -> bool:
     return local_hour >= CHEAP_RATE_START_HOUR or local_hour < CHEAP_RATE_END_HOUR
 
 
-def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
-    """Determine the appropriate mode for night-time tariff periods.
-    
+def get_night_schedule_mode(now_utc: datetime) -> tuple[int, str, str]:
+    """Determine the appropriate mode for night-time periods.
+
     Args:
         now_utc: Current time in UTC.
-        
+
     Returns:
         Tuple of (mode_value: int, phase_label: str, explanation: str) describing whether
         to use cheap-rate mode (if in the cheap window) or pre-cheap-rate mode (if before
-        cheap rates to prevent early charging).
+        cheap rates, to prevent early charging).
     """
     local_now = now_utc.astimezone(LOCAL_TZ)
     if is_cheap_rate_window(now_utc):
         return (
-            TARIFF_TO_MODE["NIGHT"],
+            PERIOD_TO_MODE["NIGHT"],
             "cheap-rate",
             (
                 f"Local time {local_now.strftime('%H:%M')} is inside the cheap-rate window "
-                f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Applying night tariff mode."
+                f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Applying night mode."
             ),
         )
     return (
@@ -124,10 +140,10 @@ def get_night_tariff_mode(now_utc: datetime) -> tuple[int, str, str]:
 
 def get_hours_until_cheap_rate(now_utc: datetime) -> float:
     """Calculate hours until the next cheap-rate window opens in local timezone.
-    
+
     Args:
         now_utc: Current time in UTC.
-        
+
     Returns:
         Hours until the next cheap-rate window starts. Returns 0.0 if already within
         the cheap-rate window. Accounts for daily cycle wrap-around.
@@ -148,28 +164,28 @@ def get_hours_until_cheap_rate(now_utc: datetime) -> float:
     return (cheap_start_local - local_now).total_seconds() / 3600.0
 
 
-def get_tariff_period_for_time(when_utc: datetime) -> str:
-    """Determine which tariff period (NIGHT, PEAK, or DAY) applies at a given time.
-    
+def get_schedule_period_for_time(when_utc: datetime) -> str:
+    """Determine which schedule period (NIGHT, PEAK, or DAY) applies at a given time.
+
     Args:
         when_utc: Time to check, in UTC.
-        
+
     Returns:
-        String representing the tariff period: 'NIGHT' (cheap rates), 'PEAK' (highest rates),
-        or 'DAY' (standard daytime rates).
+        String representing the schedule period: 'NIGHT' (cheap-rate window),
+        'PEAK' (peak hours), or 'DAY' (standard daytime).
     """
     local_hour = when_utc.astimezone(LOCAL_TZ).hour
 
     if is_cheap_rate_window(when_utc):
         return "NIGHT"
 
-    if PEAK_RATE_START_HOUR <= local_hour < PEAK_RATE_END_HOUR:
+    if PEAK_START_HOUR <= local_hour < PEAK_END_HOUR:
         return "PEAK"
 
-    if DAY_RATE_MORNING_START_HOUR <= local_hour < DAY_RATE_MORNING_END_HOUR:
+    if MORNING_START_HOUR <= local_hour < MORNING_END_HOUR:
         return "DAY"
 
-    if DAY_RATE_EVENING_START_HOUR <= local_hour < DAY_RATE_EVENING_END_HOUR:
+    if EVENING_START_HOUR <= local_hour < EVENING_END_HOUR:
         return "DAY"
 
     return "DAY"
@@ -181,16 +197,16 @@ def suppress_elapsed_periods_except_latest(
     day_state: dict[str, dict[str, bool]],
 ) -> list[str]:
     """Mark all elapsed periods as 'done' except the latest, allowing recovery if missed.
-    
+
     When multiple periods have started before the scheduler catches up, suppresses
     pre_set and start_set on all but the latest elapsed period so only the current
     period can trigger actions.
-    
+
     Args:
         now_utc: Current time in UTC.
         period_windows: Mapping of period names to start times (UTC).
         day_state: Mutable dict tracking pre_set and start_set status per period.
-        
+
     Returns:
         List of suppressed period names for logging.
     """

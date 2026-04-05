@@ -3,7 +3,7 @@
 Tests mode selection algorithms under various battery, solar, and tariff conditions.
 """
 
-from config.settings import SIGEN_MODES, TARIFF_TO_MODE
+from config.settings import SIGEN_MODES, PERIOD_TO_MODE
 from logic.decision_logic import decide_night_preparation_mode, decide_operational_mode
 from datetime import datetime, timezone
 from main import is_cheap_rate_window
@@ -33,7 +33,7 @@ def test_night_preparation_uses_night_mode_when_export_not_required():
         headroom_target_kwh=10.2,
     )
 
-    assert mode == TARIFF_TO_MODE["NIGHT"]
+    assert mode == PERIOD_TO_MODE["NIGHT"]
     assert "export is not required" in reason
 
 
@@ -46,7 +46,7 @@ def test_night_preparation_falls_back_to_night_mode_without_forecast():
         period_solar_kwh=0.0,
     )
 
-    assert mode == TARIFF_TO_MODE["NIGHT"]
+    assert mode == PERIOD_TO_MODE["NIGHT"]
     assert "No next-day forecast available" in reason
 
 
@@ -69,12 +69,12 @@ def test_peak_tariff_overrides_default_forecast_mode_to_self_powered():
         soc=60,
         headroom_kwh=8.0,
         period_solar_kwh=1.0,
-        tariff_period="PEAK",
+        schedule_period="PEAK",
         headroom_target_kwh=10.2,
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Tariff period is Peak" in reason
+    assert "Schedule period is Peak" in reason
 
 
 def test_peak_tariff_does_not_override_grid_export_rule():
@@ -84,7 +84,7 @@ def test_peak_tariff_does_not_override_grid_export_rule():
         soc=98,
         headroom_kwh=0.1,
         period_solar_kwh=3.0,
-        tariff_period="PEAK",
+        schedule_period="PEAK",
         headroom_target_kwh=10.2,
     )
 
@@ -99,7 +99,7 @@ def test_evening_red_uses_self_powered_when_battery_can_bridge_to_cheap_rate():
         soc=70,
         headroom_kwh=6.0,
         period_solar_kwh=0.5,
-        tariff_period="DAY",
+        schedule_period="DAY",
         battery_kwh=24,
         hours_until_cheap_rate=4.0,
         estimated_home_load_kw=0.8,
@@ -118,7 +118,7 @@ def test_evening_red_falls_back_to_tou_when_bridge_energy_is_insufficient():
         soc=20,
         headroom_kwh=6.0,
         period_solar_kwh=0.5,
-        tariff_period="DAY",
+        schedule_period="DAY",
         battery_kwh=24,
         hours_until_cheap_rate=4.0,
         estimated_home_load_kw=1.2,

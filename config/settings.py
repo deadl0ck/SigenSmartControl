@@ -42,7 +42,7 @@ NIGHT_MODE_ENABLED = True
 NEXT_DAY_PRECHECK_ENABLED = True
 # How long after the night window starts before running the next-day pre-check.
 NIGHT_PRECHECK_DELAY_MINUTES = 30
-# Local timezone used for tariff windows.
+# Local timezone used for schedule windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
 
 # HTTP timeout for ESB county forecast API requests.
@@ -101,19 +101,18 @@ FORECAST_ANALYSIS_INVERTER_AMBER_UTILIZATION_MAX = 0.60
 FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_RATE = 0.2
 FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_UTILIZATION = 0.55
 # ==============================
-# Tariff Schedule Windows
+# Schedule Windows
 # ==============================
-# Tariff time windows in local time.
-# These drive period detection and cheap-rate window checks in tariff_utils.py.
-DAY_RATE_MORNING_START_HOUR = 8
-DAY_RATE_MORNING_END_HOUR = 17
-PEAK_RATE_START_HOUR = 17
-PEAK_RATE_END_HOUR = 19
-DAY_RATE_EVENING_START_HOUR = 19
-DAY_RATE_EVENING_END_HOUR = 23
-# Cheap-rate tariff window start hour in local time.
+# Hour boundaries (local time) used for schedule period detection in schedule_utils.py.
+MORNING_START_HOUR = 8
+MORNING_END_HOUR = 17
+PEAK_START_HOUR = 17
+PEAK_END_HOUR = 19
+EVENING_START_HOUR = 19
+EVENING_END_HOUR = 23
+# Cheap-rate window start hour in local time.
 CHEAP_RATE_START_HOUR = 23
-# Cheap-rate tariff window end hour in local time.
+# Cheap-rate window end hour in local time.
 CHEAP_RATE_END_HOUR = 8
 # ==============================
 # Decision Thresholds
@@ -175,15 +174,15 @@ FORECAST_TO_MODE = {
 }
 
 # ==============================
-# Tariff-to-Mode Mapping
+# Period-to-Mode Mapping
 # ==============================
-# Example: Map tariff period to Sigen mode (optional, for advanced logic)
-TARIFF_TO_MODE = {
-    # Night: Cheap grid, charge battery if needed
+# Map schedule period (NIGHT/DAY/PEAK) to Sigen operational mode.
+PERIOD_TO_MODE = {
+    # Night: cheap-rate window, charge battery if needed
     "NIGHT": SIGEN_MODES["TOU"],
-    # Day: Normal operation, let AI or self-powered logic decide
+    # Day: normal solar hours, let AI or self-powered logic decide
     "DAY": SIGEN_MODES["AI"],
-    # Peak: Expensive grid, maximize self-consumption
+    # Peak: high-demand hours, maximize self-consumption
     "PEAK": SIGEN_MODES["SELF_POWERED"],
 }
 
@@ -192,7 +191,7 @@ TARIFF_TO_MODE = {
 PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
-# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE, PRE_CHEAP_RATE_MODE
+# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE, PRE_CHEAP_RATE_MODE
 
 # ==============================
 # Data File Paths

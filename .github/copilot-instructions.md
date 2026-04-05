@@ -139,7 +139,7 @@ When refactoring large files, use this guidance for module separation:
 
 | Module | Responsibility | Example Functions |
 |--------|-----------------|-------------------|
-| `tariff_utils.py` | Time-based rate windows, tariff period detection | `is_cheap_rate_window()`, `get_tariff_period_for_time()`, `get_hours_until_cheap_rate()` |
+| `schedule_utils.py` | Time-based schedule windows, period detection | `is_cheap_rate_window()`, `get_schedule_period_for_time()`, `get_hours_until_cheap_rate()` |
 | `mode_control.py` | Mode decision logic, API interaction, mode matching | `apply_mode_change()`, `mode_matches_target()`, `extract_mode_value()` |
 | `scheduler_loop.py` | Main scheduler loop, nested helpers | `run_scheduler()` and its internal async helpers |
 | `config.py` | All configuration values and environment setup | System specs, tariffs, thresholds, feature flags |

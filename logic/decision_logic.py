@@ -12,7 +12,7 @@ Implements a hierarchical decision tree:
 5. Peak tariff self-powered override
 """
 
-from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE
 
 
 def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:
@@ -35,7 +35,7 @@ def decide_operational_mode(
     headroom_kwh: float | None,
     period_solar_kwh: float,
     *,
-    tariff_period: str | None = None,
+    schedule_period: str | None = None,
     headroom_target_kwh: float = 0.0,
     battery_kwh: float | None = None,
     hours_until_cheap_rate: float | None = None,
@@ -58,7 +58,7 @@ def decide_operational_mode(
         soc: Current battery state-of-charge (0-100), or None if unavailable.
         headroom_kwh: Available battery headroom for charging, or None if SOC unavailable.
         period_solar_kwh: Estimated solar energy available in this period (used in reason text).
-        tariff_period: Current tariff period ('NIGHT', 'PEAK', 'DAY'), or None.
+        schedule_period: Current schedule period ('NIGHT', 'PEAK', 'DAY'), or None.
         headroom_target_kwh: Required free headroom in kWh before a Green period. Derived
             from hardware surplus capacity: (SOLAR_PV_KW - INVERTER_KW) × period_hours.
         battery_kwh: Total battery capacity, needed for evening bridge rule.
@@ -72,7 +72,7 @@ def decide_operational_mode(
     """
     status_key = (status or "").upper()
     period_key = (period or "").upper()
-    tariff_key = (tariff_period or "").upper()
+    schedule_key = (schedule_period or "").upper()
 
     if (
         soc is not None
@@ -88,8 +88,8 @@ def decide_operational_mode(
         return mode, reason
 
     if period_key == "NIGHT":
-        mode = TARIFF_TO_MODE["NIGHT"]
-        reason = "Night period detected. Using tariff-based mode."
+        mode = PERIOD_TO_MODE["NIGHT"]
+        reason = "Night period detected. Applying configured night mode."
         return mode, reason
 
     # Before cheap-rate starts, prefer battery usage over charge-oriented behavior
@@ -119,11 +119,11 @@ def decide_operational_mode(
 
     # During expensive peak tariff windows, prioritize self-powered operation
     # unless one of the explicit export-to-grid rules already triggered above.
-    if tariff_key == "PEAK" and mode != SIGEN_MODES["GRID_EXPORT"]:
-        mode = TARIFF_TO_MODE["PEAK"]
+    if schedule_key == "PEAK" and mode != SIGEN_MODES["GRID_EXPORT"]:
+        mode = PERIOD_TO_MODE["PEAK"]
         reason = (
-            f"{reason} Tariff period is Peak, so prioritizing self-powered mode "
-            "to reduce expensive grid import."
+            f"{reason} Schedule period is Peak, so prioritizing self-powered mode "
+            "to reduce grid import."
         )
 
     return mode, reason
@@ -156,8 +156,8 @@ def decide_night_preparation_mode(
         returns GRID_EXPORT; otherwise returns NIGHT tariff mode.
     """
     if not target_period or not status:
-        mode = TARIFF_TO_MODE["NIGHT"]
-        return mode, "No next-day forecast available. Using tariff-based night mode."
+        mode = PERIOD_TO_MODE["NIGHT"]
+        return mode, "No next-day forecast available. Applying configured night mode."
 
     mode, reason = decide_operational_mode(
         period=target_period,
@@ -170,8 +170,8 @@ def decide_night_preparation_mode(
     if mode == SIGEN_MODES["GRID_EXPORT"]:
         return mode, f"Next-day preparation for {target_period}: {reason}"
 
-    mode = TARIFF_TO_MODE["NIGHT"]
+    mode = PERIOD_TO_MODE["NIGHT"]
     return mode, (
         f"Next-day preparation for {target_period}: export is not required. "
-        "Using tariff-based night mode."
+        "Applying configured night mode."
     )
