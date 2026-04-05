@@ -10,10 +10,11 @@
 6. [How It Works](#how-it-works)
 7. [Scheduler Behavior](#scheduler-behavior)
 8. [Logging](#logging)
-9. [Forecast Accuracy Report](#forecast-accuracy-report)
-10. [Web Simulator](#web-simulator)
-11. [Tests](#tests)
-12. [Notes](#notes)
+9. [Mode Test Utility](#mode-test-utility)
+10. [Forecast Accuracy Report](#forecast-accuracy-report)
+11. [Web Simulator](#web-simulator)
+12. [Tests](#tests)
+13. [Notes](#notes)
 
 ## Overview
 
@@ -62,7 +63,8 @@ see exactly what values were used and why each decision was made.
 ├── telemetry/
 │   └── forecast_calibration.py       # Daily bounded calibration generation from telemetry
 ├── scripts/
-│   └── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
+│   ├── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
+│   └── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
 ├── web/
 │   ├── app.py                        # Flask web simulator backend
 │   ├── simulate_logic.py             # Web simulator wrapper around shared decision logic
@@ -238,8 +240,8 @@ Current defaults in this project:
 
 - Green -> `SELF_POWERED`
 - Amber -> `AI`
-- Red -> `TOU`
-- Night tariff -> `TOU`
+- Red -> `AI`
+- Night tariff -> `AI`
 - Peak tariff -> `SELF_POWERED`
 
 Mode descriptions:
@@ -288,7 +290,7 @@ For night:
 - Green + headroom < 10.2 kWh -> `GRID_EXPORT` (insufficient space for incoming solar).
 - Green + headroom >= 10.2 kWh -> Follow forecast mode (battery can absorb the solar).
 - Amber + Peak tariff -> `SELF_POWERED` (peak override wins).
-- Red + normal Day tariff -> `TOU` (default forecast mapping).
+- Red + normal Day tariff -> `AI` (default forecast mapping).
 
 ## How It Works
 
@@ -574,6 +576,37 @@ Every set-operational-mode command attempt (including simulation-mode set attemp
 - `data/mode_change_events.jsonl`
 
 Each event includes timestamp, period/context, requested mode, reason, prior mode payload (if readable), response payload, and success/failure. This allows direct correlation with inverter telemetry snapshots in `data/inverter_telemetry.jsonl`.
+
+## Mode Test Utility
+
+Run this script to inspect current mode, list all available operational modes returned by the active API client, and optionally switch to a selected mode value:
+
+```sh
+python scripts/test_mode_switch.py
+```
+
+Optional usage:
+
+```sh
+python scripts/test_mode_switch.py --list
+python scripts/test_mode_switch.py 1
+python scripts/test_mode_switch.py 5
+```
+
+Behavior:
+
+- With no mode parameter (or `--list`), it prints:
+	- the current operational mode
+	- the full available modes list (label + integer value)
+- With a mode value, it prints:
+	- current mode before switching
+	- mode set response payload
+	- current mode after switching
+
+Important:
+
+- `FULL_SIMULATION_MODE = True` means mode writes are suppressed (read-only calls still run).
+- Set `FULL_SIMULATION_MODE = False` to send real mode-change commands.
 
 ## Forecast Accuracy Report
 
