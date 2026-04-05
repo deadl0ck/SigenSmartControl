@@ -15,7 +15,20 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config.settings import LOCAL_TIMEZONE
+from config.settings import (
+    CALIBRATION_CLIPPING_RATE_WEIGHT,
+    CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+    CALIBRATION_DEFAULT_POWER_MULTIPLIER,
+    CALIBRATION_MULTIPLIER_STEP_MAX,
+    CALIBRATION_RATIO_MAX,
+    CALIBRATION_RATIO_MIN,
+    CALIBRATION_TARGET_LEAD_BUFFER_MAX,
+    CALIBRATION_TARGET_MULTIPLIER_EXCESS_WEIGHT,
+    CALIBRATION_TARGET_MULTIPLIER_MAX,
+    CALIBRATION_TARGET_MULTIPLIER_MIN,
+    CALIBRATION_WINDOW_DAYS,
+    LOCAL_TIMEZONE,
+)
 from config.constants import FORECAST_CALIBRATION_PATH, INVERTER_TELEMETRY_ARCHIVE_PATH
 from telemetry.telemetry_archive import derive_clipping_metrics
 
@@ -23,16 +36,13 @@ from telemetry.telemetry_archive import derive_clipping_metrics
 logger = logging.getLogger(__name__)
 
 PERIODS = ("Morn", "Aftn", "Eve")
-DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER = 1.1
-DEFAULT_POWER_MULTIPLIER = 1.0
-WINDOW_DAYS = 7
 
 
 def _default_period_calibration() -> dict[str, float]:
     """Return baseline calibration values for one daytime period."""
     return {
-        "power_multiplier": DEFAULT_POWER_MULTIPLIER,
-        "export_lead_buffer_multiplier": DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+        "power_multiplier": CALIBRATION_DEFAULT_POWER_MULTIPLIER,
+        "export_lead_buffer_multiplier": CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
         "telemetry_samples": 0,
         "ratios_used": 0,
         "clipping_observations": 0,
@@ -44,7 +54,7 @@ def default_forecast_calibration() -> dict[str, Any]:
     """Return the baseline calibration artifact structure."""
     return {
         "generated_at": None,
-        "window_days": WINDOW_DAYS,
+        "window_days": CALIBRATION_WINDOW_DAYS,
         "timezone": LOCAL_TIMEZONE,
         "periods": {period: _default_period_calibration() for period in PERIODS},
     }
@@ -67,7 +77,7 @@ def load_forecast_calibration() -> dict[str, Any]:
         if isinstance(loaded_periods.get(period), dict):
             calibration["periods"][period].update(loaded_periods[period])
     calibration["generated_at"] = loaded.get("generated_at")
-    calibration["window_days"] = loaded.get("window_days", WINDOW_DAYS)
+    calibration["window_days"] = loaded.get("window_days", CALIBRATION_WINDOW_DAYS)
     calibration["timezone"] = loaded.get("timezone", LOCAL_TIMEZONE)
     return calibration
 
@@ -123,7 +133,9 @@ def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
     if not path.exists():
         return []
 
-    cutoff_date = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date() - timedelta(days=WINDOW_DAYS)
+    cutoff_date = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date() - timedelta(
+        days=CALIBRATION_WINDOW_DAYS
+    )
     snapshots: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -178,7 +190,9 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         forecast_w = _extract_forecast_value_w(snapshot.get("forecast_today"), period)
         if isinstance(solar_power_kw, (int, float)) and forecast_w and forecast_w > 0:
             ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
-            ratios_by_period[period].append(max(0.5, min(2.0, ratio)))
+            ratios_by_period[period].append(
+                max(CALIBRATION_RATIO_MIN, min(CALIBRATION_RATIO_MAX, ratio))
+            )
 
         clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
 
@@ -192,17 +206,23 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         )
 
         if ratios:
-            target_multiplier = max(0.85, min(1.5, median(ratios)))
+            target_multiplier = max(
+                CALIBRATION_TARGET_MULTIPLIER_MIN,
+                min(CALIBRATION_TARGET_MULTIPLIER_MAX, median(ratios)),
+            )
         else:
             target_multiplier = prior_period["power_multiplier"]
 
         target_lead_buffer = max(
-            DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+            CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
             min(
-                1.6,
-                DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER
-                + (0.25 * clipping_rate)
-                + (0.15 * max(0.0, target_multiplier - 1.0)),
+                CALIBRATION_TARGET_LEAD_BUFFER_MAX,
+                CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER
+                + (CALIBRATION_CLIPPING_RATE_WEIGHT * clipping_rate)
+                + (
+                    CALIBRATION_TARGET_MULTIPLIER_EXCESS_WEIGHT
+                    * max(0.0, target_multiplier - CALIBRATION_DEFAULT_POWER_MULTIPLIER)
+                ),
             ),
         )
 
@@ -211,9 +231,9 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
                 _bounded_step(
                     float(prior_period["power_multiplier"]),
                     float(target_multiplier),
-                    max_step=0.08,
-                    minimum=0.85,
-                    maximum=1.5,
+                    max_step=CALIBRATION_MULTIPLIER_STEP_MAX,
+                    minimum=CALIBRATION_TARGET_MULTIPLIER_MIN,
+                    maximum=CALIBRATION_TARGET_MULTIPLIER_MAX,
                 ),
                 3,
             ),
@@ -221,9 +241,9 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
                 _bounded_step(
                     float(prior_period["export_lead_buffer_multiplier"]),
                     float(target_lead_buffer),
-                    max_step=0.08,
-                    minimum=DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
-                    maximum=1.6,
+                    max_step=CALIBRATION_MULTIPLIER_STEP_MAX,
+                    minimum=CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
+                    maximum=CALIBRATION_TARGET_LEAD_BUFFER_MAX,
                 ),
                 3,
             ),
@@ -234,7 +254,7 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         }
 
     calibration["generated_at"] = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).isoformat()
-    calibration["window_days"] = WINDOW_DAYS
+    calibration["window_days"] = CALIBRATION_WINDOW_DAYS
     calibration["timezone"] = LOCAL_TIMEZONE
 
     path = Path(FORECAST_CALIBRATION_PATH)

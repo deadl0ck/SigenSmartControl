@@ -8,6 +8,7 @@ import requests
 from datetime import datetime
 from typing import Tuple
 from config.constants import SUNRISE_SUNSET_API_URL
+from config.settings import SUNRISE_SUNSET_API_TIMEOUT_SECONDS
 import logging
 
 logger = logging.getLogger("sunrise_sunset")
@@ -31,7 +32,11 @@ def get_sunrise_sunset(lat: float, lng: float, date: str = "today") -> Tuple[str
         "formatted": 0  # ISO 8601 format
     }
     logger.info(f"Requesting sunrise/sunset for lat={lat}, lng={lng}, date={date}")
-    response = requests.get(SUNRISE_SUNSET_API_URL, params=params, timeout=10)
+    response = requests.get(
+        SUNRISE_SUNSET_API_URL,
+        params=params,
+        timeout=SUNRISE_SUNSET_API_TIMEOUT_SECONDS,
+    )
     response.raise_for_status()
     data = response.json()
     if data["status"] != "OK":

@@ -13,9 +13,15 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config.settings import LOCAL_TIMEZONE
-from config.constants import INVERTER_TELEMETRY_ARCHIVE_PATH
-from config.settings import INVERTER_KW
+from config.settings import (
+    CLIPPING_BATTERY_POWER_ABS_LOW_KW,
+    CLIPPING_BATTERY_SOC_HIGH_PERCENT,
+    CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW,
+    CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW,
+    INVERTER_KW,
+    LOCAL_TIMEZONE,
+)
+from config.constants import INVERTER_TELEMETRY_ARCHIVE_PATH, MODE_CHANGE_EVENTS_ARCHIVE_PATH
 
 
 logger = logging.getLogger(__name__)
@@ -144,11 +150,15 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
     confidence = "low"
     likely_clipping = False
-    high_battery_soc = battery_soc is not None and battery_soc >= 95
-    low_battery_absorb = battery_power_kw is not None and abs(battery_power_kw) <= 0.2
+    high_battery_soc = (
+        battery_soc is not None and battery_soc >= CLIPPING_BATTERY_SOC_HIGH_PERCENT
+    )
+    low_battery_absorb = (
+        battery_power_kw is not None and abs(battery_power_kw) <= CLIPPING_BATTERY_POWER_ABS_LOW_KW
+    )
     positive_export = grid_export_kw is not None and grid_export_kw > 0
 
-    if solar_kw is not None and solar_kw >= INVERTER_KW - 0.1:
+    if solar_kw is not None and solar_kw >= INVERTER_KW - CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW:
         likely_clipping = True
         confidence = "medium"
         reasons.append(
@@ -166,7 +176,7 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
         if positive_export:
             reasons.append(f"grid export is positive ({grid_export_kw:.2f} kW)")
 
-    elif solar_kw is not None and solar_kw >= INVERTER_KW - 0.3:
+    elif solar_kw is not None and solar_kw >= INVERTER_KW - CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW:
         corroborating_signals = sum((high_battery_soc, low_battery_absorb, positive_export))
         if corroborating_signals >= 2:
             likely_clipping = True
@@ -203,6 +213,24 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
             "grid_export_source": grid_exchange_metric[0] if grid_exchange_metric is not None else None,
         },
     }
+
+
+def extract_live_solar_power_kw(energy_flow: dict[str, Any]) -> float | None:
+    """Extract current solar generation power in kW from raw inverter telemetry.
+
+    Args:
+        energy_flow: Raw `get_energy_flow()` payload from the inverter API.
+
+    Returns:
+        Solar power in kW when available, otherwise None.
+    """
+    solar_metric = _extract_numeric_metric(
+        energy_flow,
+        ("pvPower", "solarPower", "ppv", "pv", "solar"),
+    )
+    if solar_metric is None:
+        return None
+    return _normalize_power_to_kw(solar_metric[1])
 
 
 def _json_safe(value: Any) -> Any:
@@ -267,3 +295,57 @@ def append_inverter_telemetry_snapshot(
         logger.info(f"[TELEMETRY] Saved inverter snapshot to {archive_path}")
     except OSError as exc:
         logger.warning(f"[TELEMETRY] Failed to save inverter snapshot to {archive_path}: {exc}")
+
+
+def append_mode_change_event(
+    *,
+    scheduler_now_utc: datetime,
+    period: str,
+    requested_mode: int,
+    requested_mode_label: str,
+    reason: str,
+    simulated: bool,
+    success: bool,
+    current_mode: Any = None,
+    response: Any = None,
+    error: str | None = None,
+) -> None:
+    """Append one inverter mode-change event to the local archive.
+
+    Args:
+        scheduler_now_utc: Current scheduler timestamp in UTC.
+        period: Human-readable period/context label.
+        requested_mode: Target mode integer.
+        requested_mode_label: Human-readable target mode label.
+        reason: Decision reason supplied by scheduler.
+        simulated: Whether the command ran in simulation mode.
+        success: Whether set operation succeeded.
+        current_mode: Optional current mode payload captured before set.
+        response: Optional API/simulation response payload.
+        error: Optional error string if set failed.
+    """
+    archive_path = Path(MODE_CHANGE_EVENTS_ARCHIVE_PATH)
+    captured_at_local = scheduler_now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE))
+    event = {
+        "captured_at": captured_at_local.isoformat(),
+        "scheduler_now_utc": scheduler_now_utc.isoformat(),
+        "timezone": LOCAL_TIMEZONE,
+        "period": period,
+        "requested_mode": requested_mode,
+        "requested_mode_label": requested_mode_label,
+        "reason": reason,
+        "simulated": simulated,
+        "success": success,
+        "current_mode": _json_safe(current_mode),
+        "response": _json_safe(response),
+        "error": error,
+    }
+
+    try:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive_path.open("a", encoding="utf-8") as archive_file:
+            json.dump(event, archive_file, sort_keys=True)
+            archive_file.write("\n")
+        logger.info(f"[TELEMETRY] Saved mode-change event to {archive_path}")
+    except OSError as exc:
+        logger.warning(f"[TELEMETRY] Failed to save mode-change event to {archive_path}: {exc}")

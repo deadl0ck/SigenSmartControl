@@ -17,7 +17,13 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from config.settings import LOCAL_TIMEZONE
+from config.settings import (
+    ESB_API_TIMEOUT_SECONDS,
+    LOCAL_TIMEZONE,
+    QUARTZ_API_TIMEOUT_SECONDS,
+    QUARTZ_GREEN_CAPACITY_FRACTION,
+    QUARTZ_RED_CAPACITY_FRACTION,
+)
 from config.constants import (
     AMBER_VAL,
     COUNTY,
@@ -217,7 +223,7 @@ class SolarForecast(_BaseSolarForecast):
         if ESB_FORECAST_API_SUBSCRIPTION_KEY:
             headers["API-Subscription-Key"] = ESB_FORECAST_API_SUBSCRIPTION_KEY
 
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=ESB_API_TIMEOUT_SECONDS)
         response.raise_for_status()
         rows = response.json()
         if not isinstance(rows, list) or not rows:
@@ -249,9 +255,6 @@ class SolarForecast(_BaseSolarForecast):
 class QuartzSolarForecast(_BaseSolarForecast):
     """Optional Open Quartz provider using site latitude/longitude and capacity."""
 
-    _red_capacity_fraction = 0.15
-    _green_capacity_fraction = 0.30
-
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Open Quartz API."""
         super().__init__(logger)
@@ -277,15 +280,17 @@ class QuartzSolarForecast(_BaseSolarForecast):
     def _status_from_avg_kw(cls, avg_kw: float) -> str:
         """Map Quartz period-average output to Red/Amber/Green.
 
-        Quartz returns site-level power in kW, so normalize against the configured
-        array size rather than using the legacy fixed-watt thresholds that were
-        designed around ESB's synthetic status placeholders.
+        Quartz returns site-level power in kW, so status is normalized against
+        configured array size (QUARTZ_SITE_CAPACITY_KWP):
+        - Red: < 20% of capacity
+        - Amber: 20% to < 40% of capacity
+        - Green: >= 40% of capacity
         """
         capacity_kw = max(QUARTZ_SITE_CAPACITY_KWP, 0.1)
         output_fraction = avg_kw / capacity_kw
-        if output_fraction < cls._red_capacity_fraction:
+        if output_fraction < QUARTZ_RED_CAPACITY_FRACTION:
             return "Red"
-        if output_fraction < cls._green_capacity_fraction:
+        if output_fraction < QUARTZ_GREEN_CAPACITY_FRACTION:
             return "Amber"
         return "Green"
 
@@ -299,7 +304,11 @@ class QuartzSolarForecast(_BaseSolarForecast):
             }
         }
 
-        response = requests.post(QUARTZ_FORECAST_API_URL, json=payload, timeout=30)
+        response = requests.post(
+            QUARTZ_FORECAST_API_URL,
+            json=payload,
+            timeout=QUARTZ_API_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
         body = response.json()
         power_by_timestamp = body.get("predictions", {}).get("power_kw", {})
@@ -470,8 +479,8 @@ class ComparingSolarForecastProvider:
             "quartz_site_capacity_kwp": QUARTZ_SITE_CAPACITY_KWP,
             "normalization": {
                 "quartz_period_timezone": LOCAL_TIMEZONE,
-                "quartz_red_lt_fraction": QuartzSolarForecast._red_capacity_fraction,
-                "quartz_amber_lt_fraction": QuartzSolarForecast._green_capacity_fraction,
+                "quartz_red_lt_fraction": QUARTZ_RED_CAPACITY_FRACTION,
+                "quartz_amber_lt_fraction": QUARTZ_GREEN_CAPACITY_FRACTION,
                 "esb_values_are_synthetic": True,
             },
             "today": self._build_day_snapshot(today_primary, today_secondary),
@@ -553,8 +562,8 @@ class ComparingSolarForecastProvider:
         self.logger.info(
             "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
             f"({LOCAL_TIMEZONE}) and capacity-based thresholds: "
-            f"Red < {int(QuartzSolarForecast._red_capacity_fraction * 100)}%, "
-            f"Amber < {int(QuartzSolarForecast._green_capacity_fraction * 100)}%, "
+            f"Red < {int(QUARTZ_RED_CAPACITY_FRACTION * 100)}%, "
+            f"Amber < {int(QUARTZ_GREEN_CAPACITY_FRACTION * 100)}%, "
             "Green >= that share of configured array output."
         )
 

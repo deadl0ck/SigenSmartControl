@@ -1,0 +1,1 @@
+{"captured_at": "2026-04-05T10:37:29.131287+01:00", "current_mode": 0, "error": null, "period": "Eve (period-start)", "reason": "Switching to AI for evening arbitrage.", "requested_mode": 1, "requested_mode_label": "AI", "response": {"mode": 1, "ok": true}, "scheduler_now_utc": "2026-04-05T09:37:29.131287+00:00", "simulated": true, "success": true, "timezone": "Europe/Dublin"}

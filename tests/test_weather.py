@@ -10,7 +10,7 @@ import sys
 import logging
 import pytest
 import weather.forecast as weather_module
-from weather.forecast import ComparingSolarForecastProvider, SolarForecast
+from weather.forecast import ComparingSolarForecastProvider, QuartzSolarForecast, SolarForecast
 from config.settings import FORECAST_TO_MODE, SIGEN_MODES
 import logging
 logger = logging.getLogger(__name__)
@@ -183,3 +183,13 @@ def test_comparison_provider_uses_primary_status_with_secondary_watts():
 
     assert provider.get_todays_period_forecast() == {"Aftn": (2118, "Amber")}
     assert provider.get_tomorrows_period_forecast() == {"Morn": (1139, "Red")}
+
+
+def test_quartz_status_normalization_uses_20_40_capacity_thresholds(monkeypatch):
+    """Quartz status should map to Red/Amber/Green at 20% and 40% capacity bands."""
+    monkeypatch.setattr(weather_module, "QUARTZ_SITE_CAPACITY_KWP", 10.0)
+
+    assert QuartzSolarForecast._status_from_avg_kw(1.99) == "Red"
+    assert QuartzSolarForecast._status_from_avg_kw(2.0) == "Amber"
+    assert QuartzSolarForecast._status_from_avg_kw(3.99) == "Amber"
+    assert QuartzSolarForecast._status_from_avg_kw(4.0) == "Green"

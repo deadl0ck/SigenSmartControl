@@ -7,6 +7,7 @@ grid arbitrage, and cost-minimization based on real-time conditions.
 """
 
 import asyncio
+from collections import deque
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -44,6 +45,9 @@ from config.settings import (
     SOLAR_PV_KW,
     INVERTER_KW,
     BATTERY_KWH,
+    LIVE_SOLAR_AVERAGE_SAMPLE_COUNT,
+    MIN_EFFECTIVE_BATTERY_EXPORT_KW,
+    DEFAULT_SIMULATED_SOC_PERCENT,
 )
 from logic.decision_logic import (
     decide_operational_mode,
@@ -70,7 +74,11 @@ from logic.mode_control import (
 from weather.sunrise_sunset import get_sunrise_sunset
 from config.constants import LATITUDE, LONGITUDE
 from telemetry.forecast_calibration import build_and_save_forecast_calibration, get_period_calibration
-from telemetry.telemetry_archive import append_inverter_telemetry_snapshot
+from telemetry.telemetry_archive import (
+    append_inverter_telemetry_snapshot,
+    append_mode_change_event,
+    extract_live_solar_power_kw,
+)
 
 # --- Logging configuration ---
 LOG_LEVEL = getattr(logging, CONFIG_LOG_LEVEL, logging.INFO)
@@ -132,6 +140,7 @@ async def apply_mode_change(
         True if mode was set or already at target, False if set operation failed.
     """
     mode_label = mode_names.get(mode, mode)
+    current_mode_raw: Any = None
     if sigen is None:
         logger.error(f"Cannot set mode for {period}: Sigen interaction is unavailable.")
         return False
@@ -159,12 +168,35 @@ async def apply_mode_change(
     logger.info(f"Decision reason: {reason}")
     logger.info(ACTION_DIVIDER)
 
+    event_time = datetime.now(timezone.utc)
     try:
         response = await sigen.set_operational_mode(mode)
         logger.info(f"Set mode response for {period}: {response}")
+        append_mode_change_event(
+            scheduler_now_utc=event_time,
+            period=period,
+            requested_mode=mode,
+            requested_mode_label=str(mode_label),
+            reason=reason,
+            simulated=FULL_SIMULATION_MODE,
+            success=True,
+            current_mode=current_mode_raw,
+            response=response,
+        )
         return True
     except Exception as e:
         logger.error(f"Failed to set mode for {period}: {e}")
+        append_mode_change_event(
+            scheduler_now_utc=event_time,
+            period=period,
+            requested_mode=mode,
+            requested_mode_label=str(mode_label),
+            reason=reason,
+            simulated=FULL_SIMULATION_MODE,
+            success=False,
+            current_mode=current_mode_raw,
+            error=str(e),
+        )
         return False
 
 
@@ -315,15 +347,17 @@ async def main() -> None:
 
 async def run_scheduler() -> None:
     """
-    Self-contained 15-minute scheduling loop for production use.
+    Self-contained 5-minute scheduling loop for production use.
 
     On each tick:
       1. Refreshes solar forecast and sunrise/sunset times at the start of each day,
          then derives equal-width period start times across the solar day.
       2. For each daytime period, begins monitoring SOC when within MAX_PRE_PERIOD_WINDOW
          of the period start.
-      3. Calculates the dynamic lead time needed to export enough battery headroom:
-               lead_time = (headroom_deficit_kWh * 1.1) / inverter_kw
+    3. Calculates dynamic lead time needed to export enough battery headroom using
+       a live-solar-adjusted discharge denominator:
+           lead_time = (headroom_deficit_kWh * lead_buffer) / effective_battery_export_kw
+       where effective_battery_export_kw = inverter_kw - avg(live_solar_kw over last 3 ticks).
          and triggers GRID_EXPORT as soon as that window opens.
       4. At each period start, re-evaluates SOC and sets the definitive mode.
       5. Every action (pre-export and period-start) is performed at most once per
@@ -369,14 +403,16 @@ async def run_scheduler() -> None:
         "Sign convention: positive=export, negative=import."
     )
 
-    simulated_soc_raw = os.getenv("SIMULATED_SOC_PERCENT", "80")
+    simulated_soc_raw = os.getenv("SIMULATED_SOC_PERCENT", str(DEFAULT_SIMULATED_SOC_PERCENT))
     try:
         simulated_soc_percent = float(simulated_soc_raw)
     except ValueError:
         logger.warning(
-            f"[SCHEDULER] Invalid SIMULATED_SOC_PERCENT='{simulated_soc_raw}'. Falling back to 80%."
+            "[SCHEDULER] Invalid SIMULATED_SOC_PERCENT='%s'. Falling back to %.1f%%.",
+            simulated_soc_raw,
+            DEFAULT_SIMULATED_SOC_PERCENT,
         )
-        simulated_soc_percent = 80.0
+        simulated_soc_percent = DEFAULT_SIMULATED_SOC_PERCENT
 
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
 
@@ -398,6 +434,7 @@ async def run_scheduler() -> None:
         "mode_phase": None,
         "prep_set_for": None,
     }
+    live_solar_kw_samples: deque[float] = deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)
 
     async def refresh_daily_data() -> None:
         """Fetch and cache solar forecast and sunrise/sunset times for today and tomorrow.
@@ -502,6 +539,46 @@ async def run_scheduler() -> None:
         except Exception as exc:
             logger.warning(f"[TELEMETRY] Failed to capture inverter snapshot: {exc}")
 
+    async def sample_live_solar_power(now_utc: datetime) -> None:
+        """Capture one live solar reading for rolling export-capacity calculations.
+
+        Args:
+            now_utc: Current scheduler timestamp in UTC.
+        """
+        if sigen is None:
+            return
+        try:
+            energy_flow = await sigen.get_energy_flow()
+            solar_kw = extract_live_solar_power_kw(energy_flow)
+            if solar_kw is not None:
+                live_solar_kw_samples.append(max(0.0, solar_kw))
+                logger.info(
+                    f"[SCHEDULER] Live solar sample: {solar_kw:.2f} kW "
+                    f"({len(live_solar_kw_samples)}/{LIVE_SOLAR_AVERAGE_SAMPLE_COUNT} samples)"
+                )
+        except Exception as exc:
+            logger.warning(f"[SCHEDULER] Failed to sample live solar power: {exc}")
+
+    def get_live_solar_average_kw() -> float | None:
+        """Return rolling average live solar generation across recent configured samples."""
+        if not live_solar_kw_samples:
+            return None
+        return sum(live_solar_kw_samples) / len(live_solar_kw_samples)
+
+    def get_effective_battery_export_kw(avg_live_solar_kw: float | None) -> float:
+        """Estimate available battery discharge/export power after live solar occupancy.
+
+        Args:
+            avg_live_solar_kw: Rolling average live solar generation in kW.
+
+        Returns:
+            Effective kW available for battery-driven export/discharge.
+        """
+        if avg_live_solar_kw is None:
+            return INVERTER_KW
+        available_kw = INVERTER_KW - max(0.0, avg_live_solar_kw)
+        return min(INVERTER_KW, max(MIN_EFFECTIVE_BATTERY_EXPORT_KW, available_kw))
+
     def estimate_solar(period: str, solar_value: int) -> float:
         """Estimate total solar energy available during a period.
         
@@ -530,9 +607,12 @@ async def run_scheduler() -> None:
         headroom_target_kwh: float,
         headroom_deficit_kwh: float,
         export_by_utc: datetime | None,
-        mode: int | None,
-        reason: str,
-        outcome: str,
+        solar_avg_kw_3: float | None = None,
+        effective_battery_export_kw: float | None = None,
+        lead_time_hours_adjusted: float | None = None,
+        mode: int | None = None,
+        reason: str = "",
+        outcome: str = "",
     ) -> None:
         """Log a comprehensive decision checkpoint with all relevant state and parameters.
         
@@ -549,6 +629,9 @@ async def run_scheduler() -> None:
             headroom_target_kwh: Target headroom needed before period.
             headroom_deficit_kwh: Shortfall (if any) against target.
             export_by_utc: Deadline for pre-period export window.
+            solar_avg_kw_3: Rolling average solar kW over latest three samples.
+            effective_battery_export_kw: Estimated battery export kW available after solar occupancy.
+            lead_time_hours_adjusted: Lead-time computed from adjusted export denominator.
             mode: Target operational mode, or None.
             reason: Explanation of decision logic.
             outcome: Description of action taken.
@@ -579,6 +662,23 @@ async def run_scheduler() -> None:
         )
         logger.info(f"[{period}]     -> headroom_target_kwh={headroom_target_kwh:.2f}")
         logger.info(f"[{period}]     -> headroom_deficit_kwh={headroom_deficit_kwh:.2f}")
+        logger.info(
+            f"[{period}]     -> solar_avg_kw_3={f'{solar_avg_kw_3:.2f}' if solar_avg_kw_3 is not None else 'N/A'}"
+        )
+        logger.info(
+            "[{}]     -> effective_battery_export_kw={}".format(
+                period,
+                f"{effective_battery_export_kw:.2f}"
+                if effective_battery_export_kw is not None
+                else "N/A",
+            )
+        )
+        logger.info(
+            "[{}]     -> lead_time_hours_adjusted={}".format(
+                period,
+                f"{lead_time_hours_adjusted:.2f}" if lead_time_hours_adjusted is not None else "N/A",
+            )
+        )
         logger.info(f"[{period}]     -> export_by={export_by_label}")
         logger.info(f"[{period}]     -> decision_mode={mode_label}")
         logger.info(f"[{period}]     -> outcome={outcome}")
@@ -669,6 +769,8 @@ async def run_scheduler() -> None:
                 )
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 continue
+
+        await sample_live_solar_power(now)
 
         if night_state["mode_set_for"] is not None and night_state["mode_set_for"] < today:
             night_state["mode_set_for"] = None
@@ -812,13 +914,18 @@ async def run_scheduler() -> None:
                     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
                     headroom_target_kwh = HEADROOM_TARGET_KWH
                     headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
+                    solar_avg_kw_3 = get_live_solar_average_kw()
+                    effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
+                    lead_time_hours_adjusted = 0.0
                     if headroom_deficit > 0:
-                        # Time needed = deficit (kWh) / inverter export capacity (kW), +10% buffer.
+                        # Time needed = deficit (kWh) / effective battery export capacity (kW),
+                        # with calibration buffer multiplier.
+                        lead_time_hours_adjusted = (
+                            headroom_deficit
+                            * period_calibration["export_lead_buffer_multiplier"]
+                        ) / effective_battery_export_kw
                         lead_time = timedelta(
-                            hours=(
-                                headroom_deficit
-                                * period_calibration["export_lead_buffer_multiplier"]
-                            ) / INVERTER_KW
+                            hours=lead_time_hours_adjusted
                         )
                         export_by = period_start - lead_time
                     else:
@@ -855,6 +962,9 @@ async def run_scheduler() -> None:
                                 headroom_target_kwh=headroom_target_kwh,
                                 headroom_deficit_kwh=headroom_deficit,
                                 export_by_utc=export_by,
+                                solar_avg_kw_3=solar_avg_kw_3,
+                                effective_battery_export_kw=effective_battery_export_kw,
+                                lead_time_hours_adjusted=lead_time_hours_adjusted,
                                 mode=mode,
                                 reason=reason,
                                 outcome=outcome,
@@ -880,6 +990,9 @@ async def run_scheduler() -> None:
                                 headroom_target_kwh=headroom_target_kwh,
                                 headroom_deficit_kwh=headroom_deficit,
                                 export_by_utc=export_by,
+                                solar_avg_kw_3=solar_avg_kw_3,
+                                effective_battery_export_kw=effective_battery_export_kw,
+                                lead_time_hours_adjusted=lead_time_hours_adjusted,
                                 mode=mode,
                                 reason=reason,
                                 outcome="pre-period check concluded no export needed",
@@ -899,6 +1012,9 @@ async def run_scheduler() -> None:
                             headroom_target_kwh=headroom_target_kwh,
                             headroom_deficit_kwh=headroom_deficit,
                             export_by_utc=export_by,
+                            solar_avg_kw_3=solar_avg_kw_3,
+                            effective_battery_export_kw=effective_battery_export_kw,
+                            lead_time_hours_adjusted=lead_time_hours_adjusted,
                             mode=mode,
                             reason=reason,
                             outcome="waiting until export window opens",

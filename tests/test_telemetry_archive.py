@@ -77,3 +77,40 @@ def test_append_inverter_telemetry_snapshot_flags_near_ceiling_clipping(tmp_path
     assert snapshot["derived"]["likely_clipping"] is True
     assert snapshot["derived"]["clipping_confidence"] == "high"
     assert snapshot["derived"]["extracted_metrics"]["solar_power_kw"] == 5.2
+
+
+def test_extract_live_solar_power_kw_handles_watts_and_kw() -> None:
+    """Live solar extraction should normalize both W and kW payloads."""
+    watts_payload = {"pvPower": 4200}
+    kw_payload = {"solarPower": 4.2}
+
+    assert telemetry_archive.extract_live_solar_power_kw(watts_payload) == 4.2
+    assert telemetry_archive.extract_live_solar_power_kw(kw_payload) == 4.2
+
+
+def test_append_mode_change_event(tmp_path, monkeypatch) -> None:
+    """Mode-change events should be appended as JSONL records."""
+    archive_path = tmp_path / "mode_change_events.jsonl"
+    monkeypatch.setattr(telemetry_archive, "MODE_CHANGE_EVENTS_ARCHIVE_PATH", str(archive_path))
+
+    telemetry_archive.append_mode_change_event(
+        scheduler_now_utc=datetime(2026, 4, 3, 11, 45, tzinfo=timezone.utc),
+        period="Morn (pre-period)",
+        requested_mode=5,
+        requested_mode_label="GRID_EXPORT",
+        reason="Headroom below target",
+        simulated=True,
+        success=True,
+        current_mode={"mode": 0},
+        response={"simulated": True, "mode": 5},
+    )
+
+    lines = archive_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+
+    event = json.loads(lines[0])
+    assert event["period"] == "Morn (pre-period)"
+    assert event["requested_mode"] == 5
+    assert event["requested_mode_label"] == "GRID_EXPORT"
+    assert event["simulated"] is True
+    assert event["success"] is True

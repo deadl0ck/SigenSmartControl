@@ -138,6 +138,12 @@ INVERTER_TELEMETRY_ARCHIVE_PATH: Final[str] = os.getenv(
     "data/inverter_telemetry.jsonl",
 ).strip()
 
+# Local archive file for inverter mode-change events (set attempts/results).
+MODE_CHANGE_EVENTS_ARCHIVE_PATH: Final[str] = os.getenv(
+    "MODE_CHANGE_EVENTS_ARCHIVE_PATH",
+    "data/mode_change_events.jsonl",
+).strip()
+
 # Local artifact storing bounded daily forecast calibration derived from telemetry.
 FORECAST_CALIBRATION_PATH: Final[str] = os.getenv(
     "FORECAST_CALIBRATION_PATH",

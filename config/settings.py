@@ -24,9 +24,15 @@ LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 # Runtime / Scheduler Settings
 # ==============================
 # How often the self-contained scheduler wakes up to re-check forecast windows.
-POLL_INTERVAL_MINUTES = 15
+POLL_INTERVAL_MINUTES = 5
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+# Number of live-solar samples used in rolling average calculations.
+LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
+# Lower bound for effective battery export capacity in pre-period calculations.
+MIN_EFFECTIVE_BATTERY_EXPORT_KW = 0.2
+# Default fallback SOC used in full simulation mode when env var parsing fails.
+DEFAULT_SIMULATED_SOC_PERCENT = 80.0
 # Full simulation mode: reads data and logs intended actions but never sends
 # inverter mode-change commands.
 FULL_SIMULATION_MODE = True
@@ -38,15 +44,67 @@ NEXT_DAY_PRECHECK_ENABLED = True
 NIGHT_PRECHECK_DELAY_MINUTES = 30
 # Local timezone used for tariff windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
+
+# HTTP timeout for ESB county forecast API requests.
+ESB_API_TIMEOUT_SECONDS = 30
+# HTTP timeout for Quartz forecast API requests.
+QUARTZ_API_TIMEOUT_SECONDS = 30
+# HTTP timeout for sunrise/sunset API requests.
+SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
+
+# Quartz period status normalization thresholds as fractions of configured array capacity.
+# Red: output_fraction < QUARTZ_RED_CAPACITY_FRACTION
+# Amber: QUARTZ_RED_CAPACITY_FRACTION <= output_fraction < QUARTZ_GREEN_CAPACITY_FRACTION
+# Green: output_fraction >= QUARTZ_GREEN_CAPACITY_FRACTION
+QUARTZ_RED_CAPACITY_FRACTION = 0.20
+QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
+
+# Telemetry clipping heuristics.
+# Primary clipping trigger when solar power is within this margin of inverter ceiling.
+CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW = 0.1
+# Secondary clipping trigger margin requiring corroborating signals.
+CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW = 0.3
+# Battery SOC threshold considered "high" for clipping confidence.
+CLIPPING_BATTERY_SOC_HIGH_PERCENT = 95.0
+# Absolute battery power threshold considered near-zero battery absorb/discharge.
+CLIPPING_BATTERY_POWER_ABS_LOW_KW = 0.2
+
+# Forecast calibration bounds and step controls.
+CALIBRATION_WINDOW_DAYS = 7
+CALIBRATION_DEFAULT_POWER_MULTIPLIER = 1.0
+CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER = 1.1
+CALIBRATION_RATIO_MIN = 0.5
+CALIBRATION_RATIO_MAX = 2.0
+CALIBRATION_TARGET_MULTIPLIER_MIN = 0.85
+CALIBRATION_TARGET_MULTIPLIER_MAX = 1.5
+CALIBRATION_TARGET_LEAD_BUFFER_MAX = 1.6
+CALIBRATION_MULTIPLIER_STEP_MAX = 0.08
+CALIBRATION_CLIPPING_RATE_WEIGHT = 0.25
+CALIBRATION_TARGET_MULTIPLIER_EXCESS_WEIGHT = 0.15
+
+# Forecast analysis script period windows (local hour ranges, end-exclusive).
+FORECAST_ANALYSIS_MORNING_START_HOUR = 7
+FORECAST_ANALYSIS_MORNING_END_HOUR = 12
+FORECAST_ANALYSIS_AFTERNOON_START_HOUR = 12
+FORECAST_ANALYSIS_AFTERNOON_END_HOUR = 16
+FORECAST_ANALYSIS_EVENING_START_HOUR = 16
+FORECAST_ANALYSIS_EVENING_END_HOUR = 20
+
+# Forecast analysis classification thresholds.
+FORECAST_ANALYSIS_WAY_OVER_FORECAST_MAX_RATIO = 0.5
+FORECAST_ANALYSIS_OVER_FORECAST_MAX_RATIO = 0.8
+FORECAST_ANALYSIS_ON_TARGET_MAX_RATIO = 1.25
+FORECAST_ANALYSIS_UNDER_FORECAST_MAX_RATIO = 2.0
+FORECAST_ANALYSIS_SOC_FULL_THRESHOLD_PERCENT = 99.5
+FORECAST_ANALYSIS_INVERTER_RED_UTILIZATION_MAX = 0.30
+FORECAST_ANALYSIS_INVERTER_AMBER_UTILIZATION_MAX = 0.60
+FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_RATE = 0.2
+FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_UTILIZATION = 0.55
 # ==============================
-# Tariff Configuration
+# Tariff Schedule Windows
 # ==============================
-# Tariff rates in cents per kWh.
-DAY_RATE_CENTS_PER_KWH = 26.596
-PEAK_RATE_CENTS_PER_KWH = 32.591
-NIGHT_RATE_CENTS_PER_KWH = 13.462
-SELL_RATE_CENTS_PER_KWH = 18.5
 # Tariff time windows in local time.
+# These drive period detection and cheap-rate window checks in tariff_utils.py.
 DAY_RATE_MORNING_START_HOUR = 8
 DAY_RATE_MORNING_END_HOUR = 17
 PEAK_RATE_START_HOUR = 17
@@ -134,7 +192,7 @@ TARIFF_TO_MODE = {
 PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
 
 # You can import these mappings in your main control logic:
-# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE
+# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, TARIFF_TO_MODE, PRE_CHEAP_RATE_MODE
 
 # ==============================
 # Data File Paths

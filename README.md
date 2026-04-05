@@ -112,19 +112,17 @@ BATTERY_KWH = 24
 ### Scheduler and decision thresholds
 
 ```python
-POLL_INTERVAL_MINUTES = 15
+POLL_INTERVAL_MINUTES = 5
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 FULL_SIMULATION_MODE = True
 NIGHT_MODE_ENABLED = True
 NEXT_DAY_PRECHECK_ENABLED = True
 NIGHT_PRECHECK_DELAY_MINUTES = 30
 LOCAL_TIMEZONE = "Europe/Dublin"
-DAY_RATE_CENTS_PER_KWH = 26.596
-PEAK_RATE_CENTS_PER_KWH = 32.591
-NIGHT_RATE_CENTS_PER_KWH = 13.462
+QUARTZ_RED_CAPACITY_FRACTION = 0.20
+QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
-SELL_RATE_CENTS_PER_KWH = 18.5
 HEADROOM_TARGET_KWH = 10.2
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
@@ -142,10 +140,6 @@ Meaning:
 - `NEXT_DAY_PRECHECK_ENABLED`: whether the scheduler evaluates the next morning's forecast during the night window
 - `NIGHT_PRECHECK_DELAY_MINUTES`: how long after the night window starts before the next-day pre-check runs
 - `LOCAL_TIMEZONE`: timezone used when evaluating tariff windows
-- `DAY_RATE_CENTS_PER_KWH`: day unit rate for 08:00-17:00 and 19:00-23:00
-- `PEAK_RATE_CENTS_PER_KWH`: peak unit rate for 17:00-19:00
-- `NIGHT_RATE_CENTS_PER_KWH`: night unit rate for 23:00-08:00
-- `SELL_RATE_CENTS_PER_KWH`: export unit rate used for arbitrage analysis and simulation notes
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
 - `FORECAST_PROVIDER`: active provider (`esb_api` or `quartz`)
@@ -153,6 +147,8 @@ Meaning:
 - `ESB_FORECAST_API_URL`: derived ESB endpoint for selected county id
 - `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
+- `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
+- `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 ```python
 HEADROOM_TARGET_KWH = 10.2
 ```
@@ -166,15 +162,16 @@ Meaning:
 - `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
 - `EVENING_AI_MODE_START_HOUR`: local hour after which Evening can transition to AI mode
 
-### Tariff schedule currently configured
+### Tariff schedule windows
 
-The tariff schedule currently captured in `config/settings.py` is:
+The tariff time windows in `config/settings.py` define when each tariff period is active. These drive period detection and cheap-rate window checks used by the scheduler:
 
-- `08:00-17:00`: Day at `26.596 c/kWh`
-- `17:00-19:00`: Peak at `32.591 c/kWh`
-- `19:00-23:00`: Day at `26.596 c/kWh`
-- `23:00-08:00`: Night at `13.462 c/kWh`
-- **Sell rate**: `18.5 c/kWh` (used when exporting to grid; enables arbitrage between sell and cheap-rate recharge)
+- `08:00-17:00`: Day period
+- `17:00-19:00`: Peak period
+- `19:00-23:00`: Day period (evening)
+- `23:00-08:00`: Night / cheap-rate window
+
+The scheduler uses these windows to determine whether to use self-powered, TOU, or AI modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions purely on forecast quality and tariff period, not on cost arithmetic.
 
 ### Forecast providers (ESB primary, Quartz secondary)
 
@@ -195,11 +192,11 @@ How the comparison is normalized:
 
 - ESB and Quartz are not naturally comparable. ESB is county-level and categorical (`Red`/`Amber`/`Green`), while Quartz is site-level and numeric (predicted power by timestamp).
 - Quartz timestamps are first converted into the local tariff timezone (`Europe/Dublin`) before grouping into project periods (`Morn`, `Aftn`, `Eve`, `NIGHT`). This avoids false mismatches caused by comparing UTC buckets to local scheduler windows.
-- Quartz period status is derived from average predicted output as a share of configured array size (`QUARTZ_SITE_CAPACITY_KWP`), not from the old fixed 200W/400W thresholds. Current normalization is:
-	- `Red`: less than 15% of array capacity
-	- `Amber`: 15% to less than 30% of array capacity
-	- `Green`: 30% or more of array capacity
-- ESB still exposes synthetic placeholder watts (`Red=100W`, `Amber=300W`, `Green=500W`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic, not real site output.
+- Quartz period status is derived from average predicted output as a share of configured array size (`QUARTZ_SITE_CAPACITY_KWP`). Current normalization is:
+	- `Red`: less than `QUARTZ_RED_CAPACITY_FRACTION` (default 20%)
+	- `Amber`: from `QUARTZ_RED_CAPACITY_FRACTION` up to `QUARTZ_GREEN_CAPACITY_FRACTION` (default 20% to <40%)
+	- `Green`: `QUARTZ_GREEN_CAPACITY_FRACTION` or more (default >=40%)
+- ESB still exposes synthetic placeholder forecast values (`Red=100`, `Amber=300`, `Green=500`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic and not as measured site power.
 
 Why the normalization exists:
 
@@ -260,7 +257,7 @@ Mode descriptions:
 The runtime does not just apply one mapping directly. It uses this order:
 
 1. Export rules first (highest priority):
-If forecast is Green and battery headroom is too low, or SOC is already very high, use `GRID_EXPORT`.
+If forecast is Green and battery headroom is too low, use `GRID_EXPORT`.
 2. Evening bridge rule second:
 If period is Evening and battery can safely cover expected household demand until cheap-rate starts, use `SELF_POWERED`.
 3. Peak-price rule third:
@@ -275,11 +272,10 @@ If `ENABLE_EVENING_AI_MODE_TRANSITION` is enabled and local time is after `EVENI
 For daytime periods, read it like this:
 
 1. If Green forecast AND battery space is too small for expected solar -> `GRID_EXPORT`.
-2. Else if Green forecast AND SOC already above threshold -> `GRID_EXPORT`.
-3. Else if period is Evening and battery can cover expected load until cheap-rate starts -> `SELF_POWERED`.
-4. Else if tariff is Peak -> `SELF_POWERED`.
-5. Else -> use forecast mapping (Green/Amber/Red).
-6. At Evening period-start, if Evening AI transition is enabled and local time is past the configured threshold -> force `AI`.
+2. Else if period is Evening and battery can cover expected load until cheap-rate starts -> `SELF_POWERED`.
+3. Else if tariff is Peak -> `SELF_POWERED`.
+4. Else -> use forecast mapping (Green/Amber/Red).
+5. At Evening period-start, if Evening AI transition is enabled and local time is past the configured threshold -> force `AI`.
 
 For night:
 
@@ -374,7 +370,7 @@ tariff period for the target time of the period action:
 
 Decision precedence for daytime periods is:
 
-1. Export-to-grid safety/space rules (headroom shortfall or high SOC with Green forecast)
+1. Export-to-grid safety/space rules (headroom shortfall before a Green period)
 2. Peak tariff override: if tariff is `PEAK` and export was not selected, force self-powered mode to minimize expensive imports
 3. Otherwise use the forecast mapping (Green/Amber/Red)
 
@@ -393,10 +389,18 @@ $$
 Lead time before the period:
 
 $$
-\text{lead\_time\_hours} = \frac{\text{headroom\_deficit\_kwh} \times 1.1}{\text{inverter\_kw}}
+	ext{solar\_avg\_kw\_3} = \text{average of latest 3 live solar readings}
 $$
 
-The `1.1` factor adds a 10% buffer.
+$$
+	ext{effective\_battery\_export\_kw} = \max(0.2, \text{inverter\_kw} - \text{solar\_avg\_kw\_3})
+$$
+
+$$
+	ext{lead\_time\_hours} = \frac{\text{headroom\_deficit\_kwh} \times \text{export\_lead\_buffer\_multiplier}}{\text{effective\_battery\_export\_kw}}
+$$
+
+This causes earlier export start when live solar is already high (because less inverter headroom remains for battery discharge).
 
 The scheduler then calculates:
 
@@ -545,6 +549,9 @@ For each check, the log includes:
 - battery headroom kWh
 - target headroom kWh
 - headroom deficit kWh
+- rolling 3-sample live solar average (kW)
+- effective battery export capacity after live solar occupancy (kW)
+- adjusted lead-time hours
 - calculated `export_by` time
 - selected decision mode
 - outcome
@@ -554,10 +561,19 @@ Example structure:
 
 ```text
 [Morn] PRE-PERIOD CHECK | now=... | period_start=... | forecast_w=500 | status=Green |
-expected_solar_kwh=1.50 | soc=82.0 | headroom_kwh=4.32 | headroom_target_kwh=0.38 |
-headroom_deficit_kwh=0.00 | export_by=... | decision_mode=SELF_POWERED |
+expected_solar_kwh=1.50 | soc=82.0 | headroom_kwh=4.32 | headroom_target_kwh=10.20 |
+headroom_deficit_kwh=5.88 | solar_avg_kw_3=2.80 | effective_battery_export_kw=2.70 |
+lead_time_hours_adjusted=2.40 | export_by=... | decision_mode=GRID_EXPORT |
 outcome=waiting until export window opens | reason=Default mapping for Green.
 ```
+
+### Mode-change event archive
+
+Every set-operational-mode command attempt (including simulation-mode set attempts) is appended to:
+
+- `data/mode_change_events.jsonl`
+
+Each event includes timestamp, period/context, requested mode, reason, prior mode payload (if readable), response payload, and success/failure. This allows direct correlation with inverter telemetry snapshots in `data/inverter_telemetry.jsonl`.
 
 ## Forecast Accuracy Report
 

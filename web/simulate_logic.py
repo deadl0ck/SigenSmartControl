@@ -42,8 +42,6 @@ def simulate_sigen_decision(
         Dict with keys for each period ('Morn', 'Aftn', 'Eve', 'NIGHT') mapping to
         mode details: {'mode': int, 'mode_name': str, 'reason': str, 'forecast': str}.
     """
-    HEADROOM_FRAC = 0.25
-    SOC_HIGH_THRESHOLD = 95
     periods = [
         ("Morn", forecast_morn),
         ("Aftn", forecast_aftn),

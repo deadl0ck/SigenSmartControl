@@ -33,17 +33,34 @@ sys.path.insert(0, str(_ROOT))
 
 from config.settings import (
     CALIBRATION_LOG_PATH,
+    FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
+    FORECAST_ANALYSIS_AFTERNOON_START_HOUR,
+    FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_RATE,
+    FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_UTILIZATION,
+    FORECAST_ANALYSIS_EVENING_END_HOUR,
+    FORECAST_ANALYSIS_EVENING_START_HOUR,
+    FORECAST_ANALYSIS_INVERTER_AMBER_UTILIZATION_MAX,
+    FORECAST_ANALYSIS_INVERTER_RED_UTILIZATION_MAX,
+    FORECAST_ANALYSIS_MORNING_END_HOUR,
+    FORECAST_ANALYSIS_MORNING_START_HOUR,
+    FORECAST_ANALYSIS_ON_TARGET_MAX_RATIO,
+    FORECAST_ANALYSIS_OVER_FORECAST_MAX_RATIO,
+    FORECAST_ANALYSIS_SOC_FULL_THRESHOLD_PERCENT,
+    FORECAST_ANALYSIS_UNDER_FORECAST_MAX_RATIO,
+    FORECAST_ANALYSIS_WAY_OVER_FORECAST_MAX_RATIO,
     FORECAST_COMPARISONS_LOG_PATH,
     INVERTER_KW,
+    QUARTZ_GREEN_CAPACITY_FRACTION,
+    QUARTZ_RED_CAPACITY_FRACTION,
     SOLAR_PV_KW,
     TELEMETRY_LOG_PATH,
 )
 
 # Period hour boundaries — must stay in sync with telemetry_archive.py
 _PERIOD_WINDOWS: dict[str, tuple[int, int]] = {
-    "Morn": (7, 12),
-    "Aftn": (12, 16),
-    "Eve": (16, 20),
+    "Morn": (FORECAST_ANALYSIS_MORNING_START_HOUR, FORECAST_ANALYSIS_MORNING_END_HOUR),
+    "Aftn": (FORECAST_ANALYSIS_AFTERNOON_START_HOUR, FORECAST_ANALYSIS_AFTERNOON_END_HOUR),
+    "Eve": (FORECAST_ANALYSIS_EVENING_START_HOUR, FORECAST_ANALYSIS_EVENING_END_HOUR),
 }
 
 
@@ -123,13 +140,13 @@ def classify_accuracy(ratio: float) -> str:
     Returns:
         Human-readable label for how far off the forecast was.
     """
-    if ratio < 0.5:
+    if ratio < FORECAST_ANALYSIS_WAY_OVER_FORECAST_MAX_RATIO:
         return "way over-forecast"
-    if ratio < 0.8:
+    if ratio < FORECAST_ANALYSIS_OVER_FORECAST_MAX_RATIO:
         return "over-forecast"
-    if ratio <= 1.25:
+    if ratio <= FORECAST_ANALYSIS_ON_TARGET_MAX_RATIO:
         return "on target"
-    if ratio <= 2.0:
+    if ratio <= FORECAST_ANALYSIS_UNDER_FORECAST_MAX_RATIO:
         return "under-forecast"
     return "severely under-forecast"
 
@@ -149,8 +166,8 @@ def derive_status_from_power(power_kw: float, capacity_kwp: float) -> str:
     Returns:
         Status string: 'Red', 'Amber', or 'Green'.
     """
-    red_threshold = capacity_kwp * 0.20
-    green_threshold = capacity_kwp * 0.40
+    red_threshold = capacity_kwp * QUARTZ_RED_CAPACITY_FRACTION
+    green_threshold = capacity_kwp * QUARTZ_GREEN_CAPACITY_FRACTION
 
     if power_kw < red_threshold:
         return "Red"
@@ -191,22 +208,25 @@ def derive_actual_reading_status(
 
     # Use stricter bands when the inverter basis applies.
     if basis == "Inverter":
-        if utilization < 0.30:
+        if utilization < FORECAST_ANALYSIS_INVERTER_RED_UTILIZATION_MAX:
             status = "Red"
-        elif utilization < 0.60:
+        elif utilization < FORECAST_ANALYSIS_INVERTER_AMBER_UTILIZATION_MAX:
             status = "Amber"
         else:
             status = "Green"
     else:
-        if utilization < 0.20:
+        if utilization < QUARTZ_RED_CAPACITY_FRACTION:
             status = "Red"
-        elif utilization < 0.40:
+        elif utilization < QUARTZ_GREEN_CAPACITY_FRACTION:
             status = "Amber"
         else:
             status = "Green"
 
     # Frequent clipping implies available solar may be higher than measured.
-    if clipping_rate >= 0.2 and utilization >= 0.55:
+    if (
+        clipping_rate >= FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_RATE
+        and utilization >= FORECAST_ANALYSIS_CLIPPING_PROMOTE_MIN_UTILIZATION
+    ):
         return "Green", basis
     return status, basis
 
@@ -411,8 +431,11 @@ def print_report(
         clipping_count = telem["clipping_count"]
         soc_samples = telem.get("soc_percent", [])
         max_soc = max(soc_samples) if soc_samples else None
-        # Treat >=99.5% as full to handle decimal SOC rounding around 100%.
-        soc_full = max_soc is not None and max_soc >= 99.5
+        # Treat very high SOC as full to handle decimal rounding around 100%.
+        soc_full = (
+            max_soc is not None
+            and max_soc >= FORECAST_ANALYSIS_SOC_FULL_THRESHOLD_PERCENT
+        )
 
         forecast = forecast_rows.get((date, period), {})
         esb_w = forecast.get("esb_w")
