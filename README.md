@@ -11,10 +11,11 @@
 7. [Scheduler Behavior](#scheduler-behavior)
 8. [Logging](#logging)
 9. [Mode Test Utility](#mode-test-utility)
-10. [Forecast Accuracy Report](#forecast-accuracy-report)
-11. [Web Simulator](#web-simulator)
-12. [Tests](#tests)
-13. [Notes](#notes)
+10. [Email Notifications](#email-notifications)
+11. [Forecast Accuracy Report](#forecast-accuracy-report)
+12. [Web Simulator](#web-simulator)
+13. [Tests](#tests)
+14. [Notes](#notes)
 
 ## Overview
 
@@ -65,7 +66,8 @@ see exactly what values were used and why each decision was made.
 │   └── forecast_calibration.py       # Daily bounded calibration generation from telemetry
 ├── scripts/
 │   ├── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
-│   └── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
+│   ├── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
+│   └── test_mode_change_email.py     # Sends a test mode-change email via scheduler simulation path
 ├── web/
 │   ├── app.py                        # Flask web simulator backend
 │   ├── simulate_logic.py             # Web simulator wrapper around shared decision logic
@@ -96,6 +98,9 @@ SIGEN_USERNAME=your_sigen_email
 SIGEN_PASSWORD=your_sigen_password
 SIGEN_LATITUDE=53.3498
 SIGEN_LONGITUDE=-6.2603
+EMAIL_SENDER=your_sender@gmail.com
+EMAIL_RECEIVER=your_receiver@gmail.com
+GMAIL_APP_PASSWORD=your_gmail_app_password
 ```
 
 4. Edit `config/settings.py` for your hardware and scheduler settings.
@@ -625,6 +630,43 @@ Important:
 - `FULL_SIMULATION_MODE = True` means mode writes are suppressed (read-only calls still run).
 - Set `FULL_SIMULATION_MODE = False` to send real mode-change commands.
 
+## Email Notifications
+
+When the scheduler issues a mode-change command, it sends an email notification with:
+
+- success or failure status
+- period/context
+- previous mode and requested mode
+- decision reason
+- local and UTC timestamps
+- response payload or error text
+
+Required `.env` variables:
+
+- `EMAIL_SENDER`: Gmail address used to send notifications
+- `EMAIL_RECEIVER`: destination email address
+- `GMAIL_APP_PASSWORD`: Gmail app password for `EMAIL_SENDER`
+
+Notes:
+
+- Notifications are sent for real inverter mode-change commands.
+- Notifications are also sent in simulation mode command paths.
+- If required email env vars are missing, notifications are skipped and scheduler continues.
+
+### Test email notifications
+
+Run this script to trigger a simulated mode-change command and send a test email through the same runtime notification path:
+
+```sh
+python scripts/test_mode_change_email.py
+```
+
+Optional arguments:
+
+```sh
+python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason "Testing email path"
+```
+
 ## Forecast Accuracy Report
 
 Run:
@@ -697,7 +739,6 @@ The simulator:
 - defaults SOC to `80%` while keeping it editable
 - lets you simulate Morning, Afternoon, and Evening forecasts
 - treats Night as tariff-driven (not a manual solar status)
-- derives overnight prep decisions from the next morning forecast
 - shows both the selected mode and a human-readable explanation
 - uses the same shared decision logic as the live runtime
 

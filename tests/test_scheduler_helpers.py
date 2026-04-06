@@ -4,6 +4,7 @@ Tests period suppression, scheduler initialization, and mode application logic.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -182,3 +183,30 @@ async def test_apply_mode_change_sets_when_target_differs() -> None:
 
     assert ok is True
     assert sigen.set_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_change_simulation_triggers_email_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called: dict[str, Any] = {"email": False}
+
+    async def fake_notify(**kwargs):
+        called["email"] = True
+        assert kwargs["success"] is True
+        assert kwargs["period"] == "Night->Morn"
+        assert kwargs["requested_mode"] == 1
+
+    monkeypatch.setattr(main, "FULL_SIMULATION_MODE", True)
+    monkeypatch.setattr(main, "_notify_mode_change_email", fake_notify)
+
+    ok = await main.apply_mode_change(
+        sigen=None,
+        mode=1,
+        period="Night->Morn",
+        reason="Simulation email notification test.",
+        mode_names={1: "AI"},
+    )
+
+    assert ok is True
+    assert called["email"] is True

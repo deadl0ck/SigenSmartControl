@@ -8,10 +8,12 @@ grid arbitrage, and cost-minimization based on real-time conditions.
 
 import asyncio
 from collections import deque
+import importlib.util
 import math
 import logging
 import os
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any
 
 from weather.forecast import SolarForecastProvider, create_solar_forecast_provider
@@ -72,6 +74,12 @@ from telemetry.telemetry_archive import (
 LOG_LEVEL = getattr(logging, CONFIG_LOG_LEVEL, logging.INFO)
 logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("sigen_control")
+
+_EMAIL_SENDER_ADDRESS = os.getenv("EMAIL_SENDER", "").strip()
+_EMAIL_RECEIVER_ADDRESS = os.getenv("EMAIL_RECEIVER", "").strip()
+_EMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+_EMAIL_SENDER_INSTANCE: Any | None = None
+_EMAIL_CONFIG_LOGGED = False
 
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
@@ -148,6 +156,121 @@ def log_payload_tree(title: str, payload: Any) -> None:
     for line in _iter_tree_lines(payload):
         logger.info("  %s", line)
 
+
+def _load_email_sender_class() -> type | None:
+    """Load EmailSender class from email/email_sender.py without shadowing stdlib email package.
+
+    Returns:
+        EmailSender class when available, otherwise None.
+    """
+    sender_path = Path(__file__).resolve().parent / "email" / "email_sender.py"
+    if not sender_path.exists():
+        return None
+
+    spec = importlib.util.spec_from_file_location("sigen_email_sender", sender_path)
+    if spec is None or spec.loader is None:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "EmailSender", None)
+
+
+def _get_email_sender_instance() -> Any | None:
+    """Build and cache the email sender helper when env vars are configured.
+
+    Returns:
+        Initialized EmailSender instance, or None when email notifications are disabled.
+    """
+    global _EMAIL_SENDER_INSTANCE
+    global _EMAIL_CONFIG_LOGGED
+
+    if _EMAIL_SENDER_INSTANCE is not None:
+        return _EMAIL_SENDER_INSTANCE
+
+    if not (_EMAIL_SENDER_ADDRESS and _EMAIL_RECEIVER_ADDRESS and _EMAIL_APP_PASSWORD):
+        if not _EMAIL_CONFIG_LOGGED:
+            logger.info(
+                "[EMAIL] Mode-change email notifications disabled (missing EMAIL_SENDER, "
+                "EMAIL_RECEIVER, or GMAIL_APP_PASSWORD)."
+            )
+            _EMAIL_CONFIG_LOGGED = True
+        return None
+
+    email_sender_cls = _load_email_sender_class()
+    if email_sender_cls is None:
+        logger.warning("[EMAIL] Could not load EmailSender class from email/email_sender.py.")
+        return None
+
+    try:
+        _EMAIL_SENDER_INSTANCE = email_sender_cls(_EMAIL_SENDER_ADDRESS, _EMAIL_APP_PASSWORD)
+        logger.info("[EMAIL] Mode-change email notifications enabled.")
+        return _EMAIL_SENDER_INSTANCE
+    except Exception as exc:
+        logger.error("[EMAIL] Failed to initialize EmailSender: %s", exc)
+        return None
+
+
+async def _notify_mode_change_email(
+    *,
+    success: bool,
+    period: str,
+    reason: str,
+    requested_mode: int,
+    requested_mode_label: str,
+    current_mode_raw: Any,
+    mode_names: dict[int, str],
+    event_time_utc: datetime,
+    response: Any | None = None,
+    error: str | None = None,
+) -> None:
+    """Send a best-effort email describing an inverter mode command attempt.
+
+    Args:
+        success: True when the mode command call succeeded.
+        period: Scheduler period/context label.
+        reason: Decision reason for the command.
+        requested_mode: Numeric target mode value.
+        requested_mode_label: Human-readable target mode label.
+        current_mode_raw: Current mode payload before command.
+        mode_names: Mapping from mode value to label.
+        event_time_utc: Timestamp for this command attempt.
+        response: Optional API response payload on success.
+        error: Optional error message on failure.
+    """
+    sender = _get_email_sender_instance()
+    if sender is None:
+        return
+
+    current_mode_value = extract_mode_value(current_mode_raw)
+    if current_mode_value is not None:
+        previous_mode_label = str(mode_names.get(current_mode_value, current_mode_value))
+        previous_mode_value = str(current_mode_value)
+    else:
+        previous_mode_label = "Unknown"
+        previous_mode_value = str(current_mode_raw)
+
+    status = "SUCCESS" if success else "FAILED"
+    local_time = event_time_utc.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    subject = f"[Sigen] Mode command {status}: {requested_mode_label} ({period})"
+    body = (
+        f"Mode command status: {status}\n"
+        f"Local time: {local_time}\n"
+        f"UTC time: {event_time_utc.isoformat()}\n"
+        f"Context/period: {period}\n"
+        f"Previous mode: {previous_mode_label} (raw={previous_mode_value})\n"
+        f"Requested mode: {requested_mode_label} (value={requested_mode})\n"
+        f"Reason: {reason}\n"
+        f"Error: {error if error else 'None'}\n"
+        f"Response: {response if response is not None else 'None'}\n"
+    )
+
+    try:
+        await asyncio.to_thread(sender.send, _EMAIL_RECEIVER_ADDRESS, subject, body)
+        logger.info("[EMAIL] Sent mode-change notification for %s.", period)
+    except Exception as exc:
+        logger.error("[EMAIL] Failed to send mode-change notification: %s", exc)
+
 async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
     """Log all retrievable inverter startup data.
     
@@ -219,6 +342,12 @@ async def apply_mode_change(
     current_mode_raw: Any = None
     if sigen is None:
         if FULL_SIMULATION_MODE:
+            event_time = datetime.now(timezone.utc)
+            simulated_response = {
+                "simulated": True,
+                "mode": mode,
+                "note": "Sigen interaction unavailable; simulated fallback path.",
+            }
             logger.info(ACTION_DIVIDER)
             logger.info(ACTION_DIVIDER)
             logger.info(
@@ -228,7 +357,7 @@ async def apply_mode_change(
             logger.info(ACTION_DIVIDER)
             logger.info(ACTION_DIVIDER)
             append_mode_change_event(
-                scheduler_now_utc=datetime.now(timezone.utc),
+                scheduler_now_utc=event_time,
                 period=period,
                 requested_mode=mode,
                 requested_mode_label=str(mode_label),
@@ -236,11 +365,18 @@ async def apply_mode_change(
                 simulated=True,
                 success=True,
                 current_mode=None,
-                response={
-                    "simulated": True,
-                    "mode": mode,
-                    "note": "Sigen interaction unavailable; simulated fallback path.",
-                },
+                response=simulated_response,
+            )
+            await _notify_mode_change_email(
+                success=True,
+                period=period,
+                reason=reason,
+                requested_mode=mode,
+                requested_mode_label=str(mode_label),
+                current_mode_raw=None,
+                mode_names=mode_names,
+                event_time_utc=event_time,
+                response=simulated_response,
             )
             return True
 
@@ -288,6 +424,17 @@ async def apply_mode_change(
             current_mode=current_mode_raw,
             response=response,
         )
+        await _notify_mode_change_email(
+            success=True,
+            period=period,
+            reason=reason,
+            requested_mode=mode,
+            requested_mode_label=str(mode_label),
+            current_mode_raw=current_mode_raw,
+            mode_names=mode_names,
+            event_time_utc=event_time,
+            response=response,
+        )
         return True
     except Exception as e:
         logger.error(f"Failed to set mode for {period}: {e}")
@@ -300,6 +447,17 @@ async def apply_mode_change(
             simulated=FULL_SIMULATION_MODE,
             success=False,
             current_mode=current_mode_raw,
+            error=str(e),
+        )
+        await _notify_mode_change_email(
+            success=False,
+            period=period,
+            reason=reason,
+            requested_mode=mode,
+            requested_mode_label=str(mode_label),
+            current_mode_raw=current_mode_raw,
+            mode_names=mode_names,
+            event_time_utc=event_time,
             error=str(e),
         )
         return False
