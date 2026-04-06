@@ -13,6 +13,7 @@ Endpoints:
 from flask import Flask, request, jsonify, send_from_directory
 import sys
 import os
+from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config.settings import SOLAR_PV_KW, INVERTER_KW, BATTERY_KWH

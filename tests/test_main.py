@@ -23,7 +23,6 @@ import pytest
 from config.settings import FORECAST_TO_MODE, SIGEN_MODES
 import logging
 logger = logging.getLogger(__name__)
-import os
 
 def mask(val):
     if isinstance(val, str) and ("PASS" in val or "SECRET" in val or "TOKEN" in val):

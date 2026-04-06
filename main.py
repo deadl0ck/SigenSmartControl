@@ -13,7 +13,6 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from weather.forecast import SolarForecastProvider, create_solar_forecast_provider
 from integrations.sigen_interaction import SigenInteraction
@@ -22,29 +21,15 @@ from config.settings import (
     LOG_LEVEL as CONFIG_LOG_LEVEL,
     SIGEN_MODES,
     PERIOD_TO_MODE,
-    PRE_CHEAP_RATE_MODE,
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
-    NEXT_DAY_PRECHECK_ENABLED,
-    NIGHT_PRECHECK_DELAY_MINUTES,
     NIGHT_SLEEP_MODE_ENABLED,
-    LOCAL_TIMEZONE,
-    MORNING_START_HOUR,
-    MORNING_END_HOUR,
-    PEAK_START_HOUR,
-    PEAK_END_HOUR,
-    EVENING_START_HOUR,
-    EVENING_END_HOUR,
-    CHEAP_RATE_START_HOUR,
-    CHEAP_RATE_END_HOUR,
     HEADROOM_TARGET_KWH,
     ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     ESTIMATED_HOME_LOAD_KW,
     BRIDGE_BATTERY_RESERVE_KWH,
-    ENABLE_EVENING_AI_MODE_TRANSITION,
-    EVENING_AI_MODE_START_HOUR,
     SOLAR_PV_KW,
     INVERTER_KW,
     BATTERY_KWH,
@@ -57,15 +42,12 @@ from config.settings import (
 )
 from logic.decision_logic import (
     decide_operational_mode,
-    decide_night_preparation_mode,
     calc_headroom_kwh,
 )
 from logic.schedule_utils import (
     _parse_utc,
     derive_period_windows,
     get_first_period_info,
-    is_cheap_rate_window,
-    get_night_schedule_mode,
     get_hours_until_cheap_rate,
     get_schedule_period_for_time,
     suppress_elapsed_periods_except_latest,
@@ -380,120 +362,6 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
     raise SystemExit(1)
 
 
-async def main() -> None:
-    """
-    Main control loop for Sigen inverter automation.
-    - Fetches today's solar forecast
-    - Determines the best operational mode for each period (Morn/Aftn/Eve)
-    - Sets the inverter mode accordingly
-    - All actions are logged at the configured level
-    """
-
-    def mask(val, key=None):
-        """Mask sensitive environment variable values in logs.
-        
-        Args:
-            val: Value to check for masking.
-            key: Optional environment variable name.
-            
-        Returns:
-            Masked string for sensitive values, original value otherwise.
-        """
-        if key and key.upper() in ("SIGEN_PASSWORD",):
-            return "***MASKED***"
-        if not isinstance(val, str):
-            return val
-        if any(s in val.upper() for s in ("PASS", "SECRET", "TOKEN")):
-            return val[:2] + "***MASKED***" + val[-2:]
-        return val
-
-    # Only log relevant env vars used in code
-    relevant_env_vars = [
-        "SIGEN_USERNAME", "SIGEN_PASSWORD", "SIGEN_LATITUDE", "SIGEN_LONGITUDE"
-    ]
-    logger.info("[RUN] Loaded relevant environment variables:")
-    for k in relevant_env_vars:
-        v = os.getenv(k)
-        if v is None:
-            logger.info(f"[RUN] ENV {k} = [NOT SET]")
-        else:
-            logger.info(f"[RUN] ENV {k} = {mask(v, k)}")
-
-    logger.info("Starting Sigen inverter control loop...")
-    logger.info(f"System Specs: Solar PV = {SOLAR_PV_KW} kW, Inverter = {INVERTER_KW} kW, Battery = {BATTERY_KWH} kWh")
-
-    # Helper to estimate max possible solar input for a period (kWh)
-    def estimate_period_solar(solar_value: int, period_hours: float = 3.0) -> float:
-        """Estimate total solar energy available during a period.
-        
-        Args:
-            solar_value: Forecasted power in watts (typically average for period).
-            period_hours: Duration of the period in hours (default 3.0).
-            
-        Returns:
-            Estimated energy in kWh, capped by system limits (PV size, inverter capacity).
-        """
-        # solar_value is forecast W for the period; scale by PV size
-        # Assume forecast is average W for period
-        kw = (solar_value / 1000.0)
-        kw = min(kw, SOLAR_PV_KW, INVERTER_KW)  # can't exceed hardware
-        return kw * period_hours
-
-    # Legacy one-shot run path (scheduler mode is run_scheduler).
-    sigen = await SigenInteraction.create()
-    mode_names = {v: k for k, v in SIGEN_MODES.items()}
-    await log_current_mode_on_startup(sigen, mode_names)
-    forecast: SolarForecastProvider = create_solar_forecast_provider(logger)
-    period_forecast = forecast.get_todays_period_forecast()
-
-
-    for period, (solar_value, status) in period_forecast.items():
-        logger.info(f"Period: {period}, Solar Value: {solar_value}, Status: {status}")
-
-        # Fetch battery SOC for this period
-        try:
-            energy_flow: dict[str, Any] = await sigen.get_energy_flow()
-            soc = energy_flow.get("batterySoc")
-            logger.info(f"Battery SOC for {period}: {soc}%")
-        except Exception as e:
-            logger.error(f"Failed to fetch SOC for {period}: {e}")
-            soc = None
-
-        # Estimate headroom and solar for this period
-        headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc) if soc is not None else None
-        period_solar_kwh = estimate_period_solar(solar_value)
-        logger.info(f"Estimated battery headroom before {period}: {headroom_kwh:.2f} kWh")
-        logger.info(f"Estimated max solar input for {period}: {period_solar_kwh:.2f} kWh")
-
-        mode, decision_reason = decide_operational_mode(
-            period=period,
-            status=status,
-            soc=soc,
-            headroom_kwh=headroom_kwh,
-            period_solar_kwh=period_solar_kwh,
-            schedule_period=get_schedule_period_for_time(datetime.now(timezone.utc)),
-            headroom_target_kwh=HEADROOM_TARGET_KWH,
-            battery_kwh=BATTERY_KWH,
-            hours_until_cheap_rate=get_hours_until_cheap_rate(datetime.now(timezone.utc)),
-            estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-            bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-            enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
-        )
-        logger.info(
-            f"Selected mode for {period}: {mode_names.get(mode, mode)} (value={mode}). Reason: {decision_reason}"
-        )
-
-        await apply_mode_change(
-            sigen=sigen,
-            mode=mode,
-            period=period,
-            reason=decision_reason,
-            mode_names=mode_names,
-        )
-
-    logger.info("Control loop complete.")
-
-
 async def run_scheduler() -> None:
     """
     Self-contained 5-minute scheduling loop for production use.
@@ -580,8 +448,6 @@ async def run_scheduler() -> None:
     day_state: dict[str, dict[str, bool]] = {}
     night_state: dict[str, Any] = {
         "mode_set_for": None,
-        "mode_phase": None,
-        "prep_set_for": None,
     }
     sleep_override_seconds: int | None = None
     refresh_auth_on_wake = False
@@ -1193,9 +1059,6 @@ async def run_scheduler() -> None:
 
         if night_state["mode_set_for"] is not None and night_state["mode_set_for"] < today:
             night_state["mode_set_for"] = None
-            night_state["mode_phase"] = None
-        if night_state["prep_set_for"] is not None and night_state["prep_set_for"] < today:
-            night_state["prep_set_for"] = None
 
         night_context = get_active_night_context(now)
         if NIGHT_MODE_ENABLED and night_context is not None:
@@ -1205,12 +1068,10 @@ async def run_scheduler() -> None:
                 night_context["solar_value"],
             )
             night_headroom_target_kwh = HEADROOM_TARGET_KWH
-            night_mode, night_phase, night_mode_reason = get_night_schedule_mode(now)
+            night_mode = PERIOD_TO_MODE["NIGHT"]
+            night_mode_reason = "Night window active. Forcing AI mode overnight."
 
-            if (
-                night_state["mode_set_for"] != night_context["target_date"]
-                or night_state["mode_phase"] != night_phase
-            ):
+            if night_state["mode_set_for"] != night_context["target_date"]:
                 log_check(
                     night_period_name,
                     "NIGHT-BASE",
@@ -1229,7 +1090,7 @@ async def run_scheduler() -> None:
                         f"Active {night_context['window_name']} window before "
                         f"{night_context['target_period']}. {night_mode_reason}"
                     ),
-                    outcome=f"night {night_phase} mode applied",
+                    outcome="night mode applied",
                 )
                 try:
                     ok = await apply_mode_change(
@@ -1241,112 +1102,14 @@ async def run_scheduler() -> None:
                     )
                     if ok:
                         night_state["mode_set_for"] = night_context["target_date"]
-                        night_state["mode_phase"] = night_phase
                 except Exception as e:
                     logger.error(f"[{night_period_name}] Unexpected error applying base night mode: {e}")
-
-            if NEXT_DAY_PRECHECK_ENABLED and night_state["prep_set_for"] != night_context["target_date"]:
-                precheck_opens_at = (
-                    night_context["night_start"] + timedelta(minutes=NIGHT_PRECHECK_DELAY_MINUTES)
-                    if night_context["night_start"] is not None
-                    else now
-                )
-                if now >= precheck_opens_at:
-                    soc = await fetch_soc(night_period_name)
-                    if soc is not None:
-                        headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                        headroom_deficit = max(0.0, night_headroom_target_kwh - headroom_kwh)
-                        mode, reason = decide_night_preparation_mode(
-                            target_period=night_context["target_period"],
-                            status=night_context["status"],
-                            soc=soc,
-                            headroom_kwh=headroom_kwh,
-                            period_solar_kwh=night_period_solar_kwh,
-                            headroom_target_kwh=HEADROOM_TARGET_KWH,
-                        )
-                        if mode == PERIOD_TO_MODE["NIGHT"] and not is_cheap_rate_window(now):
-                            mode = PRE_CHEAP_RATE_MODE
-                            reason = (
-                                f"{reason} Cheap-rate window has not opened yet, so using pre-cheap-rate mode "
-                                "instead of charge-oriented night mode."
-                            )
-                        log_check(
-                            night_period_name,
-                            "NIGHT-PREP",
-                            now_utc=now,
-                            period_start_utc=night_context["target_start"],
-                            solar_value=night_context["solar_value"],
-                            status=night_context["status"],
-                            period_solar_kwh=night_period_solar_kwh,
-                            soc=soc,
-                            headroom_kwh=headroom_kwh,
-                            headroom_target_kwh=night_headroom_target_kwh,
-                            headroom_deficit_kwh=headroom_deficit,
-                            export_by_utc=precheck_opens_at,
-                            mode=mode,
-                            reason=reason,
-                            outcome="night pre-check action applied",
-                        )
-                        ok = await apply_mode_change(
-                            sigen=sigen,
-                            mode=mode,
-                            period=night_period_name,
-                            reason=reason,
-                            mode_names=mode_names,
-                        )
-                        if ok:
-                            night_state["prep_set_for"] = night_context["target_date"]
-                else:
-                    log_check(
-                        night_period_name,
-                        "NIGHT-PREP",
-                        now_utc=now,
-                        period_start_utc=night_context["target_start"],
-                        solar_value=night_context["solar_value"],
-                        status=night_context["status"],
-                        period_solar_kwh=night_period_solar_kwh,
-                        soc=None,
-                        headroom_kwh=None,
-                        headroom_target_kwh=night_headroom_target_kwh,
-                        headroom_deficit_kwh=0.0,
-                        export_by_utc=precheck_opens_at,
-                        mode=night_mode,
-                        reason=(
-                            "Waiting until configured night pre-check delay has elapsed. "
-                            f"Current local time {now.astimezone(LOCAL_TZ).strftime('%H:%M')} is still in "
-                            f"the {night_phase} tariff phase."
-                        ),
-                        outcome="night pre-check not yet due",
-                    )
 
             if NIGHT_SLEEP_MODE_ENABLED:
                 pre_window_opens_at = night_context["target_start"] - MAX_PRE_PERIOD_WINDOW
 
-                precheck_due_at = (
-                    night_context["night_start"] + timedelta(minutes=NIGHT_PRECHECK_DELAY_MINUTES)
-                    if (
-                        NEXT_DAY_PRECHECK_ENABLED
-                        and night_context["night_start"] is not None
-                        and night_state["prep_set_for"] != night_context["target_date"]
-                    )
-                    else None
-                )
-
-                wake_at_utc: datetime | None = None
-                wake_reason = ""
-
-                if precheck_due_at is not None and now < precheck_due_at:
-                    wake_at_utc = precheck_due_at
-                    wake_reason = "next-day pre-check window"
-                elif (
-                    night_state["prep_set_for"] == night_context["target_date"]
-                    and now < pre_window_opens_at
-                ):
-                    wake_at_utc = pre_window_opens_at
-                    wake_reason = "morning pre-period window"
-
-                if wake_at_utc is not None:
-                    sleep_seconds = max(1, int((wake_at_utc - now).total_seconds()))
+                if now < pre_window_opens_at:
+                    sleep_seconds = max(1, int((pre_window_opens_at - now).total_seconds()))
                     if sleep_seconds > POLL_INTERVAL_SECONDS:
                         sleep_override_seconds = sleep_seconds
                         refresh_auth_on_wake = True
@@ -1354,8 +1117,8 @@ async def run_scheduler() -> None:
                             "[SCHEDULER] Night sleep mode active. Sleeping for %s minutes "
                             "until %s (%s).",
                             sleep_seconds // 60,
-                            wake_at_utc.isoformat(),
-                            wake_reason,
+                            pre_window_opens_at.isoformat(),
+                            "morning pre-period window",
                         )
 
         for period, period_start in today_period_windows.items():

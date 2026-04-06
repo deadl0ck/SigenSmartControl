@@ -57,7 +57,6 @@ def pytest_configure() -> None:
 
 # Shared pytest fixtures can go here
 
-import pytest
 import logging
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:

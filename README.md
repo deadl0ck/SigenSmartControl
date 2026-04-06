@@ -119,8 +119,6 @@ POLL_INTERVAL_MINUTES = 5
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 FULL_SIMULATION_MODE = True
 NIGHT_MODE_ENABLED = True
-NEXT_DAY_PRECHECK_ENABLED = True
-NIGHT_PRECHECK_DELAY_MINUTES = 30
 LOCAL_TIMEZONE = "Europe/Dublin"
 QUARTZ_RED_CAPACITY_FRACTION = 0.20
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
@@ -140,8 +138,6 @@ Meaning:
 - `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
 - `FULL_SIMULATION_MODE`: when `True`, run full logic and logging but do not send inverter mode-change commands
 - `NIGHT_MODE_ENABLED`: whether the scheduler explicitly applies the configured night mode overnight
-- `NEXT_DAY_PRECHECK_ENABLED`: whether the scheduler evaluates the next morning's forecast during the night window
-- `NIGHT_PRECHECK_DELAY_MINUTES`: how long after the night window starts before the next-day pre-check runs
 - `LOCAL_TIMEZONE`: timezone used when evaluating tariff windows
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
@@ -282,9 +278,8 @@ For daytime periods, read it like this:
 
 For night:
 
-1. Use night tariff behavior (`PERIOD_TO_MODE["NIGHT"]`) during cheap-rate hours.
-2. Before cheap-rate starts, hold `PRE_CHEAP_RATE_MODE` to avoid early charge behavior.
-3. Optional next-day pre-check can prepare for tomorrow morning, but still respects pre-cheap-rate protection.
+1. Apply `PERIOD_TO_MODE["NIGHT"]` throughout the active night window.
+2. Keep night behavior simple and deterministic (AI-only in the default config).
 
 ### Quick examples
 
@@ -449,19 +444,13 @@ The scheduler now has an explicit night window.
 
 During the active night window it can do two separate things:
 
-1. Apply either a pre-cheap-rate mode or the configured night mode depending on local tariff time.
-2. Optionally run a next-day pre-check for the next morning forecast after `NIGHT_PRECHECK_DELAY_MINUTES`.
+1. Apply the configured night mode (`PERIOD_TO_MODE["NIGHT"]`).
+2. Optionally sleep between checks to reduce polling until the morning pre-period window opens.
 
 For example, with cheap rates from 11pm to 8am:
 
-- after sunset but before 11pm, the system stays in pre-cheap-rate mode so it does not start charge-oriented night behavior too early
-- from 11pm to 8am local time, it can use `PERIOD_TO_MODE["NIGHT"]`
-- after 8am, if the first daytime period has not started yet, it falls back out of the cheap-rate night mode again
-
-The next-day pre-check uses the upcoming first daytime period, normally `Morn`.
-
-If the next morning looks strong enough that headroom must be created, it can choose `GRID_EXPORT` overnight.
-Otherwise it stays in the appropriate pre-cheap-rate or cheap-rate night mode for the current local tariff phase.
+- after sunset and before the first daytime period, the scheduler holds the configured night mode
+- if night sleep mode is enabled, it can sleep and wake near the morning pre-period window
 
 ### AI Mode profit-max and arbitrage (battery sell-discharge-recharge)
 

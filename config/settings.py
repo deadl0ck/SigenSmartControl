@@ -41,10 +41,6 @@ FULL_SIMULATION_MODE = True
 MAX_TIMED_EXPORT_MINUTES = 240
 # Whether the scheduler should explicitly apply the configured night mode.
 NIGHT_MODE_ENABLED = True
-# Whether the scheduler should perform a night-before pre-check for the next morning.
-NEXT_DAY_PRECHECK_ENABLED = True
-# How long after the night window starts before running the next-day pre-check.
-NIGHT_PRECHECK_DELAY_MINUTES = 30
 # Whether scheduler should sleep through inactive night periods instead of polling every tick.
 NIGHT_SLEEP_MODE_ENABLED = True
 # Local timezone used for schedule windows.
@@ -194,12 +190,8 @@ PERIOD_TO_MODE = {
     "PEAK": SIGEN_MODES["SELF_POWERED"],
 }
 
-# Mode used before cheap-rate starts overnight.
-# This prevents the system from moving into cheap-rate night behavior too early.
-PRE_CHEAP_RATE_MODE = SIGEN_MODES["AI"]
-
 # You can import these mappings in your main control logic:
-# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE, PRE_CHEAP_RATE_MODE
+# from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE
 
 # ==============================
 # Data File Paths

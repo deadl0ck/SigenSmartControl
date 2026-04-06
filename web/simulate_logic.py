@@ -11,7 +11,6 @@ battery states, and system configurations without live hardware.
 from config.settings import SIGEN_MODES, HEADROOM_TARGET_KWH
 from logic.decision_logic import (
     decide_operational_mode,
-    decide_night_preparation_mode,
     calc_headroom_kwh,
 )
 
@@ -67,21 +66,5 @@ def simulate_sigen_decision(
             "mode_name": [k for k, v in SIGEN_MODES.items() if v == mode][0],
             "reason": reason,
         }
-
-    # Simulate optional overnight prep decision for next morning.
-    next_morn_solar_kwh = min(solar_pv_kw, inverter_kw) * 3.0
-    prep_mode, prep_reason = decide_night_preparation_mode(
-        target_period="Morn",
-        status=forecast_morn,
-        soc=soc,
-        headroom_kwh=calc_headroom_kwh(battery_kwh, soc),
-        period_solar_kwh=next_morn_solar_kwh,
-        headroom_target_kwh=HEADROOM_TARGET_KWH,
-    )
-    results["NightPrep"] = {
-        "mode": prep_mode,
-        "mode_name": [k for k, v in SIGEN_MODES.items() if v == prep_mode][0],
-        "reason": prep_reason,
-    }
 
     return results

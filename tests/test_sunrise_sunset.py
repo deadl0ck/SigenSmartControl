@@ -10,12 +10,10 @@ import logging
 Tests time parsing and API response handling.
 """
 
-import pytest
 from unittest.mock import patch
 from weather.sunrise_sunset import get_sunrise_sunset
 import logging
 logger = logging.getLogger(__name__)
-import config.constants as constants
 
 def mask(val):
     if isinstance(val, str) and ("PASS" in val or "SECRET" in val or "TOKEN" in val):

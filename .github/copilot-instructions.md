@@ -150,8 +150,8 @@ When refactoring large files, use this guidance for module separation:
 | `mode_control.py` | Mode decision logic, API interaction, mode matching | `apply_mode_change()`, `mode_matches_target()`, `extract_mode_value()` |
 | `scheduler_loop.py` | Main scheduler loop, nested helpers | `run_scheduler()` and its internal async helpers |
 | `config.py` | All configuration values and environment setup | System specs, tariffs, thresholds, feature flags |
-| `decision_logic.py` | Mode decision algorithms | `decide_operational_mode()`, `decide_night_preparation_mode()` |
-| `main.py` | Entry points only | `async def main()`, `async def run_scheduler()`, `if __name__ == "__main__"` |
+| `decision_logic.py` | Mode decision algorithms | `decide_operational_mode()` |
+| `main.py` | Entry points only | `async def run_scheduler()`, `if __name__ == "__main__"` |
 
 ## Common Patterns
 

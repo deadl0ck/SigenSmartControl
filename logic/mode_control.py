@@ -14,7 +14,6 @@ from integrations.sigen_interaction import SigenInteraction
 from config.settings import (
     ENABLE_EVENING_AI_MODE_TRANSITION,
     EVENING_AI_MODE_START_HOUR,
-    SIGEN_MODES,
 )
 from logic.schedule_utils import LOCAL_TZ
 
@@ -203,34 +202,3 @@ async def apply_mode_change(
         return False
 
 
-async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInteraction | None:
-    """Create and validate the Sigen API interaction wrapper.
-    
-    Attempts to initialize API connection and logs current inverter mode on startup.
-    If authentication fails but FULL_SIMULATION_MODE is enabled, returns None for
-    dry-run operation; otherwise re-raises the exception.
-    
-    Args:
-        mode_names: Mapping from numeric mode to human-readable label.
-        
-    Returns:
-        SigenInteraction instance if successful, or None in simulation mode if auth fails.
-        
-    Raises:
-        Exception: If API initialization fails and not in simulation mode.
-    """
-    from config.settings import FULL_SIMULATION_MODE
-    
-    try:
-        sigen = await SigenInteraction.create()
-        await log_current_mode_on_startup(sigen, mode_names)
-        return sigen
-    except Exception as e:
-        if FULL_SIMULATION_MODE:
-            logger.warning(
-                "[SCHEDULER] Inverter authentication failed, but FULL_SIMULATION_MODE is enabled. "
-                "Continuing in offline dry-run mode with simulated SOC values. "
-                f"Reason: {e}"
-            )
-            return None
-        raise

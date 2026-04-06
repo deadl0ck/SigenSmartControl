@@ -3,51 +3,10 @@
 Tests mode selection algorithms under various battery, solar, and tariff conditions.
 """
 
-from config.settings import SIGEN_MODES, PERIOD_TO_MODE
-from logic.decision_logic import decide_night_preparation_mode, decide_operational_mode
+from config.settings import SIGEN_MODES
+from logic.decision_logic import decide_operational_mode
+from logic.schedule_utils import is_cheap_rate_window
 from datetime import datetime, timezone
-from main import is_cheap_rate_window
-
-
-def test_night_preparation_uses_grid_export_when_headroom_is_insufficient():
-    mode, reason = decide_night_preparation_mode(
-        target_period="Morn",
-        status="Green",
-        soc=90,
-        headroom_kwh=0.2,
-        period_solar_kwh=3.0,
-        headroom_target_kwh=10.2,
-    )
-
-    assert mode == SIGEN_MODES["GRID_EXPORT"]
-    assert "Next-day preparation" in reason
-
-
-def test_night_preparation_uses_night_mode_when_export_not_required():
-    mode, reason = decide_night_preparation_mode(
-        target_period="Morn",
-        status="Amber",
-        soc=40,
-        headroom_kwh=10.0,
-        period_solar_kwh=1.0,
-        headroom_target_kwh=10.2,
-    )
-
-    assert mode == PERIOD_TO_MODE["NIGHT"]
-    assert "export is not required" in reason
-
-
-def test_night_preparation_falls_back_to_night_mode_without_forecast():
-    mode, reason = decide_night_preparation_mode(
-        target_period="",
-        status="",
-        soc=None,
-        headroom_kwh=None,
-        period_solar_kwh=0.0,
-    )
-
-    assert mode == PERIOD_TO_MODE["NIGHT"]
-    assert "No next-day forecast available" in reason
 
 
 def test_cheap_rate_window_is_true_during_cheap_tariff_hours():

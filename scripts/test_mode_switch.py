@@ -76,7 +76,7 @@ async def switch_mode(sigen: SigenInteraction, mode_id: int) -> None:
     
     try:
         logger.info(f"\nBefore switch - fetching current mode...")
-        before = await get_current_mode(sigen)
+        await get_current_mode(sigen)
         logger.info(f"\nSwitching to mode {mode_id}...")
         response = await sigen.set_operational_mode(mode_id)
         
@@ -86,7 +86,7 @@ async def switch_mode(sigen: SigenInteraction, mode_id: int) -> None:
         logger.info(json.dumps(response, indent=2, default=str))
         
         logger.info(f"\nAfter switch - fetching new mode...")
-        after = await get_current_mode(sigen)
+        await get_current_mode(sigen)
         
         logger.info("\n" + "=" * 80)
         logger.info("SWITCH COMPLETE")

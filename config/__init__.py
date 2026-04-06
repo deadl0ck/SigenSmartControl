@@ -1,9 +1,7 @@
-"""Public configuration package exports.
+"""Configuration package marker.
 
-Re-exports runtime settings and environment-backed constants so existing
-`import config` consumers can continue to access top-level attributes.
+Import explicit modules instead of relying on package-level wildcard exports:
+- config.settings for runtime tunables
+- config.constants for environment-derived constants
 """
-
-from .constants import *
-from .settings import *
 

@@ -18,8 +18,6 @@ from config.settings import (
     MORNING_START_HOUR,
     PEAK_END_HOUR,
     PEAK_START_HOUR,
-    PERIOD_TO_MODE,
-    PRE_CHEAP_RATE_MODE,
     LOCAL_TIMEZONE,
 )
 
@@ -105,37 +103,6 @@ def is_cheap_rate_window(now_utc: datetime) -> bool:
     if CHEAP_RATE_START_HOUR < CHEAP_RATE_END_HOUR:
         return CHEAP_RATE_START_HOUR <= local_hour < CHEAP_RATE_END_HOUR
     return local_hour >= CHEAP_RATE_START_HOUR or local_hour < CHEAP_RATE_END_HOUR
-
-
-def get_night_schedule_mode(now_utc: datetime) -> tuple[int, str, str]:
-    """Determine the appropriate mode for night-time periods.
-
-    Args:
-        now_utc: Current time in UTC.
-
-    Returns:
-        Tuple of (mode_value: int, phase_label: str, explanation: str) describing whether
-        to use cheap-rate mode (if in the cheap window) or pre-cheap-rate mode (if before
-        cheap rates, to prevent early charging).
-    """
-    local_now = now_utc.astimezone(LOCAL_TZ)
-    if is_cheap_rate_window(now_utc):
-        return (
-            PERIOD_TO_MODE["NIGHT"],
-            "cheap-rate",
-            (
-                f"Local time {local_now.strftime('%H:%M')} is inside the cheap-rate window "
-                f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Applying night mode."
-            ),
-        )
-    return (
-        PRE_CHEAP_RATE_MODE,
-        "pre-cheap-rate",
-        (
-            f"Local time {local_now.strftime('%H:%M')} is outside the cheap-rate window "
-            f"{CHEAP_RATE_START_HOUR:02d}:00-{CHEAP_RATE_END_HOUR:02d}:00. Holding pre-cheap-rate mode until cheap-rate window opens."
-        ),
-    )
 
 
 def get_hours_until_cheap_rate(now_utc: datetime) -> float:

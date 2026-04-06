@@ -36,7 +36,6 @@ def test_simulate_valid_soc(client):
     data = resp.get_json()
     assert 'Morn' in data and 'mode' in data['Morn']
     assert 'NIGHT' in data and 'mode' in data['NIGHT']
-    assert 'NightPrep' in data and 'mode' in data['NightPrep']
 
 def test_simulate_missing_soc(client):
     resp = post_simulate(client, {
