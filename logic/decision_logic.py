@@ -12,7 +12,13 @@ Implements a hierarchical decision tree:
 5. Peak tariff self-powered override
 """
 
-from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE
+from config.settings import (
+    FORECAST_TO_MODE,
+    MORNING_HIGH_SOC_PROTECTION_ENABLED,
+    MORNING_HIGH_SOC_THRESHOLD_PERCENT,
+    PERIOD_TO_MODE,
+    SIGEN_MODES,
+)
 
 
 def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:
@@ -47,10 +53,11 @@ def decide_operational_mode(
     
     Implements a hierarchical decision tree:
     1. Export if headroom is below the physics-derived target before a Green period
-    2. Use tariff mode if night period
-    3. Evening bridge: use self-powered if battery can cover load until cheap rate
-    4. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
-    5. Peak tariff override: prioritize self-powered during expensive hours
+    2. Morning high-SOC protection for Amber/Green morning periods
+    3. Use tariff mode if night period
+    4. Evening bridge: use self-powered if battery can cover load until cheap rate
+    5. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
+    6. Peak tariff override: prioritize self-powered during expensive hours
     
     Args:
         period: Current period name (e.g., 'Morn', 'Aftn', 'Eve', 'Night').
@@ -83,6 +90,24 @@ def decide_operational_mode(
         mode = SIGEN_MODES["GRID_EXPORT"]
         reason = (
             f"Headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
+            "Preemptively exporting to grid."
+        )
+        return mode, reason
+
+    if (
+        MORNING_HIGH_SOC_PROTECTION_ENABLED
+        and period_key == "MORN"
+        and status_key in {"AMBER", "GREEN"}
+        and soc is not None
+        and soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
+        and headroom_kwh is not None
+        and headroom_kwh < headroom_target_kwh
+    ):
+        mode = SIGEN_MODES["GRID_EXPORT"]
+        reason = (
+            "Morning high-SOC protection: "
+            f"SOC ({soc:.1f}%) >= {MORNING_HIGH_SOC_THRESHOLD_PERCENT:.1f}% and "
+            f"headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
             "Preemptively exporting to grid."
         )
         return mode, reason

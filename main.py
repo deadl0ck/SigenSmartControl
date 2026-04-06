@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from weather.forecast import SolarForecastProvider, create_solar_forecast_provider
 from integrations.sigen_interaction import SigenInteraction
+from integrations.sigen_auth import refresh_sigen_instance
 from config.settings import (
     LOG_LEVEL as CONFIG_LOG_LEVEL,
     SIGEN_MODES,
@@ -28,6 +29,7 @@ from config.settings import (
     NIGHT_MODE_ENABLED,
     NEXT_DAY_PRECHECK_ENABLED,
     NIGHT_PRECHECK_DELAY_MINUTES,
+    NIGHT_SLEEP_MODE_ENABLED,
     LOCAL_TIMEZONE,
     MORNING_START_HOUR,
     MORNING_END_HOUR,
@@ -581,6 +583,9 @@ async def run_scheduler() -> None:
         "mode_phase": None,
         "prep_set_for": None,
     }
+    sleep_override_seconds: int | None = None
+    refresh_auth_on_wake = False
+    auth_refreshed_for_date = None
     timed_export_override: dict[str, Any] = {
         "active": False,
         "started_at": None,
@@ -1127,6 +1132,19 @@ async def run_scheduler() -> None:
     while True:
         now = datetime.now(timezone.utc)
         today = now.date()
+        sleep_override_seconds = None
+
+        if refresh_auth_on_wake and auth_refreshed_for_date != today and sigen is not None:
+            try:
+                logger.info("[SCHEDULER] Wake-time auth refresh: forcing full re-authentication.")
+                refreshed_client = await refresh_sigen_instance()
+                sigen = SigenInteraction.from_client(refreshed_client)
+                auth_refreshed_for_date = today
+                logger.info("[SCHEDULER] Wake-time auth refresh completed.")
+            except Exception as exc:
+                logger.warning("[SCHEDULER] Wake-time auth refresh failed: %s", exc)
+            finally:
+                refresh_auth_on_wake = False
 
         # Refresh forecast and period windows once per calendar day.
         if today != current_date:
@@ -1300,6 +1318,45 @@ async def run_scheduler() -> None:
                         ),
                         outcome="night pre-check not yet due",
                     )
+
+            if NIGHT_SLEEP_MODE_ENABLED:
+                pre_window_opens_at = night_context["target_start"] - MAX_PRE_PERIOD_WINDOW
+
+                precheck_due_at = (
+                    night_context["night_start"] + timedelta(minutes=NIGHT_PRECHECK_DELAY_MINUTES)
+                    if (
+                        NEXT_DAY_PRECHECK_ENABLED
+                        and night_context["night_start"] is not None
+                        and night_state["prep_set_for"] != night_context["target_date"]
+                    )
+                    else None
+                )
+
+                wake_at_utc: datetime | None = None
+                wake_reason = ""
+
+                if precheck_due_at is not None and now < precheck_due_at:
+                    wake_at_utc = precheck_due_at
+                    wake_reason = "next-day pre-check window"
+                elif (
+                    night_state["prep_set_for"] == night_context["target_date"]
+                    and now < pre_window_opens_at
+                ):
+                    wake_at_utc = pre_window_opens_at
+                    wake_reason = "morning pre-period window"
+
+                if wake_at_utc is not None:
+                    sleep_seconds = max(1, int((wake_at_utc - now).total_seconds()))
+                    if sleep_seconds > POLL_INTERVAL_SECONDS:
+                        sleep_override_seconds = sleep_seconds
+                        refresh_auth_on_wake = True
+                        logger.info(
+                            "[SCHEDULER] Night sleep mode active. Sleeping for %s minutes "
+                            "until %s (%s).",
+                            sleep_seconds // 60,
+                            wake_at_utc.isoformat(),
+                            wake_reason,
+                        )
 
         for period, period_start in today_period_windows.items():
             s = day_state[period]
@@ -1504,12 +1561,13 @@ async def run_scheduler() -> None:
                         s["start_set"] = True
                         s["pre_set"] = True  # Suppress further pre-period checks.
 
+        next_sleep_seconds = sleep_override_seconds or POLL_INTERVAL_SECONDS
         logger.info(
             f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "
-            f"Next check in {POLL_INTERVAL_SECONDS // 60} minutes."
+            f"Next check in {next_sleep_seconds // 60} minutes."
         )
         await archive_inverter_telemetry("scheduler_tick", now)
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        await asyncio.sleep(next_sleep_seconds)
 
 
 if __name__ == "__main__":

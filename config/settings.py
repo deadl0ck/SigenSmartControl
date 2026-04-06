@@ -45,6 +45,8 @@ NIGHT_MODE_ENABLED = True
 NEXT_DAY_PRECHECK_ENABLED = True
 # How long after the night window starts before running the next-day pre-check.
 NIGHT_PRECHECK_DELAY_MINUTES = 30
+# Whether scheduler should sleep through inactive night periods instead of polling every tick.
+NIGHT_SLEEP_MODE_ENABLED = True
 # Local timezone used for schedule windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
 
@@ -134,6 +136,9 @@ ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 # Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
+# Morning clipping protection: allow export for Amber/Green mornings when battery is very full.
+MORNING_HIGH_SOC_PROTECTION_ENABLED = True
+MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
 # Enable AI Mode transition for evening periods approaching cheap-rate window.
 # When enabled, the Evening period will switch to AI Mode (with profit-max configured
 # in mySigen app) to allow automatic battery arbitrage: discharge at day/peak rates,

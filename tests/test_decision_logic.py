@@ -128,3 +128,33 @@ def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
 
     assert mode == SIGEN_MODES["AI"]
     assert "Default mapping for Red" in reason
+
+
+def test_morning_high_soc_protection_exports_for_amber_when_headroom_is_low():
+    mode, reason = decide_operational_mode(
+        period="Morn",
+        status="Amber",
+        soc=97.0,
+        headroom_kwh=0.6,
+        period_solar_kwh=1.5,
+        schedule_period="DAY",
+        headroom_target_kwh=10.2,
+    )
+
+    assert mode == SIGEN_MODES["GRID_EXPORT"]
+    assert "Morning high-SOC protection" in reason
+
+
+def test_morning_high_soc_protection_does_not_trigger_below_threshold():
+    mode, reason = decide_operational_mode(
+        period="Morn",
+        status="Amber",
+        soc=85.0,
+        headroom_kwh=0.6,
+        period_solar_kwh=1.5,
+        schedule_period="DAY",
+        headroom_target_kwh=10.2,
+    )
+
+    assert mode == SIGEN_MODES["AI"]
+    assert "Default mapping for Amber" in reason
