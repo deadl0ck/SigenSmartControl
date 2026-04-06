@@ -651,6 +651,9 @@ Notes:
 
 - Notifications are sent for real inverter mode-change commands.
 - Notifications are also sent in simulation mode command paths.
+- In simulation mode, the interaction layer tracks the last simulated mode command so
+	follow-up change-back transitions are detected consistently and can generate their own
+	simulated command log entries and notification emails.
 - If required email env vars are missing, notifications are skipped and scheduler continues.
 
 ### Test email notifications

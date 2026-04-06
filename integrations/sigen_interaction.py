@@ -36,6 +36,7 @@ class SigenInteraction:
 
     def __init__(self, client: SigenApiProtocol) -> None:
         self._client = client
+        self._simulated_operational_mode: int | None = None
 
     @classmethod
     async def create(cls) -> "SigenInteraction":
@@ -94,6 +95,11 @@ class SigenInteraction:
         Returns:
             Raw operational mode payload from the Sigen API.
         """
+        if FULL_SIMULATION_MODE and self._simulated_operational_mode is not None:
+            return {
+                "simulated": True,
+                "mode": self._simulated_operational_mode,
+            }
         return await self._call_with_reauth_once(
             lambda client: client.get_operational_mode(),
             "get_operational_mode",
@@ -120,6 +126,7 @@ class SigenInteraction:
                     f"[SIMULATION] set_operational_mode(mode={mode_label}, value={mode}) "
                     f"- command suppressed in simulation mode"
                 )
+                self._simulated_operational_mode = mode
                 return {"simulated": True, "mode": mode}
             else:
                 logger.info(f"Setting operational mode to {mode_label} (value={mode})")

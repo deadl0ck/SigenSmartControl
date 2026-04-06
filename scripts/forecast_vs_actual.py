@@ -18,6 +18,7 @@ For each date/period that has telemetry data, prints:
     - Forecast accuracy percentage versus measured average
     - Calibrated forecast equivalent (ESB index × fitted period multiplier)
     - Actual average kW measured by the inverter
+    - Average battery SOC (%) measured in that period
     - Actual classification with explicit basis (Array or Inverter)
     - Clipping events flagged in that window
     - Sample count (number of 15-min poll intervals)
@@ -270,7 +271,7 @@ def describe_period(
     Returns:
         Human-readable description string.
     """
-    parts: list[str] = [f"{period}:"]
+    parts: list[str] = []
 
     # Compare ESB and Quartz to actual
     if esb_kw is not None and esb_status is not None:
@@ -438,21 +439,21 @@ def print_report(
     fitted_multipliers = compute_period_fit_multipliers(telemetry_rows, forecast_rows)
 
     print()
-    print("=" * 160)
+    print("=" * 176)
     print("  FORECAST ACCURACY REPORT")
     print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × fitted period multiplier")
     print("  ESB/Quartz status use site-capacity thresholds; Actual Reading is SOC-aware (Array vs Inverter basis)")
     print("  Percentages show (Forecast / Actual) × 100: <100% means underestimated, >100% means overestimated")
-    print("=" * 160)
+    print("=" * 176)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
         f"{'ESB Forecast':>12}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated kW':>12}  "
-        f"{'Avg Act kW':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
+        f"{'Avg Act kW':>10}  {'Avg SOC %':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
-    print("-" * 160)
+    print("-" * 176)
 
-    verdicts: list[str] = []
+    verdicts_by_date: dict[str, list[str]] = defaultdict(list)
 
     # Sort by date, then by period in time order (Morn, Aftn, Eve)
     period_order = {"Morn": 0, "Aftn": 1, "Eve": 2}
@@ -475,6 +476,7 @@ def print_report(
         n = len(actuals)
         clipping_count = telem["clipping_count"]
         soc_samples = telem.get("soc_percent", [])
+        avg_soc = round(sum(soc_samples) / len(soc_samples), 1) if soc_samples else None
         max_soc = max(soc_samples) if soc_samples else None
         # Treat very high SOC as full to handle decimal rounding around 100%.
         soc_full = (
@@ -527,11 +529,12 @@ def print_report(
         print(
             f"  {date:<12}  {period:<6}  "
             f"{esb_s:>12}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
-            f"{avg_actual:>10.2f}  {actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
+            f"{avg_actual:>10.2f}  {f'{avg_soc:.1f}' if avg_soc is not None else 'N/A':>10}  "
+            f"{actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
 
         if esb_kw is not None and buffered_kw is not None:
-            verdicts.append(
+            verdicts_by_date[date].append(
                 f"  {date} {period}: "
                 + describe_period(
                     period=period,
@@ -548,13 +551,15 @@ def print_report(
             )
 
     print()
-    print("=" * 160)
+    print("=" * 176)
     print("  PLAIN LANGUAGE SUMMARY")
-    print("=" * 160)
-    if verdicts:
-        for verdict in verdicts:
-            print(verdict)
-            print()
+    print("=" * 176)
+    if verdicts_by_date:
+        for index, date in enumerate(sorted(verdicts_by_date.keys())):
+            for verdict in verdicts_by_date[date]:
+                print(verdict)
+            if index < len(verdicts_by_date) - 1:
+                print()
     else:
         print("  No data to summarise.")
     print()

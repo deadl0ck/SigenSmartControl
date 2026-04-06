@@ -87,6 +87,27 @@ async def test_sigen_interaction_set_operational_mode_respects_simulation_mode(
 
 
 @pytest.mark.asyncio
+async def test_sigen_interaction_simulation_tracks_current_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulation mode should remember the last simulated mode command."""
+    import integrations.sigen_interaction as sigen_interaction
+
+    monkeypatch.setattr(sigen_interaction, "FULL_SIMULATION_MODE", True)
+    dummy = DummyClient()
+    interaction = SigenInteraction.from_client(dummy)
+
+    # Before any simulated set, interaction falls back to underlying client mode.
+    assert await interaction.get_operational_mode() == {"mode": 1}
+
+    await interaction.set_operational_mode(0)
+    assert await interaction.get_operational_mode() == {"simulated": True, "mode": 0}
+
+    await interaction.set_operational_mode(1)
+    assert await interaction.get_operational_mode() == {"simulated": True, "mode": 1}
+
+
+@pytest.mark.asyncio
 async def test_sigen_interaction_reauth_retries_once_on_auth_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
