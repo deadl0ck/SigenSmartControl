@@ -1,13 +1,13 @@
-"""
-sigen_interaction.py
---------------------
-Single interaction layer for all direct Sigen API calls.
-Centralizes simulation mode handling for all write operations.
+"""Single interaction layer for direct Sigen API calls.
+
+Centralizes simulation mode handling for writes and provides one-time auth
+recovery when token refresh fails (refresh -> full re-auth -> retry once).
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from integrations.sigen_auth import get_sigen_instance
+from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
 from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
 import logging
 
@@ -52,13 +52,52 @@ class SigenInteraction:
         """Factory for tests and dependency injection scenarios."""
         return cls(client)
 
+    @staticmethod
+    def _is_recoverable_auth_error(exc: Exception) -> bool:
+        """Return True when exception looks like token/auth expiration failure."""
+        msg = str(exc).lower()
+        return any(
+            token in msg
+            for token in (
+                "failed to refresh access token",
+                "invalid grant",
+                "/auth/oauth/token",
+                "access token",
+                "unauthorized",
+            )
+        )
+
+    async def _call_with_reauth_once(
+        self,
+        operation: Callable[[SigenApiProtocol], Awaitable[Any]],
+        operation_name: str,
+    ) -> Any:
+        """Run API operation and retry once after forced re-auth on auth errors."""
+        try:
+            return await operation(self._client)
+        except Exception as exc:
+            if not self._is_recoverable_auth_error(exc):
+                raise
+
+            logger.warning(
+                "[AUTH RECOVERY] %s failed due to auth error: %s. "
+                "Forcing full re-auth and retrying once.",
+                operation_name,
+                exc,
+            )
+            self._client = await refresh_sigen_instance()
+            return await operation(self._client)
+
     async def get_operational_mode(self) -> Any:
         """Get the current operational mode from the inverter.
         
         Returns:
             Raw operational mode payload from the Sigen API.
         """
-        return await self._client.get_operational_mode()
+        return await self._call_with_reauth_once(
+            lambda client: client.get_operational_mode(),
+            "get_operational_mode",
+        )
 
     async def set_operational_mode(self, mode: int) -> Any:
         """Set the operational mode.
@@ -84,7 +123,10 @@ class SigenInteraction:
                 return {"simulated": True, "mode": mode}
             else:
                 logger.info(f"Setting operational mode to {mode_label} (value={mode})")
-            return await self._client.set_operational_mode(mode)
+            return await self._call_with_reauth_once(
+                lambda client: client.set_operational_mode(mode),
+                "set_operational_mode",
+            )
         finally:
             logger.info("************************************************************************************************")
             logger.info("************************************************************************************************")
@@ -117,7 +159,10 @@ class SigenInteraction:
         Returns:
             Raw energy_flow payload with PV power, battery state, exports, etc.
         """
-        return await self._client.get_energy_flow()
+        return await self._call_with_reauth_once(
+            lambda client: client.get_energy_flow(),
+            "get_energy_flow",
+        )
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
         """Get the list of supported operational modes.
@@ -125,4 +170,7 @@ class SigenInteraction:
         Returns:
             List of mode dictionaries available on the inverter.
         """
-        return await self._client.get_operational_modes()
+        return await self._call_with_reauth_once(
+            lambda client: client.get_operational_modes(),
+            "get_operational_modes",
+        )

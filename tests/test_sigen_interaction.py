@@ -26,6 +26,17 @@ class DummyClient:
         return [{"label": "AI", "value": 1}]
 
 
+class FlakyAuthClient(DummyClient):
+    def __init__(self, error_message: str = "Invalid grant"):
+        super().__init__()
+        self.calls = 0
+        self.error_message = error_message
+
+    async def get_energy_flow(self):
+        self.calls += 1
+        raise RuntimeError(self.error_message)
+
+
 @pytest.mark.asyncio
 async def test_sigen_interaction_from_client_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch FULL_SIMULATION_MODE to False to test pass-through behavior
@@ -73,3 +84,47 @@ async def test_sigen_interaction_set_operational_mode_respects_simulation_mode(
     assert set_resp == {"simulated": True, "mode": 2}
     # Verify the dummy client was NOT called
     assert dummy.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sigen_interaction_reauth_retries_once_on_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.sigen_interaction as sigen_interaction
+
+    first_client = FlakyAuthClient("Failed to refresh access token: Invalid grant")
+    second_client = DummyClient()
+
+    async def fake_refresh_sigen_instance():
+        return second_client
+
+    monkeypatch.setattr(sigen_interaction, "refresh_sigen_instance", fake_refresh_sigen_instance)
+
+    interaction = SigenInteraction.from_client(first_client)
+    result = await interaction.get_energy_flow()
+
+    assert first_client.calls == 1
+    assert result == {"batterySoc": 81}
+
+
+@pytest.mark.asyncio
+async def test_sigen_interaction_reauth_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.sigen_interaction as sigen_interaction
+
+    first_client = FlakyAuthClient("Invalid grant")
+    second_client = FlakyAuthClient("Invalid grant")
+
+    async def fake_refresh_sigen_instance():
+        return second_client
+
+    monkeypatch.setattr(sigen_interaction, "refresh_sigen_instance", fake_refresh_sigen_instance)
+
+    interaction = SigenInteraction.from_client(first_client)
+
+    with pytest.raises(RuntimeError, match="Invalid grant"):
+        await interaction.get_energy_flow()
+
+    assert first_client.calls == 1
+    assert second_client.calls == 1

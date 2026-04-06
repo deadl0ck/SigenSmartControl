@@ -46,3 +46,24 @@ async def test_get_sigen_instance_uses_legacy_client_by_default(
     client = await sigen_auth.get_sigen_instance()
     assert isinstance(client, FakeSigen)
     assert client.initialized is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_sigen_instance_forces_new_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """refresh_sigen_instance should clear cache and rebuild client."""
+    created: list[dict[str, str]] = []
+
+    async def fake_get_sigen_instance() -> dict[str, str]:
+        client = {"client": f"n{len(created) + 1}"}
+        created.append(client)
+        sigen_auth._sigen_instance = client
+        return client
+
+    monkeypatch.setattr(sigen_auth, "_sigen_instance", {"client": "cached"})
+    monkeypatch.setattr(sigen_auth, "get_sigen_instance", fake_get_sigen_instance)
+
+    refreshed = await sigen_auth.refresh_sigen_instance()
+    assert refreshed == {"client": "n1"}
+    assert sigen_auth._sigen_instance == {"client": "n1"}

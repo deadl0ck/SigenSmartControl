@@ -60,3 +60,17 @@ async def get_sigen_instance() -> object:
     logger.info("Legacy Sigen authentication successful.")
     _sigen_instance = sigen
     return sigen
+
+
+async def refresh_sigen_instance() -> object:
+    """Force full re-authentication and return a newly initialized client.
+
+    This helper clears the cached singleton and performs a fresh auth flow,
+    which is used as a fallback when token refresh fails at runtime.
+
+    Returns:
+        Newly authenticated client instance.
+    """
+    global _sigen_instance
+    _sigen_instance = None
+    return await get_sigen_instance()
