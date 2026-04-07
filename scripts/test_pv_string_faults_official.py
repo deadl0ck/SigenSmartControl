@@ -157,7 +157,19 @@ async def main() -> None:
     client = await SigenOfficial.create_from_env()
     logger.info("Official client initialized.")
 
-    device_payload = await client.get_device_realtime(serial)
+    if serial == str(client.system_id):
+        raise SystemExit(
+            "The --serial value matches systemId. Device realtime requires a device serialNumber "
+            "(for example inverter/AIO SN), not systemId."
+        )
+
+    try:
+        device_payload = await client.get_device_realtime(serial)
+    except RuntimeError as exc:
+        raise SystemExit(
+            f"Device realtime query failed: {exc}\n"
+            "Tip: confirm --serial is a device serialNumber from the Sigen app, not systemId."
+        ) from exc
 
     if args.json:
         print(json.dumps(device_payload, indent=2, default=str))

@@ -704,13 +704,45 @@ class SigenOfficial:
         if not serial_number.strip():
             raise ValueError("serial_number is required.")
 
-        path = self.paths.device_realtime.replace("{systemId}", str(self.system_id))
-        response = await self._request(
-            method="GET",
-            path=path,
-            payload=None,
-            include_bearer=True,
-            query_params={"serialNumber": serial_number.strip()},
+        serial = serial_number.strip()
+        candidate_paths = [
+            self.paths.device_realtime,
+            "/openapi/systems/{systemId}/device/realtime",
+            "/openapi/systems/device/realtime",
+            "/openapi/device/realtime",
+        ]
+
+        attempted: list[str] = []
+        for candidate in dict.fromkeys(candidate_paths):
+            if not candidate:
+                continue
+
+            resolved_path = candidate.replace("{systemId}", str(self.system_id))
+            query_params = {"serialNumber": serial}
+            if "{systemId}" not in candidate:
+                query_params["systemId"] = str(self.system_id)
+
+            try:
+                response = await self._request(
+                    method="GET",
+                    path=resolved_path,
+                    payload=None,
+                    include_bearer=True,
+                    query_params=query_params,
+                )
+                data = self._extract_data(response)
+                return data if isinstance(data, dict) else {"raw": response}
+            except RuntimeError as exc:
+                attempted.append(f"{resolved_path} ? {query_params}")
+                # Different tenants can expose different inventory/realtime paths.
+                # Continue only for not-found style errors; otherwise surface immediately.
+                if "failed (404)" in str(exc):
+                    continue
+                raise
+
+        attempted_paths = " | ".join(attempted) if attempted else "none"
+        raise RuntimeError(
+            "Official device realtime endpoint not found for this tenant. "
+            f"Attempted: {attempted_paths}. "
+            "Also verify that serial_number is a DEVICE serial (not the systemId)."
         )
-        data = self._extract_data(response)
-        return data if isinstance(data, dict) else {"raw": response}

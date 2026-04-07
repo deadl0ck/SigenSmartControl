@@ -664,7 +664,7 @@ All files under `scripts/` are documented below.
 
 - `scripts/test_pv_string_faults_official.py`
 	- Official API per-string PV realtime snapshot and imbalance warning check.
-	- Requires inverter/AIO serial number (`--serial` or `SIGEN_INVERTER_SERIAL`).
+	- Requires inverter/AIO device serial number (`--serial` or `SIGEN_INVERTER_SERIAL`), not systemId.
 	- Run: `python scripts/test_pv_string_faults_official.py --serial <SERIAL>`
 	- Optional: `python scripts/test_pv_string_faults_official.py --serial <SERIAL> --warn-pct 30`
 	- Optional raw payload: `python scripts/test_pv_string_faults_official.py --serial <SERIAL> --json`

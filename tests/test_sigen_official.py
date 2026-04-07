@@ -188,6 +188,51 @@ async def test_get_device_realtime_uses_serial_query_param(
 
 
 @pytest.mark.asyncio
+async def test_get_device_realtime_falls_back_to_alt_path_with_system_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Device realtime should try alternate endpoint shapes on 404 errors."""
+    client = SigenOfficial(username="u", password="p", system_id="SYS-1")
+    client.access_token = "token"
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    async def fake_request(
+        *,
+        method,
+        path,
+        payload,
+        include_bearer=True,
+        use_form_urlencoded=False,
+        query_params=None,
+    ):
+        del method, payload, include_bearer, use_form_urlencoded
+        calls.append((path, query_params or {}))
+        if path == "/openapi/systems/SYS-1/device/realtime":
+            raise RuntimeError("GET ... failed (404): not found")
+        if path == "/openapi/systems/device/realtime":
+            return {
+                "code": 0,
+                "msg": "success",
+                "data": {"serialNumber": "INV-1", "realTimeInfo": {"pvPower": 1.5}},
+            }
+        raise AssertionError(f"Unexpected path {path}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    response = await client.get_device_realtime("INV-1")
+    assert response["serialNumber"] == "INV-1"
+    assert calls[0] == (
+        "/openapi/systems/SYS-1/device/realtime",
+        {"serialNumber": "INV-1"},
+    )
+    assert calls[1] == (
+        "/openapi/systems/device/realtime",
+        {"serialNumber": "INV-1", "systemId": "SYS-1"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_device_realtime_requires_serial_number() -> None:
     """Device realtime should fail fast when serial number is empty."""
     client = SigenOfficial(username="u", password="p", system_id="SYS-1")
