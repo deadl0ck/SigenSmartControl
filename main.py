@@ -81,6 +81,11 @@ _EMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").strip()
 _EMAIL_SENDER_INSTANCE: Any | None = None
 _EMAIL_CONFIG_LOGGED = False
 
+
+def _is_truthy_env(name: str) -> bool:
+    """Return True when an environment variable is set to a truthy value."""
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
@@ -208,6 +213,27 @@ def _get_email_sender_instance() -> Any | None:
 
     if _EMAIL_SENDER_INSTANCE is not None:
         return _EMAIL_SENDER_INSTANCE
+
+    # Safety guard: test runs should not trigger real email sends unless explicitly enabled.
+    if _is_truthy_env("SIGEN_DISABLE_MODE_CHANGE_EMAILS"):
+        if not _EMAIL_CONFIG_LOGGED:
+            logger.info(
+                "[EMAIL] Mode-change email notifications disabled by "
+                "SIGEN_DISABLE_MODE_CHANGE_EMAILS."
+            )
+            _EMAIL_CONFIG_LOGGED = True
+        return None
+
+    running_under_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    allow_pytest_emails = _is_truthy_env("SIGEN_ALLOW_EMAIL_NOTIFICATIONS_IN_TESTS")
+    if running_under_pytest and not allow_pytest_emails:
+        if not _EMAIL_CONFIG_LOGGED:
+            logger.info(
+                "[EMAIL] Mode-change email notifications disabled during pytest run. "
+                "Set SIGEN_ALLOW_EMAIL_NOTIFICATIONS_IN_TESTS=true to override."
+            )
+            _EMAIL_CONFIG_LOGGED = True
+        return None
 
     if not (_EMAIL_SENDER_ADDRESS and _EMAIL_RECEIVER_ADDRESS and _EMAIL_APP_PASSWORD):
         if not _EMAIL_CONFIG_LOGGED:
