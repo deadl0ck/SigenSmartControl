@@ -85,6 +85,27 @@ _EMAIL_CONFIG_LOGGED = False
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
+_CANONICAL_DAYTIME_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve")
+
+
+def order_daytime_periods(period_forecast: dict[str, tuple[int, str]]) -> list[str]:
+    """Return daytime periods in deterministic scheduler order.
+
+    Args:
+        period_forecast: Mapping of period labels to forecast tuples.
+
+    Returns:
+        Ordered daytime period list. Known periods are returned as Morn, Aftn,
+        Eve when present. Any additional daytime labels are appended in
+        alphabetical order for deterministic behavior.
+    """
+    known = [period for period in _CANONICAL_DAYTIME_PERIOD_ORDER if period in period_forecast]
+    extras = sorted(
+        period
+        for period in period_forecast
+        if period.upper() != "NIGHT" and period not in _CANONICAL_DAYTIME_PERIOD_ORDER
+    )
+    return known + extras
 
 
 # --- Scheduler interaction and mode control ---
@@ -240,6 +261,13 @@ async def _notify_mode_change_email(
     """
     sender = _get_email_sender_instance()
     if sender is None:
+        logger.info(
+            "[EMAIL] Skipping mode-change notification (sender unavailable). "
+            "period=%s target=%s(%s)",
+            period,
+            requested_mode_label,
+            requested_mode,
+        )
         return
 
     current_mode_value = extract_mode_value(current_mode_raw)
@@ -266,6 +294,13 @@ async def _notify_mode_change_email(
     )
 
     try:
+        logger.info(
+            "[EMAIL] Sending mode-change notification: status=%s period=%s target=%s(%s).",
+            status,
+            period,
+            requested_mode_label,
+            requested_mode,
+        )
         await asyncio.to_thread(sender.send, _EMAIL_RECEIVER_ADDRESS, subject, body)
         logger.info("[EMAIL] Sent mode-change notification for %s.", period)
     except Exception as exc:
@@ -354,6 +389,7 @@ async def apply_mode_change(
                 f"[SIMULATION] set_operational_mode(mode={mode_label}, value={mode}) "
                 "- command suppressed in simulation mode"
             )
+            logger.info("[SIMULATION] Context=%s | reason=%s", period, reason)
             logger.info(ACTION_DIVIDER)
             logger.info(ACTION_DIVIDER)
             append_mode_change_event(
@@ -424,6 +460,14 @@ async def apply_mode_change(
             current_mode=current_mode_raw,
             response=response,
         )
+        logger.info(
+            "[EMAIL] Queueing mode-change notification: status=SUCCESS period=%s target=%s(%s) "
+            "simulated=%s",
+            period,
+            mode_label,
+            mode,
+            FULL_SIMULATION_MODE,
+        )
         await _notify_mode_change_email(
             success=True,
             period=period,
@@ -448,6 +492,14 @@ async def apply_mode_change(
             success=False,
             current_mode=current_mode_raw,
             error=str(e),
+        )
+        logger.info(
+            "[EMAIL] Queueing mode-change notification: status=FAILED period=%s target=%s(%s) "
+            "simulated=%s",
+            period,
+            mode_label,
+            mode,
+            FULL_SIMULATION_MODE,
         )
         await _notify_mode_change_email(
             success=False,
@@ -847,14 +899,16 @@ async def run_scheduler() -> None:
         )
         logger.info(f"[SCHEDULER] Tomorrow sunrise: {tomorrow_sunrise.isoformat()}")
 
-        daytime_periods = [p for p in today_period_forecast if p.upper() != "NIGHT"]
-        tomorrow_daytime_periods = [p for p in tomorrow_period_forecast if p.upper() != "NIGHT"]
+        daytime_periods = order_daytime_periods(today_period_forecast)
+        tomorrow_daytime_periods = order_daytime_periods(tomorrow_period_forecast)
         today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
         tomorrow_period_windows = derive_period_windows(
             tomorrow_sunrise,
             tomorrow_sunset,
             tomorrow_daytime_periods,
         )
+        logger.info("[SCHEDULER] Ordered daytime periods today: %s", daytime_periods)
+        logger.info("[SCHEDULER] Ordered daytime periods tomorrow: %s", tomorrow_daytime_periods)
         for period, start in today_period_windows.items():
             logger.info(f"[SCHEDULER] Period '{period}' starts at {start.isoformat()} UTC")
         for period, start in tomorrow_period_windows.items():

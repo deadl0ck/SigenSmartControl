@@ -123,6 +123,28 @@ def test_get_hours_until_cheap_rate_counts_down_before_cheap_window() -> None:
     assert abs(hours - 2.0) < 0.01
 
 
+def test_order_daytime_periods_enforces_morn_aftn_eve_order() -> None:
+    period_forecast = {
+        "Eve": (3000, "Green"),
+        "Morn": (1200, "Amber"),
+        "Aftn": (2200, "Green"),
+        "NIGHT": (0, "Red"),
+    }
+
+    assert main.order_daytime_periods(period_forecast) == ["Morn", "Aftn", "Eve"]
+
+
+def test_order_daytime_periods_appends_unknown_daytime_periods() -> None:
+    period_forecast = {
+        "Shoulder": (700, "Amber"),
+        "Eve": (2100, "Green"),
+        "Morn": (800, "Amber"),
+        "NIGHT": (0, "Red"),
+    }
+
+    assert main.order_daytime_periods(period_forecast) == ["Morn", "Eve", "Shoulder"]
+
+
 class DummyModeInteraction:
     def __init__(self, current_mode):
         self.current_mode = current_mode
