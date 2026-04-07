@@ -672,6 +672,20 @@ async def run_scheduler() -> None:
         "duration_minutes": None,
     }
     live_solar_kw_samples: deque[float] = deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)
+    tick_mode_change_attempts = 0
+    tick_mode_change_successes = 0
+    tick_mode_change_failures = 0
+
+    async def _apply_mode_change_tracked(**kwargs: Any) -> bool:
+        """Apply mode change and record per-tick mode-change counters."""
+        nonlocal tick_mode_change_attempts, tick_mode_change_successes, tick_mode_change_failures
+        tick_mode_change_attempts += 1
+        ok = await apply_mode_change(**kwargs)
+        if ok:
+            tick_mode_change_successes += 1
+        else:
+            tick_mode_change_failures += 1
+        return ok
 
     async def start_timed_grid_export(
         *,
@@ -749,7 +763,7 @@ async def run_scheduler() -> None:
             f"{reason} Timed export override active for {clamped_minutes} minutes "
             f"(until {restore_at.isoformat()}) before restoring previous mode {restore_label}."
         )
-        ok = await apply_mode_change(
+        ok = await _apply_mode_change_tracked(
             sigen=sigen,
             mode=SIGEN_MODES["GRID_EXPORT"],
             period=f"{period} (timed-export-start)",
@@ -833,7 +847,7 @@ async def run_scheduler() -> None:
         )
         logger.info(ACTION_DIVIDER)
 
-        restore_ok = await apply_mode_change(
+        restore_ok = await _apply_mode_change_tracked(
             sigen=sigen,
             mode=restore_mode,
             period=f"{trigger_period} (timed-export-restore)",
@@ -1211,6 +1225,9 @@ async def run_scheduler() -> None:
         now = datetime.now(timezone.utc)
         today = now.date()
         sleep_override_seconds = None
+        tick_mode_change_attempts = 0
+        tick_mode_change_successes = 0
+        tick_mode_change_failures = 0
 
         if refresh_auth_on_wake and auth_refreshed_for_date != today and sigen is not None:
             try:
@@ -1262,6 +1279,12 @@ async def run_scheduler() -> None:
                 timed_export_override["restore_at"],
             )
             logger.info(
+                "[SCHEDULER] Tick mode-change summary: attempted=%s successful=%s failed=%s",
+                tick_mode_change_attempts,
+                tick_mode_change_successes,
+                tick_mode_change_failures,
+            )
+            logger.info(
                 f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "
                 f"Next check in {POLL_INTERVAL_SECONDS // 60} minutes."
             )
@@ -1305,7 +1328,7 @@ async def run_scheduler() -> None:
                     outcome="night mode applied",
                 )
                 try:
-                    ok = await apply_mode_change(
+                    ok = await _apply_mode_change_tracked(
                         sigen=sigen,
                         mode=night_mode,
                         period=night_period_name,
@@ -1525,7 +1548,7 @@ async def run_scheduler() -> None:
                         reason=reason,
                         outcome="period start mode applied",
                     )
-                    ok = await apply_mode_change(
+                    ok = await _apply_mode_change_tracked(
                         sigen=sigen,
                         mode=mode,
                         period=f"{period} (period-start)",
@@ -1536,6 +1559,12 @@ async def run_scheduler() -> None:
                         s["start_set"] = True
                         s["pre_set"] = True  # Suppress further pre-period checks.
 
+        logger.info(
+            "[SCHEDULER] Tick mode-change summary: attempted=%s successful=%s failed=%s",
+            tick_mode_change_attempts,
+            tick_mode_change_successes,
+            tick_mode_change_failures,
+        )
         next_sleep_seconds = sleep_override_seconds or POLL_INTERVAL_SECONDS
         logger.info(
             f"[SCHEDULER] Tick at {now.isoformat()} UTC complete. "
