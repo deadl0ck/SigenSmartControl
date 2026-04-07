@@ -147,6 +147,56 @@ async def test_get_energy_flow_uses_official_monitoring_path(
 
 
 @pytest.mark.asyncio
+async def test_get_device_realtime_uses_serial_query_param(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Device realtime should query configured path with serialNumber parameter."""
+    client = SigenOfficial(username="u", password="p", system_id="SYS-1")
+    client.access_token = "token"
+
+    captured: dict[str, object] = {}
+
+    async def fake_request(
+        *,
+        method,
+        path,
+        payload,
+        include_bearer=True,
+        use_form_urlencoded=False,
+        query_params=None,
+    ):
+        captured["method"] = method
+        captured["path"] = path
+        captured["query_params"] = query_params
+        del payload, include_bearer, use_form_urlencoded
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "serialNumber": "INV-1",
+                "realTimeInfo": {"pv1Voltage": 420.0, "pv1Current": 4.2},
+            },
+        }
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    response = await client.get_device_realtime("INV-1")
+    assert response["serialNumber"] == "INV-1"
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/openapi/systems/SYS-1/device/realtime"
+    assert captured["query_params"] == {"serialNumber": "INV-1"}
+
+
+@pytest.mark.asyncio
+async def test_get_device_realtime_requires_serial_number() -> None:
+    """Device realtime should fail fast when serial number is empty."""
+    client = SigenOfficial(username="u", password="p", system_id="SYS-1")
+
+    with pytest.raises(ValueError, match="serial_number is required"):
+        await client.get_device_realtime("   ")
+
+
+@pytest.mark.asyncio
 async def test_async_initialize_fetches_system_id_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

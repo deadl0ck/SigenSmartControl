@@ -630,6 +630,49 @@ Important:
 - `FULL_SIMULATION_MODE = True` means mode writes are suppressed (read-only calls still run).
 - Set `FULL_SIMULATION_MODE = False` to send real mode-change commands.
 
+## Scripts Reference
+
+All files under `scripts/` are documented below.
+
+- `scripts/forecast_vs_actual.py`
+	- Compares ESB/Quartz forecasts against measured telemetry by period.
+	- Run: `python scripts/forecast_vs_actual.py`
+
+- `scripts/test.sh`
+	- Convenience wrapper to run tests from shell.
+	- Run: `bash scripts/test.sh`
+
+- `scripts/test_legacy_api.py`
+	- Read-only diagnostic for the legacy third-party Sigen client.
+	- Run: `python scripts/test_legacy_api.py`
+	- Optional: `python scripts/test_legacy_api.py --json --skip-signals`
+
+- `scripts/test_mode_change_email.py`
+	- Sends a test mode-change notification email through scheduler email path.
+	- Run: `python scripts/test_mode_change_email.py`
+	- Optional: `python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason "Testing email path"`
+
+- `scripts/test_mode_switch.py`
+	- Legacy/active-client mode check and mode switch helper.
+	- Run: `python scripts/test_mode_switch.py`
+	- Optional: `python scripts/test_mode_switch.py --list` and `python scripts/test_mode_switch.py <mode_id>`
+
+- `scripts/test_mode_switch_official.py`
+	- Official API mode diagnostics and optional official mode switch (`--apply`).
+	- Run: `python scripts/test_mode_switch_official.py`
+	- Optional: `python scripts/test_mode_switch_official.py --list` and `python scripts/test_mode_switch_official.py 5 --apply`
+
+- `scripts/test_pv_string_faults_official.py`
+	- Official API per-string PV realtime snapshot and imbalance warning check.
+	- Requires inverter/AIO serial number (`--serial` or `SIGEN_INVERTER_SERIAL`).
+	- Run: `python scripts/test_pv_string_faults_official.py --serial <SERIAL>`
+	- Optional: `python scripts/test_pv_string_faults_official.py --serial <SERIAL> --warn-pct 30`
+	- Optional raw payload: `python scripts/test_pv_string_faults_official.py --serial <SERIAL> --json`
+
+- `scripts/todays_forecast_both.py`
+	- Prints today's ESB and Quartz forecasts side-by-side.
+	- Run: `python scripts/todays_forecast_both.py`
+
 ## Email Notifications
 
 When the scheduler issues a mode-change command, it sends an email notification with:
@@ -646,6 +689,11 @@ Required `.env` variables:
 - `EMAIL_SENDER`: Gmail address used to send notifications
 - `EMAIL_RECEIVER`: destination email address
 - `GMAIL_APP_PASSWORD`: Gmail app password for `EMAIL_SENDER`
+
+For official per-device PV string diagnostics, set one of:
+
+- `SIGEN_INVERTER_SERIAL`: inverter/AIO serial for `test_pv_string_faults_official.py`
+- or pass `--serial` directly when running the script
 
 Notes:
 

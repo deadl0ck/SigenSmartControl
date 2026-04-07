@@ -69,6 +69,7 @@ class OfficialPaths:
     query_mode: str = "/openapi/instruction/{systemId}/settings"
     switch_mode: str = "/openapi/instruction/settings"
     energy_flow: str | None = "/openapi/systems/{systemId}/energyFlow"
+    device_realtime: str | None = "/openapi/systems/{systemId}/device/realtime"
 
 
 class SigenOfficial:
@@ -180,6 +181,10 @@ class SigenOfficial:
                 energy_flow=os.getenv(
                     "SIGEN_OFFICIAL_ENERGY_FLOW_PATH",
                     "/openapi/systems/{systemId}/energyFlow",
+                ),
+                device_realtime=os.getenv(
+                    "SIGEN_OFFICIAL_DEVICE_REALTIME_PATH",
+                    "/openapi/systems/{systemId}/device/realtime",
                 ),
             ),
         )
@@ -671,6 +676,41 @@ class SigenOfficial:
             path=path,
             payload=None,
             include_bearer=True,
+        )
+        data = self._extract_data(response)
+        return data if isinstance(data, dict) else {"raw": response}
+
+    async def get_device_realtime(self, serial_number: str) -> dict[str, Any]:
+        """Query realtime telemetry for a specific device serial number.
+
+        Args:
+            serial_number: Device serial number (for example inverter/AIO SN).
+
+        Returns:
+            Parsed realtime payload, or a raw wrapper when response shape differs.
+
+        Raises:
+            RuntimeError: If realtime path is not configured.
+            RuntimeError: If `system_id` is not set.
+            ValueError: If `serial_number` is empty.
+        """
+        if not self.paths.device_realtime:
+            raise RuntimeError(
+                "Official device realtime endpoint is not configured. "
+                "Set SIGEN_OFFICIAL_DEVICE_REALTIME_PATH."
+            )
+        if not self.system_id:
+            raise RuntimeError("system_id is not set.")
+        if not serial_number.strip():
+            raise ValueError("serial_number is required.")
+
+        path = self.paths.device_realtime.replace("{systemId}", str(self.system_id))
+        response = await self._request(
+            method="GET",
+            path=path,
+            payload=None,
+            include_bearer=True,
+            query_params={"serialNumber": serial_number.strip()},
         )
         data = self._extract_data(response)
         return data if isinstance(data, dict) else {"raw": response}
