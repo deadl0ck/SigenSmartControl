@@ -524,6 +524,61 @@ class SigenOfficial:
         data = self._extract_data(response)
         return data if isinstance(data, list) else []
 
+    async def get_device_list(self) -> list[dict[str, Any]]:
+        """Fetch device inventory for the configured system.
+
+        Different tenants expose inventory paths differently. This method tries a
+        set of likely endpoint shapes and query styles.
+
+        Returns:
+            List of device dictionaries when available.
+
+        Raises:
+            RuntimeError: If system_id is missing or no inventory endpoint is found.
+        """
+        if not self.system_id:
+            raise RuntimeError("system_id is not set.")
+
+        candidate_paths = [
+            "/openapi/systems/{systemId}/devices",
+            "/openapi/systems/{systemId}/device/list",
+            "/openapi/systems/device/list",
+            "/openapi/inventory/device",
+            "/systems/{systemId}/devices",
+            "/systems/{systemId}/device/list",
+            "/systems/device/list",
+            "/inventory/device",
+        ]
+
+        attempted: list[str] = []
+        for candidate in candidate_paths:
+            resolved_path = candidate.replace("{systemId}", str(self.system_id))
+            query_params = None
+            if "{systemId}" not in candidate:
+                query_params = {"systemId": str(self.system_id)}
+
+            try:
+                response = await self._request(
+                    method="GET",
+                    path=resolved_path,
+                    payload=None,
+                    include_bearer=True,
+                    query_params=query_params,
+                )
+                data = self._extract_data(response)
+                return data if isinstance(data, list) else []
+            except RuntimeError as exc:
+                attempted.append(f"{resolved_path} ? {query_params}")
+                if "failed (404)" in str(exc):
+                    continue
+                raise
+
+        attempted_paths = " | ".join(attempted)
+        raise RuntimeError(
+            "Official device list endpoint not found for this tenant. "
+            f"Attempted: {attempted_paths}"
+        )
+
     async def get_operational_mode(self) -> dict[str, Any]:
         """Query the current operational mode for this system.
 
@@ -710,6 +765,13 @@ class SigenOfficial:
             "/openapi/systems/{systemId}/device/realtime",
             "/openapi/systems/device/realtime",
             "/openapi/device/realtime",
+            "/systems/{systemId}/device/realtime",
+            "/systems/device/realtime",
+            "/device/realtime",
+        ]
+        query_variants: list[dict[str, str]] = [
+            {"serialNumber": serial},
+            {"snCode": serial},
         ]
 
         attempted: list[str] = []
@@ -718,27 +780,28 @@ class SigenOfficial:
                 continue
 
             resolved_path = candidate.replace("{systemId}", str(self.system_id))
-            query_params = {"serialNumber": serial}
-            if "{systemId}" not in candidate:
-                query_params["systemId"] = str(self.system_id)
+            for query in query_variants:
+                query_params = dict(query)
+                if "{systemId}" not in candidate:
+                    query_params["systemId"] = str(self.system_id)
 
-            try:
-                response = await self._request(
-                    method="GET",
-                    path=resolved_path,
-                    payload=None,
-                    include_bearer=True,
-                    query_params=query_params,
-                )
-                data = self._extract_data(response)
-                return data if isinstance(data, dict) else {"raw": response}
-            except RuntimeError as exc:
-                attempted.append(f"{resolved_path} ? {query_params}")
-                # Different tenants can expose different inventory/realtime paths.
-                # Continue only for not-found style errors; otherwise surface immediately.
-                if "failed (404)" in str(exc):
-                    continue
-                raise
+                try:
+                    response = await self._request(
+                        method="GET",
+                        path=resolved_path,
+                        payload=None,
+                        include_bearer=True,
+                        query_params=query_params,
+                    )
+                    data = self._extract_data(response)
+                    return data if isinstance(data, dict) else {"raw": response}
+                except RuntimeError as exc:
+                    attempted.append(f"{resolved_path} ? {query_params}")
+                    # Different tenants can expose different inventory/realtime paths.
+                    # Continue only for not-found style errors; otherwise surface immediately.
+                    if "failed (404)" in str(exc):
+                        continue
+                    raise
 
         attempted_paths = " | ".join(attempted) if attempted else "none"
         raise RuntimeError(

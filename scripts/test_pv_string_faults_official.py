@@ -143,19 +143,43 @@ async def main() -> None:
         action="store_true",
         help="Print only the raw device realtime payload as JSON and exit.",
     )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="List available device serials for this system and exit.",
+    )
     args = parser.parse_args()
-
-    serial = args.serial.strip()
-    if not serial:
-        raise SystemExit(
-            "Missing serial number. Provide --serial or set SIGEN_INVERTER_SERIAL in .env."
-        )
 
     os.environ["SIGEN_OFFICIAL_STRICT_ONLY"] = "true"
 
     logger.info("Initializing official Sigen client...")
     client = await SigenOfficial.create_from_env()
     logger.info("Official client initialized.")
+
+    if args.list_devices:
+        try:
+            devices = await client.get_device_list()
+        except RuntimeError as exc:
+            raise SystemExit(f"Device list query failed: {exc}") from exc
+
+        if not devices:
+            print("No devices returned by official inventory endpoint for this account/system.")
+            return
+
+        print("Available devices")
+        print("=================")
+        for device in devices:
+            serial = device.get("serialNumber") or device.get("snCode") or "UNKNOWN"
+            device_type = device.get("deviceType", "UNKNOWN")
+            status = device.get("status", "UNKNOWN")
+            print(f"- serial={serial} type={device_type} status={status}")
+        return
+
+    serial = args.serial.strip()
+    if not serial:
+        raise SystemExit(
+            "Missing serial number. Provide --serial or set SIGEN_INVERTER_SERIAL in .env."
+        )
 
     if serial == str(client.system_id):
         raise SystemExit(
@@ -166,9 +190,25 @@ async def main() -> None:
     try:
         device_payload = await client.get_device_realtime(serial)
     except RuntimeError as exc:
+        discovered_devices: list[dict[str, Any]] | None = None
+        try:
+            discovered_devices = await client.get_device_list()
+        except Exception:
+            discovered_devices = None
+
+        discovery_hint = ""
+        if discovered_devices:
+            lines = []
+            for device in discovered_devices:
+                serial_hint = device.get("serialNumber") or device.get("snCode") or "UNKNOWN"
+                type_hint = device.get("deviceType", "UNKNOWN")
+                lines.append(f"  - serial={serial_hint} type={type_hint}")
+            discovery_hint = "\nDiscovered device serials for this account/system:\n" + "\n".join(lines)
+
         raise SystemExit(
             f"Device realtime query failed: {exc}\n"
             "Tip: confirm --serial is a device serialNumber from the Sigen app, not systemId."
+            f"{discovery_hint}"
         ) from exc
 
     if args.json:

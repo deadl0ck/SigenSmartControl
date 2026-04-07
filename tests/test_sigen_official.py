@@ -227,9 +227,52 @@ async def test_get_device_realtime_falls_back_to_alt_path_with_system_id_query(
         {"serialNumber": "INV-1"},
     )
     assert calls[1] == (
+        "/openapi/systems/SYS-1/device/realtime",
+        {"snCode": "INV-1"},
+    )
+    assert calls[2] == (
         "/openapi/systems/device/realtime",
         {"serialNumber": "INV-1", "systemId": "SYS-1"},
     )
+
+
+@pytest.mark.asyncio
+async def test_get_device_realtime_retries_with_sncode_query_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Device realtime should retry with snCode when serialNumber form is not found."""
+    client = SigenOfficial(username="u", password="p", system_id="SYS-1")
+    client.access_token = "token"
+
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    async def fake_request(
+        *,
+        method,
+        path,
+        payload,
+        include_bearer=True,
+        use_form_urlencoded=False,
+        query_params=None,
+    ):
+        del method, payload, include_bearer, use_form_urlencoded
+        calls.append((path, query_params or {}))
+        if query_params == {"serialNumber": "INV-1"}:
+            raise RuntimeError("GET ... failed (404): not found")
+        if query_params == {"snCode": "INV-1"}:
+            return {
+                "code": 0,
+                "msg": "success",
+                "data": {"serialNumber": "INV-1", "realTimeInfo": {"pvPower": 2.3}},
+            }
+        raise AssertionError(f"Unexpected query params {query_params}")
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    response = await client.get_device_realtime("INV-1")
+    assert response["serialNumber"] == "INV-1"
+    assert calls[0][1] == {"serialNumber": "INV-1"}
+    assert calls[1][1] == {"snCode": "INV-1"}
 
 
 @pytest.mark.asyncio
