@@ -1438,6 +1438,7 @@ async def run_scheduler() -> None:
 
                     if now >= export_by:
                         outcome = "pre-period export triggered"
+                        pre_check_complete = False
                         if mode == SIGEN_MODES["GRID_EXPORT"]:
                             duration_minutes = max(
                                 1,
@@ -1476,6 +1477,7 @@ async def run_scheduler() -> None:
                                     period,
                                 )
                                 continue
+                            pre_check_complete = True
                         else:
                             log_check(
                                 period,
@@ -1497,7 +1499,22 @@ async def run_scheduler() -> None:
                                 reason=reason,
                                 outcome="pre-period check concluded no export needed",
                             )
-                        s["pre_set"] = True
+
+                            # Keep checking until headroom deficit clears or a GRID_EXPORT
+                            # override starts so rising live solar can still trigger pre-export.
+                            if headroom_deficit <= 0:
+                                pre_check_complete = True
+                            else:
+                                logger.info(
+                                    "[%s] Retrying pre-period check next tick: headroom deficit "
+                                    "%.2f kWh remains and mode=%s.",
+                                    period,
+                                    headroom_deficit,
+                                    mode_names.get(mode, mode),
+                                )
+
+                        if pre_check_complete:
+                            s["pre_set"] = True
                     else:
                         log_check(
                             period,
