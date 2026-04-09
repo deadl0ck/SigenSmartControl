@@ -48,6 +48,7 @@ LONGITUDE: Final[float] = _get_env_float_required("SIGEN_LONGITUDE")
 # Supported values:
 # - "esb_api": ESB Networks county forecast API (default)
 # - "quartz": Open Quartz site-level forecast API (optional provider)
+# - "forecast_solar": Forecast.Solar site-level forecast API (optional provider)
 FORECAST_PROVIDER: Final[str] = os.getenv("FORECAST_PROVIDER", "esb_api").strip().lower()
 
 # County used for the ESB county-level forecast API.
@@ -125,6 +126,22 @@ QUARTZ_FORECAST_API_URL: Final[str] = os.getenv(
     "https://open.quartz.solar/forecast/",
 ).strip()
 QUARTZ_SITE_CAPACITY_KWP: Final[float] = float(os.getenv("QUARTZ_SITE_CAPACITY_KWP", "8.9"))
+
+# Optional Forecast.Solar provider settings.
+FORECAST_SOLAR_API_BASE_URL: Final[str] = os.getenv(
+    "FORECAST_SOLAR_API_BASE_URL",
+    "https://api.forecast.solar",
+).strip().rstrip("/")
+FORECAST_SOLAR_API_KEY: Final[str] = os.getenv("FORECAST_SOLAR_API_KEY", "").strip()
+FORECAST_SOLAR_PLANE_DECLINATION: Final[int] = int(
+    os.getenv("FORECAST_SOLAR_PLANE_DECLINATION", "37")
+)
+FORECAST_SOLAR_PLANE_AZIMUTH: Final[int] = int(
+    os.getenv("FORECAST_SOLAR_PLANE_AZIMUTH", "0")
+)
+FORECAST_SOLAR_SITE_KWP: Final[float] = float(
+    os.getenv("FORECAST_SOLAR_SITE_KWP", str(QUARTZ_SITE_CAPACITY_KWP))
+)
 
 # Local archive file for side-by-side ESB vs Quartz comparison snapshots.
 FORECAST_COMPARISON_ARCHIVE_PATH: Final[str] = os.getenv(

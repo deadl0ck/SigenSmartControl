@@ -50,6 +50,8 @@ LOCAL_TIMEZONE = "Europe/Dublin"
 ESB_API_TIMEOUT_SECONDS = 30
 # HTTP timeout for Quartz forecast API requests.
 QUARTZ_API_TIMEOUT_SECONDS = 30
+# HTTP timeout for Forecast.Solar API requests.
+FORECAST_SOLAR_API_TIMEOUT_SECONDS = 30
 # HTTP timeout for sunrise/sunset API requests.
 SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
 

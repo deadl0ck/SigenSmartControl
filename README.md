@@ -146,7 +146,7 @@ Meaning:
 - `LOCAL_TIMEZONE`: timezone used when evaluating tariff windows
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
-- `FORECAST_PROVIDER`: active provider (`esb_api` or `quartz`)
+- `FORECAST_PROVIDER`: active provider (`esb_api`, `forecast_solar`, or `quartz`)
 - `ESB_FORECAST_COUNTY`: county name used for ESB county API lookup (e.g., `Westmeath`)
 - `ESB_FORECAST_API_URL`: derived ESB endpoint for selected county id
 - `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
@@ -177,19 +177,21 @@ The tariff time windows in `config/settings.py` define when each tariff period i
 
 The scheduler uses these windows to determine whether to use self-powered, TOU, or AI modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions purely on forecast quality and tariff period, not on cost arithmetic.
 
-### Forecast providers (ESB primary, Quartz secondary)
+### Forecast providers (ESB primary, Forecast.Solar backup, Quartz fallback)
 
 Forecast ingestion is abstracted behind a stable provider interface in `weather/forecast.py`.
 
 - Default runtime mode (`FORECAST_PROVIDER=esb_api`) uses ESB county API data for decisions.
-- In ESB mode, the app also pulls Quartz and logs a period-by-period comparison summary each refresh.
-- Quartz is comparison-only in this mode; inverter decisions still follow ESB-derived forecasts.
+- In ESB mode, the app pulls Forecast.Solar first and Quartz second and logs a period-by-period comparison summary each refresh.
+- Forecast.Solar and Quartz are comparison-only in this mode; inverter decisions still follow ESB-derived statuses.
+- For numeric watts used in headroom/clipping calculations, backup priority is Forecast.Solar first, then Quartz.
+- If you set `FORECAST_PROVIDER=forecast_solar`, Forecast.Solar becomes the decision source.
 - If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
 
-Why keep Quartz as secondary while ESB is primary:
+Why keep Forecast.Solar/Quartz as secondary sources while ESB is primary:
 
 - ESB county statuses align with the public county forecast users already see.
-- Quartz provides independent site-level predictions, useful for validating trends and potential future migration.
+- Forecast.Solar and Quartz provide independent site-level predictions, useful for validating trends and potential future migration.
 - Running both lets you quantify match/mismatch over time before changing decision source.
 
 How the comparison is normalized:
@@ -636,7 +638,7 @@ Important:
 All files under `scripts/` are documented below.
 
 - `scripts/forecast_vs_actual.py`
-	- Compares ESB/Quartz forecasts against measured telemetry by period.
+	- Compares ESB, Forecast.Solar, and Quartz forecasts against measured telemetry by period.
 	- Adds a daily telemetry total line per date: `Day PV total (pvDayNrg): <kWh>`.
 	- Run: `python scripts/forecast_vs_actual.py`
 
@@ -728,11 +730,13 @@ Run:
 python scripts/forecast_vs_actual.py
 ```
 
-This report compares ESB, Quartz, and measured inverter telemetry by daytime period.
+This report compares ESB, Forecast.Solar, Quartz, and measured inverter telemetry by daytime period.
 
 Columns include:
 
 - `ESB Forecast`: ESB period status only (`Red`/`Amber`/`Green`)
+- `ForecastSolar`: Forecast.Solar period forecast in kW with `(Forecast / Actual) %` (when available)
+- `FS Status`: Forecast.Solar status derived from configured capacity thresholds
 - `Quartz kW`: Quartz period forecast in kW with `(Forecast / Actual) %`
 - `Quartz Status`: Quartz status derived from configured capacity thresholds
 - `Calibrated kW`: ESB kW adjusted by a fitted multiplier from observed telemetry
@@ -743,7 +747,7 @@ Columns include:
 
 ### Status rules used in the report
 
-`ESB Forecast` and `Quartz Status` use site-capacity thresholds:
+`ESB Forecast`, `FS Status`, and `Quartz Status` use site-capacity thresholds:
 
 - `Red`: <20% of `SOLAR_PV_KW`
 - `Amber`: 20% to <40% of `SOLAR_PV_KW`

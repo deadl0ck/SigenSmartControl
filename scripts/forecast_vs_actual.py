@@ -245,6 +245,8 @@ def describe_period(
     period: str,
     esb_kw: float | None,
     esb_status: str | None,
+    forecast_solar_kw: float | None,
+    forecast_solar_pct: int | None,
     quartz_kw: float | None,
     quartz_pct: int | None,
     actual_status: str,
@@ -278,6 +280,19 @@ def describe_period(
     # Compare ESB and Quartz to actual
     if esb_kw is not None and esb_status is not None:
         parts.append(f"ESB forecast was {esb_status}; actual reading was {actual_status}")
+
+    if forecast_solar_kw is not None and forecast_solar_pct is not None:
+        if forecast_solar_pct < 50:
+            fs_label = "severely underestimated"
+        elif forecast_solar_pct < 80:
+            fs_label = "underestimated"
+        elif forecast_solar_pct <= 120:
+            fs_label = "on target"
+        elif forecast_solar_pct < 200:
+            fs_label = "overestimated"
+        else:
+            fs_label = "severely overestimated"
+        parts.append(f"Forecast.Solar {fs_label} ({forecast_solar_pct}%)")
 
     if quartz_kw is not None and quartz_pct is not None:
         if quartz_pct < 50:
@@ -461,6 +476,8 @@ def build_forecast_rows(
         lambda: {
             "esb_w": None,
             "esb_status": None,
+            "forecast_solar_w": None,
+            "forecast_solar_status": None,
             "quartz_w": None,
             "quartz_status": None,
             "captured_at": None,
@@ -491,8 +508,23 @@ def build_forecast_rows(
 
                 secondary = (period_data or {}).get("secondary")
                 if secondary and secondary.get("value_w") is not None:
-                    rows[key]["quartz_w"] = secondary.get("value_w")
-                    rows[key]["quartz_status"] = secondary.get("status")
+                    secondary_name = str(rec.get("secondary_provider") or "quartz").strip().lower()
+                    if secondary_name == "forecast_solar":
+                        rows[key]["forecast_solar_w"] = secondary.get("value_w")
+                        rows[key]["forecast_solar_status"] = secondary.get("status")
+                    else:
+                        rows[key]["quartz_w"] = secondary.get("value_w")
+                        rows[key]["quartz_status"] = secondary.get("status")
+
+                tertiary = (period_data or {}).get("tertiary")
+                if tertiary and tertiary.get("value_w") is not None:
+                    tertiary_name = str(rec.get("tertiary_provider") or "").strip().lower()
+                    if tertiary_name == "quartz":
+                        rows[key]["quartz_w"] = tertiary.get("value_w")
+                        rows[key]["quartz_status"] = tertiary.get("status")
+                    elif tertiary_name == "forecast_solar":
+                        rows[key]["forecast_solar_w"] = tertiary.get("value_w")
+                        rows[key]["forecast_solar_status"] = tertiary.get("status")
 
     return rows
 
@@ -526,7 +558,7 @@ def print_report(
     print("=" * 176)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
-        f"{'ESB Forecast':>12}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated kW':>12}  "
+        f"{'ESB Forecast':>12}  {'ForecastSolar':>14}  {'FS Status':>10}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated kW':>12}  "
         f"{'Avg Act kW':>10}  {'Avg SOC %':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
@@ -568,17 +600,23 @@ def print_report(
         esb_status = forecast.get("esb_status")  # Use stored status from archive
         quartz_w = forecast.get("quartz_w")
         quartz_status = forecast.get("quartz_status")  # Use stored status from archive
+        forecast_solar_w = forecast.get("forecast_solar_w")
+        forecast_solar_status = forecast.get("forecast_solar_status")
 
         # Convert ESB forecast index to kW equivalent (for reporting purposes)
         # ESB indices: Red=100, Amber=300, Green=500
         # Quartz is already in watts, convert to kW
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
+        forecast_solar_kw = round(forecast_solar_w / 1000, 3) if forecast_solar_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
 
         # Calculate percentage of actual (forecast as % of actual)
         quartz_pct = None
         if quartz_kw is not None and avg_actual > 0:
             quartz_pct = round((quartz_kw / avg_actual) * 100)
+        forecast_solar_pct = None
+        if forecast_solar_kw is not None and avg_actual > 0:
+            forecast_solar_pct = round((forecast_solar_kw / avg_actual) * 100)
 
         cal = calibration.get(period, {})
         multiplier = fitted_multipliers.get(period, cal.get("power_multiplier", 1.0))
@@ -587,6 +625,12 @@ def print_report(
         # Format columns with percentages
         esb_s = esb_status if esb_status is not None else "N/A"
 
+        fs_status = forecast_solar_status if forecast_solar_status is not None else "N/A"
+        fs_s = (
+            f"{forecast_solar_kw:.3f} ({forecast_solar_pct}%)"
+            if forecast_solar_kw is not None and forecast_solar_pct is not None
+            else "N/A"
+        )
         quartz_s_status = quartz_status if quartz_status is not None else "N/A"
         quartz_s = (
             f"{quartz_kw:.3f} ({quartz_pct}%)"
@@ -607,7 +651,7 @@ def print_report(
 
         print(
             f"  {date:<12}  {period:<6}  "
-            f"{esb_s:>12}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
+            f"{esb_s:>12}  {fs_s:>14}  {fs_status:>10}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
             f"{avg_actual:>10.2f}  {f'{avg_soc:.1f}' if avg_soc is not None else 'N/A':>10}  "
             f"{actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
@@ -619,6 +663,8 @@ def print_report(
                     period=period,
                     esb_kw=esb_kw,
                     esb_status=esb_status,
+                    forecast_solar_kw=forecast_solar_kw,
+                    forecast_solar_pct=forecast_solar_pct,
                     quartz_kw=quartz_kw,
                     quartz_pct=quartz_pct,
                     actual_status=derived_status,

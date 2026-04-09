@@ -19,6 +19,7 @@ import requests
 
 from config.settings import (
     ESB_API_TIMEOUT_SECONDS,
+    FORECAST_SOLAR_API_TIMEOUT_SECONDS,
     LOCAL_TIMEZONE,
     QUARTZ_API_TIMEOUT_SECONDS,
     QUARTZ_GREEN_CAPACITY_FRACTION,
@@ -31,6 +32,11 @@ from config.constants import (
     ESB_FORECAST_API_BASE_URL,
     ESB_FORECAST_API_ENDPOINT,
     ESB_FORECAST_API_SUBSCRIPTION_KEY,
+    FORECAST_SOLAR_API_BASE_URL,
+    FORECAST_SOLAR_API_KEY,
+    FORECAST_SOLAR_PLANE_AZIMUTH,
+    FORECAST_SOLAR_PLANE_DECLINATION,
+    FORECAST_SOLAR_SITE_KWP,
     FORECAST_COMPARISON_ARCHIVE_PATH,
     FORECAST_PROVIDER,
     GOOD_DAY_THRESHOLD,
@@ -344,6 +350,101 @@ class QuartzSolarForecast(_BaseSolarForecast):
         self._log_table()
 
 
+class ForecastSolarForecast(_BaseSolarForecast):
+    """Forecast.Solar provider using public or API-key estimate endpoints."""
+
+    def __init__(self, logger: logging.Logger) -> None:
+        """Initialize provider and load forecasts from Forecast.Solar API."""
+        super().__init__(logger)
+        self._load_forecast_solar_table()
+
+    @staticmethod
+    def _period_from_hour(hour_local: int) -> str:
+        """Map local hour to project period labels."""
+        if 7 <= hour_local < 12:
+            return "Morn"
+        if 12 <= hour_local < 16:
+            return "Aftn"
+        if 16 <= hour_local < 20:
+            return "Eve"
+        return "NIGHT"
+
+    @staticmethod
+    def _local_timezone() -> ZoneInfo:
+        """Return the configured local timezone for period bucketing."""
+        return ZoneInfo(LOCAL_TIMEZONE)
+
+    @classmethod
+    def _status_from_avg_kw(cls, avg_kw: float) -> str:
+        """Map Forecast.Solar period-average output to Red/Amber/Green."""
+        capacity_kw = max(FORECAST_SOLAR_SITE_KWP, 0.1)
+        output_fraction = avg_kw / capacity_kw
+        if output_fraction < QUARTZ_RED_CAPACITY_FRACTION:
+            return "Red"
+        if output_fraction < QUARTZ_GREEN_CAPACITY_FRACTION:
+            return "Amber"
+        return "Green"
+
+    def _build_endpoint(self) -> str:
+        """Build Forecast.Solar watts endpoint based on account mode."""
+        lat = f"{LATITUDE:.4f}"
+        lon = f"{LONGITUDE:.4f}"
+        dec = str(FORECAST_SOLAR_PLANE_DECLINATION)
+        az = str(FORECAST_SOLAR_PLANE_AZIMUTH)
+        kwp = f"{FORECAST_SOLAR_SITE_KWP:.3f}".rstrip("0").rstrip(".")
+
+        if FORECAST_SOLAR_API_KEY:
+            return (
+                f"{FORECAST_SOLAR_API_BASE_URL}/{FORECAST_SOLAR_API_KEY}"
+                f"/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
+            )
+        return f"{FORECAST_SOLAR_API_BASE_URL}/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
+
+    def _load_forecast_solar_table(self) -> None:
+        """Load and normalize Forecast.Solar output into project period rows."""
+        endpoint = self._build_endpoint()
+        response = requests.get(endpoint, timeout=FORECAST_SOLAR_API_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        body = response.json()
+
+        result = body.get("result") if isinstance(body, dict) else None
+        watts_by_timestamp = result.get("watts") if isinstance(result, dict) else None
+        if not isinstance(watts_by_timestamp, dict) or not watts_by_timestamp:
+            raise ValueError("Forecast.Solar response did not include result.watts")
+
+        info = body.get("message", {}).get("info", {}) if isinstance(body, dict) else {}
+        provider_tz_name = info.get("timezone") if isinstance(info, dict) else None
+        local_tz = ZoneInfo(provider_tz_name) if isinstance(provider_tz_name, str) else self._local_timezone()
+
+        grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
+        for timestamp, watts_value in watts_by_timestamp.items():
+            try:
+                dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=local_tz)
+                local_dt = dt.astimezone(self._local_timezone())
+                period = self._period_from_hour(local_dt.hour)
+                day_label = local_dt.strftime("%a").capitalize()
+                grouped[(day_label, period)].append(float(watts_value) / 1000.0)
+            except Exception:
+                continue
+
+        normalized_rows: list[TableRow] = []
+        for (day_label, period), kw_values in grouped.items():
+            avg_kw = sum(kw_values) / len(kw_values)
+            value = int(round(avg_kw * 1000.0))
+            status = self._status_from_avg_kw(avg_kw)
+            normalized_rows.append((day_label, period, value, status))
+
+        if not normalized_rows:
+            raise ValueError("Forecast.Solar forecast produced no usable period rows")
+
+        period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "NIGHT": 3}
+        normalized_rows.sort(key=lambda row: (row[0], period_order.get(row[1], 99)))
+        self.table_data = normalized_rows
+        self._log_table()
+
+
 class ComparingSolarForecastProvider:
     """Wrap primary and secondary providers, using primary for decisions.
 
@@ -361,12 +462,16 @@ class ComparingSolarForecastProvider:
         *,
         primary_name: str,
         secondary_name: str,
+        tertiary: SolarForecastProvider | None = None,
+        tertiary_name: str | None = None,
     ) -> None:
         self.logger = logger
         self._primary = primary
         self._secondary = secondary
+        self._tertiary = tertiary
         self._primary_name = primary_name
         self._secondary_name = secondary_name
+        self._tertiary_name = tertiary_name
         self._log_comparison()
 
     def _ordered_periods(
@@ -381,6 +486,7 @@ class ComparingSolarForecastProvider:
         self,
         primary: PeriodForecast,
         secondary: PeriodForecast,
+        tertiary: PeriodForecast | None,
     ) -> PeriodForecast:
         """Keep primary statuses while borrowing secondary watts when available.
 
@@ -392,11 +498,16 @@ class ComparingSolarForecastProvider:
         merged: PeriodForecast = {}
         for period, (primary_value, primary_status) in primary.items():
             secondary_value = secondary.get(period)
-            if secondary_value is None:
-                merged[period] = (primary_value, primary_status)
+            if secondary_value is not None:
+                merged[period] = (secondary_value[0], primary_status)
                 continue
 
-            merged[period] = (secondary_value[0], primary_status)
+            tertiary_value = tertiary.get(period) if tertiary is not None else None
+            if tertiary_value is not None:
+                merged[period] = (tertiary_value[0], primary_status)
+                continue
+
+            merged[period] = (primary_value, primary_status)
 
         return merged
 
@@ -459,12 +570,47 @@ class ComparingSolarForecastProvider:
             },
         }
 
+    def _build_day_snapshot_with_optional_tertiary(
+        self,
+        left: PeriodForecast,
+        secondary: PeriodForecast,
+        tertiary: PeriodForecast | None,
+    ) -> dict[str, object]:
+        """Build serializable comparison payload for one day with optional tertiary source."""
+        base_snapshot = self._build_day_snapshot(left, secondary)
+        if tertiary is None:
+            return base_snapshot
+
+        periods = base_snapshot.get("periods", {})
+        for period in self._ordered_periods(left, tertiary):
+            period_entry = periods.get(period)
+            if not isinstance(period_entry, dict):
+                period_entry = {
+                    "primary": self._serialize_period_value(left.get(period)),
+                    "secondary": self._serialize_period_value(secondary.get(period)),
+                    "status_match": None,
+                }
+                periods[period] = period_entry
+
+            tertiary_val = tertiary.get(period)
+            primary_val = left.get(period)
+            period_entry["tertiary"] = self._serialize_period_value(tertiary_val)
+            if primary_val is None or tertiary_val is None:
+                period_entry["status_match_tertiary"] = None
+            else:
+                period_entry["status_match_tertiary"] = primary_val[1] == tertiary_val[1]
+
+        base_snapshot["periods"] = periods
+        return base_snapshot
+
     def _persist_comparison_snapshot(
         self,
         today_primary: PeriodForecast,
         today_secondary: PeriodForecast,
         tomorrow_primary: PeriodForecast,
         tomorrow_secondary: PeriodForecast,
+        today_tertiary: PeriodForecast | None,
+        tomorrow_tertiary: PeriodForecast | None,
     ) -> None:
         """Append one normalized comparison snapshot to the local JSONL archive."""
         archive_path = Path(FORECAST_COMPARISON_ARCHIVE_PATH)
@@ -473,18 +619,28 @@ class ComparingSolarForecastProvider:
             "timezone": LOCAL_TIMEZONE,
             "primary_provider": self._primary_name,
             "secondary_provider": self._secondary_name,
+            "tertiary_provider": self._tertiary_name,
             "county": COUNTY,
             "latitude": LATITUDE,
             "longitude": LONGITUDE,
             "quartz_site_capacity_kwp": QUARTZ_SITE_CAPACITY_KWP,
+            "forecast_solar_site_kwp": FORECAST_SOLAR_SITE_KWP,
             "normalization": {
                 "quartz_period_timezone": LOCAL_TIMEZONE,
                 "quartz_red_lt_fraction": QUARTZ_RED_CAPACITY_FRACTION,
                 "quartz_amber_lt_fraction": QUARTZ_GREEN_CAPACITY_FRACTION,
                 "esb_values_are_synthetic": True,
             },
-            "today": self._build_day_snapshot(today_primary, today_secondary),
-            "tomorrow": self._build_day_snapshot(tomorrow_primary, tomorrow_secondary),
+            "today": self._build_day_snapshot_with_optional_tertiary(
+                today_primary,
+                today_secondary,
+                today_tertiary,
+            ),
+            "tomorrow": self._build_day_snapshot_with_optional_tertiary(
+                tomorrow_primary,
+                tomorrow_secondary,
+                tomorrow_tertiary,
+            ),
         }
 
         try:
@@ -550,11 +706,22 @@ class ComparingSolarForecastProvider:
         today_secondary = self._secondary.get_todays_period_forecast()
         tomorrow_primary = self._primary.get_tomorrows_period_forecast()
         tomorrow_secondary = self._secondary.get_tomorrows_period_forecast()
+        today_tertiary = (
+            self._tertiary.get_todays_period_forecast() if self._tertiary is not None else None
+        )
+        tomorrow_tertiary = (
+            self._tertiary.get_tomorrows_period_forecast() if self._tertiary is not None else None
+        )
 
         self.logger.info(
             f"[FORECAST-COMPARE] Decision provider is {self._primary_name}. "
             f"{self._secondary_name} is comparison-only and does not drive inverter decisions."
         )
+        if self._tertiary_name is not None:
+            self.logger.info(
+                f"[FORECAST-COMPARE] Backup order for numeric watts: "
+                f"{self._secondary_name} first, {self._tertiary_name} second."
+            )
         self.logger.info(
             f"[FORECAST-COMPARE] Scheduler calculations keep {self._primary_name} statuses "
             f"but use {self._secondary_name} site-level watts when available to estimate clipping risk."
@@ -583,18 +750,22 @@ class ComparingSolarForecastProvider:
             today_secondary,
             tomorrow_primary,
             tomorrow_secondary,
+            today_tertiary,
+            tomorrow_tertiary,
         )
 
     def get_todays_period_forecast(self) -> PeriodForecast:
         return self._merge_primary_status_with_secondary_values(
             self._primary.get_todays_period_forecast(),
             self._secondary.get_todays_period_forecast(),
+            self._tertiary.get_todays_period_forecast() if self._tertiary is not None else None,
         )
 
     def get_tomorrows_period_forecast(self) -> PeriodForecast:
         return self._merge_primary_status_with_secondary_values(
             self._primary.get_tomorrows_period_forecast(),
             self._secondary.get_tomorrows_period_forecast(),
+            self._tertiary.get_tomorrows_period_forecast() if self._tertiary is not None else None,
         )
 
     def get_todays_solar_values(self) -> list[str]:
@@ -611,26 +782,59 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
     """Create the active forecast provider based on constants configuration."""
     if FORECAST_PROVIDER == "esb_api":
         primary = SolarForecast(logger)
+        forecast_solar_provider: ForecastSolarForecast | None = None
+        quartz_provider: QuartzSolarForecast | None = None
+
         try:
-            secondary = QuartzSolarForecast(logger)
+            forecast_solar_provider = ForecastSolarForecast(logger)
+        except Exception as exc:
+            logger.warning(
+                "[FORECAST-COMPARE] Forecast.Solar backup provider unavailable. Reason: %s",
+                exc,
+            )
+
+        try:
+            quartz_provider = QuartzSolarForecast(logger)
+        except Exception as exc:
+            logger.warning(
+                "[FORECAST-COMPARE] Quartz backup provider unavailable. Reason: %s",
+                exc,
+            )
+
+        if forecast_solar_provider is not None:
             return ComparingSolarForecastProvider(
                 logger,
                 primary,
-                secondary,
+                forecast_solar_provider,
+                primary_name="esb_api",
+                secondary_name="forecast_solar",
+                tertiary=quartz_provider,
+                tertiary_name="quartz" if quartz_provider is not None else None,
+            )
+
+        if quartz_provider is not None:
+            return ComparingSolarForecastProvider(
+                logger,
+                primary,
+                quartz_provider,
                 primary_name="esb_api",
                 secondary_name="quartz",
             )
-        except Exception as exc:
-            logger.warning(
-                "[FORECAST-COMPARE] Quartz comparison provider unavailable. "
-                f"Continuing with ESB-only decisions. Reason: {exc}"
-            )
-            return primary
+
+        logger.warning(
+            "[FORECAST-COMPARE] No backup forecast providers available. Continuing with ESB-only decisions."
+        )
+        return primary
+
+    if FORECAST_PROVIDER == "forecast_solar":
+        return ForecastSolarForecast(logger)
+
     if FORECAST_PROVIDER == "quartz":
         return QuartzSolarForecast(logger)
+
     raise ValueError(
         f"Unsupported FORECAST_PROVIDER='{FORECAST_PROVIDER}'. "
-        "Use 'esb_api' or 'quartz'."
+        "Use 'esb_api', 'forecast_solar' or 'quartz'."
     )
 
 
