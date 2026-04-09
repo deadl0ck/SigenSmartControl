@@ -213,7 +213,8 @@ Actual inverter telemetry is also archived locally for later analysis:
 
 - The scheduler appends one raw inverter snapshot per tick to `data/inverter_telemetry.jsonl` when the inverter API is reachable.
 - Each record includes the raw `get_energy_flow()` payload, current operational mode, scheduler timestamp, and the forecast state seen by the scheduler at that time.
-- Each record also includes derived clipping heuristics. If inverter-side solar is at or near the `5.5 kW` ceiling, the snapshot is flagged as likely clipping, with higher confidence when the battery is already near full and battery power is near zero.
+- When night sleep mode is active, the scheduler also writes a dedicated `night_sleep_start` snapshot before entering the long evening sleep window so the latest daily totals (including `pvDayNrg`) are preserved.
+- Each record also includes derived clipping heuristics. A sample is flagged as likely clipping only when inverter-side solar equals the `5.5 kW` ceiling.
 - This file is intended for post-run analysis so you can compare forecasted periods against what the inverter and battery actually did.
 
 Daily bounded calibration is also applied from that telemetry:
@@ -636,6 +637,7 @@ All files under `scripts/` are documented below.
 
 - `scripts/forecast_vs_actual.py`
 	- Compares ESB/Quartz forecasts against measured telemetry by period.
+	- Adds a daily telemetry total line per date: `Day PV total (pvDayNrg): <kWh>`.
 	- Run: `python scripts/forecast_vs_actual.py`
 
 - `scripts/test.sh`
@@ -737,6 +739,7 @@ Columns include:
 - `Avg Act kW`: average measured solar for that date/period
 - `Actual Basis`: denominator used for measured classification (`Array` or `Inverter`)
 - `Actual Reading`: measured status (`Red`/`Amber`/`Green`)
+- Per-day summary line: `Day PV total (pvDayNrg): <kWh>` from telemetry
 
 ### Status rules used in the report
 
@@ -759,6 +762,7 @@ Measured thresholds by basis:
 Clipping-aware promotion:
 
 - If clipping rate >=20% and utilization >=55%, measured status is promoted to `Green`
+- Clipping candidates are strict (`sample == 5.5 kW`) and de-noised: if a nearby following sample exceeds `5.5 kW`, the earlier candidate is discarded as non-clipping
 
 ### Calibrated kW note
 

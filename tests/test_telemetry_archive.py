@@ -56,8 +56,8 @@ def test_append_inverter_telemetry_snapshot_flags_likely_clipping(tmp_path, monk
     assert snapshot["derived"]["extracted_metrics"]["solar_power_kw"] == 5.5
 
 
-def test_append_inverter_telemetry_snapshot_flags_near_ceiling_clipping(tmp_path, monkeypatch) -> None:
-    """Near-ceiling solar with full battery and export should still count as clipping risk."""
+def test_append_inverter_telemetry_snapshot_does_not_flag_near_ceiling_only(tmp_path, monkeypatch) -> None:
+    """Near-ceiling-only samples should not be flagged when clipping requires exact ceiling output."""
     archive_path = tmp_path / "inverter_telemetry.jsonl"
     monkeypatch.setattr(telemetry_archive, "INVERTER_TELEMETRY_ARCHIVE_PATH", str(archive_path))
 
@@ -74,9 +74,32 @@ def test_append_inverter_telemetry_snapshot_flags_near_ceiling_clipping(tmp_path
     )
 
     snapshot = json.loads(archive_path.read_text(encoding="utf-8").strip())
-    assert snapshot["derived"]["likely_clipping"] is True
-    assert snapshot["derived"]["clipping_confidence"] == "high"
+    assert snapshot["derived"]["likely_clipping"] is False
+    assert snapshot["derived"]["clipping_confidence"] == "low"
     assert snapshot["derived"]["extracted_metrics"]["solar_power_kw"] == 5.2
+
+
+def test_append_inverter_telemetry_snapshot_does_not_flag_above_ceiling(tmp_path, monkeypatch) -> None:
+    """Above-ceiling readings should not be treated as clipping under the exact-ceiling rule."""
+    archive_path = tmp_path / "inverter_telemetry.jsonl"
+    monkeypatch.setattr(telemetry_archive, "INVERTER_TELEMETRY_ARCHIVE_PATH", str(archive_path))
+
+    telemetry_archive.append_inverter_telemetry_snapshot(
+        energy_flow={
+            "batterySoc": 100,
+            "pvPower": 5600,
+            "batteryPower": 0,
+            "gridExportPower": 5000,
+        },
+        operational_mode="Sigen AI Mode",
+        reason="scheduler_tick",
+        scheduler_now_utc=datetime(2026, 4, 3, 10, 30, tzinfo=timezone.utc),
+    )
+
+    snapshot = json.loads(archive_path.read_text(encoding="utf-8").strip())
+    assert snapshot["derived"]["likely_clipping"] is False
+    assert snapshot["derived"]["clipping_confidence"] == "low"
+    assert snapshot["derived"]["extracted_metrics"]["solar_power_kw"] == 5.6
 
 
 def test_extract_live_solar_power_kw_handles_watts_and_kw() -> None:

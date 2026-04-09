@@ -16,8 +16,6 @@ from zoneinfo import ZoneInfo
 from config.settings import (
     CLIPPING_BATTERY_POWER_ABS_LOW_KW,
     CLIPPING_BATTERY_SOC_HIGH_PERCENT,
-    CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW,
-    CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW,
     INVERTER_KW,
     LOCAL_TIMEZONE,
 )
@@ -110,11 +108,9 @@ def _split_grid_exchange_power_kw(value_kw: float | None) -> tuple[float | None,
 def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     """Infer likely clipping from raw inverter telemetry.
 
-    The strongest signal is inverter-side solar power sitting at the inverter AC
-    ceiling. Confidence is increased when the battery is already near full and
-    there is little remaining battery charging headroom. A secondary path flags
-    near-ceiling output when that pattern is corroborated by battery and export
-    telemetry.
+    A sample is considered likely clipping only when solar power equals the
+    inverter AC ceiling exactly. Confidence is increased when corroborated by
+    high SOC, low battery absorb power, and positive export telemetry.
     """
     solar_metric = _extract_numeric_metric(
         energy_flow,
@@ -158,11 +154,11 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     )
     positive_export = grid_export_kw is not None and grid_export_kw > 0
 
-    if solar_kw is not None and solar_kw >= INVERTER_KW - CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW:
+    if solar_kw is not None and solar_kw == INVERTER_KW:
         likely_clipping = True
         confidence = "medium"
         reasons.append(
-            f"solar power is at or near the inverter ceiling ({solar_kw:.2f} kW vs {INVERTER_KW:.1f} kW)"
+            f"solar power equals the inverter ceiling ({solar_kw:.2f} kW vs {INVERTER_KW:.1f} kW)"
         )
 
         if high_battery_soc:
@@ -175,25 +171,6 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
 
         if positive_export:
             reasons.append(f"grid export is positive ({grid_export_kw:.2f} kW)")
-
-    elif solar_kw is not None and solar_kw >= INVERTER_KW - CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW:
-        corroborating_signals = sum((high_battery_soc, low_battery_absorb, positive_export))
-        if corroborating_signals >= 2:
-            likely_clipping = True
-            confidence = "medium" if corroborating_signals == 2 else "high"
-            reasons.append(
-                "solar power is close to the inverter ceiling with corroborating export/headroom signals "
-                f"({solar_kw:.2f} kW vs {INVERTER_KW:.1f} kW)"
-            )
-
-            if high_battery_soc:
-                reasons.append(f"battery SOC is high ({battery_soc:.1f}%)")
-
-            if low_battery_absorb:
-                reasons.append(f"battery power is near zero ({battery_power_kw:.2f} kW)")
-
-            if positive_export:
-                reasons.append(f"grid export is positive ({grid_export_kw:.2f} kW)")
 
     return {
         "likely_clipping": likely_clipping,

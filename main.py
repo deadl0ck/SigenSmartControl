@@ -684,6 +684,7 @@ async def run_scheduler() -> None:
     day_state: dict[str, dict[str, bool]] = {}
     night_state: dict[str, Any] = {
         "mode_set_for": None,
+        "sleep_snapshot_for_date": None,
     }
     sleep_override_seconds: int | None = None
     refresh_auth_on_wake = False
@@ -1372,6 +1373,16 @@ async def run_scheduler() -> None:
                 if now < pre_window_opens_at:
                     sleep_seconds = max(1, int((pre_window_opens_at - now).total_seconds()))
                     if sleep_seconds > POLL_INTERVAL_SECONDS:
+                        local_date = now.astimezone(LOCAL_TZ).date()
+                        if (
+                            night_context["window_name"] == "EVENING-NIGHT"
+                            and night_state.get("sleep_snapshot_for_date") != local_date
+                        ):
+                            await archive_inverter_telemetry("night_sleep_start", now)
+                            night_state["sleep_snapshot_for_date"] = local_date
+                            logger.info(
+                                "[SCHEDULER] Captured end-of-day telemetry snapshot before night sleep."
+                            )
                         sleep_override_seconds = sleep_seconds
                         refresh_auth_on_wake = True
                         logger.info(

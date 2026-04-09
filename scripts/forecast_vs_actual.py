@@ -71,6 +71,8 @@ _PERIOD_WINDOWS: dict[str, tuple[int, int]] = {
     "Eve": (FORECAST_ANALYSIS_EVENING_START_HOUR, FORECAST_ANALYSIS_EVENING_END_HOUR),
 }
 
+CLIPPING_LOOKAHEAD_SAMPLES = 2
+
 
 def period_for_hour(hour: int) -> str | None:
     """Return the forecast period name for a given local hour, or None if outside all windows.
@@ -330,6 +332,8 @@ def build_period_rows(
                 lambda: {"actual_kw": [], "soc_percent": [], "clipping_count": 0}
     )
     for rec in records:
+        if not isinstance(rec, dict):
+            continue
         ts = rec.get("captured_at", "")
         if len(ts) < 13:
             continue
@@ -340,7 +344,12 @@ def build_period_rows(
         date = ts[:10]
         key = (date, period)
 
-        metrics = (rec.get("derived") or {}).get("extracted_metrics", {})
+        derived = rec.get("derived")
+        if not isinstance(derived, dict):
+            derived = {}
+        metrics = derived.get("extracted_metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
         solar_kw = metrics.get("solar_power_kw")
         if solar_kw is None:
             continue
@@ -350,10 +359,76 @@ def build_period_rows(
         if isinstance(soc_percent, (int, float)):
             rows[key]["soc_percent"].append(float(soc_percent))
 
-        if (rec.get("derived") or {}).get("likely_clipping"):
-            rows[key]["clipping_count"] += 1
+    for _, row in rows.items():
+        row["clipping_count"] = count_confirmed_clipping_samples(
+            row["actual_kw"],
+            lookahead=CLIPPING_LOOKAHEAD_SAMPLES,
+        )
 
     return rows
+
+
+def build_daily_pv_totals(records: list[dict[str, Any]]) -> dict[str, float]:
+    """Build per-day PV energy totals from telemetry `pvDayNrg` values.
+
+    Args:
+        records: All telemetry records from the archive.
+
+    Returns:
+        Dict of date string (YYYY-MM-DD) to max observed `pvDayNrg` value (kWh).
+    """
+    daily_totals: dict[str, float] = {}
+
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        ts = rec.get("captured_at", "")
+        if len(ts) < 10:
+            continue
+
+        date = ts[:10]
+        energy_flow = rec.get("energy_flow")
+        if not isinstance(energy_flow, dict):
+            continue
+        pv_day_nrg = energy_flow.get("pvDayNrg")
+        if not isinstance(pv_day_nrg, (int, float)):
+            continue
+
+        pv_day_nrg_f = float(pv_day_nrg)
+        daily_totals[date] = max(daily_totals.get(date, 0.0), pv_day_nrg_f)
+
+    return daily_totals
+
+
+def count_confirmed_clipping_samples(actual_kw_samples: list[float], lookahead: int = 2) -> int:
+    """Count confirmed clipping samples using strict ceiling and short lookahead checks.
+
+    A sample is a clipping candidate only when it equals the inverter ceiling exactly.
+    If any closely-following sample exceeds the inverter ceiling, the candidate is
+    discarded because that pattern implies the earlier reading was not a true cap.
+
+    Args:
+        actual_kw_samples: Ordered per-period power samples in kW.
+        lookahead: Number of subsequent samples to inspect.
+
+    Returns:
+        Number of samples considered confirmed clipping.
+    """
+    clipping_count = 0
+    n = len(actual_kw_samples)
+
+    for i, sample_kw in enumerate(actual_kw_samples):
+        if sample_kw != INVERTER_KW:
+            continue
+
+        upper = min(n, i + 1 + max(0, lookahead))
+        future_samples = actual_kw_samples[i + 1:upper]
+        if any(next_kw > INVERTER_KW for next_kw in future_samples):
+            continue
+
+        clipping_count += 1
+
+    return clipping_count
 
 
 def build_forecast_rows(
@@ -392,6 +467,8 @@ def build_forecast_rows(
         }
     )
     for rec in records:
+        if not isinstance(rec, dict):
+            continue
         ts = rec.get("captured_at", "")
         if len(ts) < 10:
             continue
@@ -424,6 +501,7 @@ def print_report(
     telemetry_rows: dict[tuple[str, str], dict[str, Any]],
     forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
     calibration: dict[str, dict[str, float]],
+    daily_pv_totals: dict[str, float],
 ) -> None:
     """Print the forecast accuracy report to stdout.
 
@@ -433,6 +511,7 @@ def print_report(
         telemetry_rows: Aggregated period telemetry from build_period_rows().
         forecast_rows: ESB and Quartz forecasts from build_forecast_rows().
         calibration: Per-period calibration data from load_calibration().
+        daily_pv_totals: Per-day max `pvDayNrg` values from telemetry (kWh).
     """
     # Fit a period-level multiplier directly from observed data so the report's
     # calibrated column reflects how ESB compares to measured output in practice.
@@ -558,6 +637,8 @@ def print_report(
         for index, date in enumerate(sorted(verdicts_by_date.keys())):
             for verdict in verdicts_by_date[date]:
                 print(verdict)
+            if date in daily_pv_totals:
+                print(f"  {date} Day PV total (pvDayNrg): {daily_pv_totals[date]:.2f} kWh")
             if index < len(verdicts_by_date) - 1:
                 print()
     else:
@@ -580,9 +661,10 @@ def main() -> None:
     forecast_records = load_forecast_comparisons(forecast_path)
 
     telemetry_rows = build_period_rows(telemetry_records)
+    daily_pv_totals = build_daily_pv_totals(telemetry_records)
     forecast_rows = build_forecast_rows(forecast_records)
 
-    print_report(telemetry_rows, forecast_rows, calibration)
+    print_report(telemetry_rows, forecast_rows, calibration, daily_pv_totals)
 
 
 def compute_period_fit_multipliers(

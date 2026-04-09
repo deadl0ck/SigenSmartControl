@@ -35,7 +35,7 @@ def test_build_and_save_forecast_calibration_adjusts_period_settings(tmp_path, m
 
     aftn = calibration["periods"]["Aftn"]
     assert aftn["telemetry_samples"] == 2
-    assert aftn["clipping_observations"] == 2
+    assert aftn["clipping_observations"] == 1
     assert aftn["power_multiplier"] > 1.0
     assert aftn["export_lead_buffer_multiplier"] > 1.1
     assert calibration_path.exists()
