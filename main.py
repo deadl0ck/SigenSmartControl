@@ -25,6 +25,7 @@ from config.settings import (
     PERIOD_TO_MODE,
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
+    FORECAST_REFRESH_INTERVAL_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
     NIGHT_SLEEP_MODE_ENABLED,
@@ -88,6 +89,7 @@ def _is_truthy_env(name: str) -> bool:
 
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
+FORECAST_REFRESH_INTERVAL_SECONDS = FORECAST_REFRESH_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
 _CANONICAL_DAYTIME_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve")
@@ -689,6 +691,7 @@ async def run_scheduler() -> None:
     sleep_override_seconds: int | None = None
     refresh_auth_on_wake = False
     auth_refreshed_for_date = None
+    last_forecast_refresh_utc: datetime | None = None
     timed_export_override: dict[str, Any] = {
         "active": False,
         "started_at": None,
@@ -899,16 +902,20 @@ async def run_scheduler() -> None:
         logger.warning("[TIMED EXPORT] Restore attempt failed; will retry next scheduler tick.")
         return True
 
-    async def refresh_daily_data() -> None:
+    async def refresh_daily_data(*, reset_day_state: bool = True) -> None:
         """Fetch and cache solar forecast and sunrise/sunset times for today and tomorrow.
         
-        Called once per calendar day to initialize/refresh period windows, forecasts,
-        and sunrise/sunset times used throughout the day's scheduling loop.
+        Called at day start and optionally intra-day to refresh period windows,
+        forecasts, and sunrise/sunset times used throughout the scheduling loop.
+
+        Args:
+            reset_day_state: When True, resets per-period pre/start action flags for a
+                new day. When False, preserves existing period action state.
         """
         nonlocal today_period_windows, tomorrow_period_windows
         nonlocal today_period_forecast, tomorrow_period_forecast
         nonlocal today_sunrise_utc, today_sunset_utc, tomorrow_sunrise_utc, day_state
-        nonlocal forecast_calibration
+        nonlocal forecast_calibration, last_forecast_refresh_utc
         logger.info("[SCHEDULER] Refreshing daily forecast and sunrise/sunset data.")
         forecast_calibration = build_and_save_forecast_calibration()
         forecast_obj: SolarForecastProvider = create_solar_forecast_provider(logger)
@@ -955,7 +962,13 @@ async def run_scheduler() -> None:
         for period, start in tomorrow_period_windows.items():
             logger.info(f"[SCHEDULER] Tomorrow period '{period}' starts at {start.isoformat()} UTC")
 
-        day_state = {p: {"pre_set": False, "start_set": False} for p in daytime_periods}
+        if reset_day_state:
+            day_state = {p: {"pre_set": False, "start_set": False} for p in daytime_periods}
+        else:
+            for period in daytime_periods:
+                day_state.setdefault(period, {"pre_set": False, "start_set": False})
+
+        last_forecast_refresh_utc = datetime.now(timezone.utc)
 
     async def fetch_soc(period: str) -> float | None:
         """Fetch current battery state-of-charge from inverter or use simulated value.
@@ -1247,6 +1260,13 @@ async def run_scheduler() -> None:
         f"Max pre-period window: {MAX_PRE_PERIOD_WINDOW_MINUTES} minutes. "
         f"Headroom target: {HEADROOM_TARGET_KWH:.1f} kWh (surplus capacity × 3 h)."
     )
+    if FORECAST_REFRESH_INTERVAL_SECONDS > 0:
+        logger.info(
+            "[SCHEDULER] Intra-day forecast refresh enabled every %s minutes.",
+            FORECAST_REFRESH_INTERVAL_MINUTES,
+        )
+    else:
+        logger.info("[SCHEDULER] Intra-day forecast refresh disabled.")
 
     while True:
         now = datetime.now(timezone.utc)
@@ -1272,7 +1292,7 @@ async def run_scheduler() -> None:
         if today != current_date:
             current_date = today
             try:
-                await refresh_daily_data()
+                await refresh_daily_data(reset_day_state=True)
                 suppressed_periods = suppress_elapsed_periods_except_latest(
                     now,
                     today_period_windows,
@@ -1296,6 +1316,23 @@ async def run_scheduler() -> None:
                 )
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 continue
+
+        elif (
+            FORECAST_REFRESH_INTERVAL_SECONDS > 0
+            and last_forecast_refresh_utc is not None
+            and (now - last_forecast_refresh_utc).total_seconds() >= FORECAST_REFRESH_INTERVAL_SECONDS
+        ):
+            try:
+                logger.info(
+                    "[SCHEDULER] Running intra-day forecast refresh (interval=%s minutes).",
+                    FORECAST_REFRESH_INTERVAL_MINUTES,
+                )
+                await refresh_daily_data(reset_day_state=False)
+            except Exception as exc:
+                logger.warning(
+                    "[SCHEDULER] Intra-day forecast refresh failed: %s. Will retry next tick.",
+                    exc,
+                )
 
         await sample_live_solar_power(now)
 

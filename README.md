@@ -121,6 +121,7 @@ BATTERY_KWH = 24
 
 ```python
 POLL_INTERVAL_MINUTES = 5
+FORECAST_REFRESH_INTERVAL_MINUTES = 30
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 FULL_SIMULATION_MODE = True
 NIGHT_MODE_ENABLED = True
@@ -140,6 +141,7 @@ EVENING_AI_MODE_START_HOUR = 17
 Meaning:
 
 - `POLL_INTERVAL_MINUTES`: how often the scheduler wakes up to evaluate each period
+- `FORECAST_REFRESH_INTERVAL_MINUTES`: how often forecast data refreshes during the day (`0` disables intra-day refresh)
 - `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
 - `FULL_SIMULATION_MODE`: when `True`, run full logic and logging but do not send inverter mode-change commands
 - `NIGHT_MODE_ENABLED`: whether the scheduler explicitly applies the configured night mode overnight
@@ -544,13 +546,14 @@ The scheduler:
 
 1. Wakes every `POLL_INTERVAL_MINUTES`
 2. Refreshes forecast and sunrise/sunset data once per day
-3. Divides the daylight window from sunrise to sunset into equal period start times for `Morn`, `Aftn`, and `Eve`
-4. Explicitly applies night mode during the night window when enabled
-5. Optionally checks the next morning forecast during the night window and can prepare with export if needed
-6. Begins monitoring each daytime period when inside the `MAX_PRE_PERIOD_WINDOW_MINUTES` window before that period starts
-7. Fetches live SOC and evaluates export, forecast, and tariff-period rules for each period
-8. Applies pre-period export at most once per period per day
-9. Applies the definitive period-start mode at most once per period per day
+3. Optionally refreshes forecast data intra-day every `FORECAST_REFRESH_INTERVAL_MINUTES` when configured above `0`
+4. Divides the daylight window from sunrise to sunset into equal period start times for `Morn`, `Aftn`, and `Eve`
+5. Explicitly applies night mode during the night window when enabled
+6. Optionally checks the next morning forecast during the night window and can prepare with export if needed
+7. Begins monitoring each daytime period when inside the `MAX_PRE_PERIOD_WINDOW_MINUTES` window before that period starts
+8. Fetches live SOC and evaluates export, forecast, and tariff-period rules for each period
+9. Applies pre-period export at most once per period per day
+10. Applies the definitive period-start mode at most once per period per day
 
 ## Logging
 

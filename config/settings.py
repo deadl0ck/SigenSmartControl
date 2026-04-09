@@ -25,6 +25,8 @@ LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 # ==============================
 # How often the self-contained scheduler wakes up to re-check forecast windows.
 POLL_INTERVAL_MINUTES = 5
+# How often to refresh forecast data during the day (0 disables intra-day refresh).
+FORECAST_REFRESH_INTERVAL_MINUTES = 30
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 # Number of live-solar samples used in rolling average calculations.

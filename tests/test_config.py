@@ -73,3 +73,11 @@ def test_forecast_to_mode():
         assert mode in config.SIGEN_MODES.values()
     logger.info(f"[TEST] FORECAST_TO_MODE assertions passed.")
     logger.info("[RESULT] test_forecast_to_mode: PASSED - All expected forecast keys are present in FORECAST_TO_MODE.")
+
+
+def test_forecast_refresh_interval_minutes() -> None:
+    """Validate intra-day forecast refresh interval configuration."""
+    assert hasattr(config, "FORECAST_REFRESH_INTERVAL_MINUTES")
+    value = config.FORECAST_REFRESH_INTERVAL_MINUTES
+    assert isinstance(value, int)
+    assert value >= 0
