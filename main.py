@@ -93,9 +93,9 @@ class LevelColorFormatter(logging.Formatter):
             fmt: Base logging format string.
         """
         super().__init__(fmt=fmt)
-        self._use_color = bool(getattr(os.sys.stderr, "isatty", lambda: False)()) and not os.getenv(
-            "NO_COLOR"
-        )
+        force_color = os.getenv("FORCE_COLOR", "").strip().lower() in {"1", "true", "yes", "on"}
+        is_tty = bool(getattr(os.sys.stderr, "isatty", lambda: False)())
+        self._use_color = (is_tty or force_color) and not os.getenv("NO_COLOR")
 
     def format(self, record: logging.LogRecord) -> str:
         """Format a log record, colorizing WARNING and ERROR/CRITICAL levels.
@@ -109,15 +109,12 @@ class LevelColorFormatter(logging.Formatter):
         if not self._use_color:
             return super().format(record)
 
-        original_levelname = record.levelname
-        try:
-            if record.levelno == logging.WARNING:
-                record.levelname = f"{self._ORANGE}{record.levelname}{self._RESET}"
-            elif record.levelno >= logging.ERROR:
-                record.levelname = f"{self._RED}{record.levelname}{self._RESET}"
-            return super().format(record)
-        finally:
-            record.levelname = original_levelname
+        rendered = super().format(record)
+        if record.levelno == logging.WARNING:
+            return f"{self._ORANGE}{rendered}{self._RESET}"
+        if record.levelno >= logging.ERROR:
+            return f"{self._RED}{rendered}{self._RESET}"
+        return rendered
 
 
 # --- Logging configuration ---
@@ -126,7 +123,7 @@ _log_handler = logging.StreamHandler()
 _log_handler.setFormatter(
     LevelColorFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 )
-logging.basicConfig(level=LOG_LEVEL, handlers=[_log_handler])
+logging.basicConfig(level=LOG_LEVEL, handlers=[_log_handler], force=True)
 logger = logging.getLogger("sigen_control")
 
 _EMAIL_SENDER_ADDRESS = os.getenv("EMAIL_SENDER", "").strip()

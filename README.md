@@ -564,6 +564,16 @@ The scheduler:
 
 Logging is controlled by `LOG_LEVEL` in `config/settings.py`.
 
+Terminal output is level-colorized to improve readability:
+
+- `WARNING` lines are shown in orange
+- `ERROR` and `CRITICAL` lines are shown in red
+
+Color is auto-enabled when stderr is a TTY. You can also control behavior with environment variables:
+
+- `FORCE_COLOR=1` to force ANSI colors in environments that do not report a TTY
+- `NO_COLOR=1` to disable ANSI colors
+
 Recommended values:
 
 - `INFO` for normal operation
