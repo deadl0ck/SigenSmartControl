@@ -29,8 +29,8 @@ POLL_INTERVAL_MINUTES = 5
 FORECAST_REFRESH_INTERVAL_MINUTES = 30
 # Whether to pull and archive raw Forecast.Solar readings during scheduler ticks.
 FORECAST_SOLAR_ARCHIVE_ENABLED = True
-# Minimum minutes between raw Forecast.Solar archive pulls (set to 5 to match scheduler tick).
-FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES = 5
+# Minimum minutes between raw Forecast.Solar archive pulls.
+FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES = 10
 # Cooldown minutes applied after Forecast.Solar responds with HTTP 429.
 FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES = 60
 # How far ahead of a period start we begin monitoring SOC for a possible export.
