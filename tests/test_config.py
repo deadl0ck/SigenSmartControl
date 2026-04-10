@@ -92,3 +92,8 @@ def test_forecast_solar_archive_settings() -> None:
     interval = config.FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES
     assert isinstance(interval, int)
     assert interval >= 0
+
+    assert hasattr(config, "FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES")
+    cooldown = config.FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES
+    assert isinstance(cooldown, int)
+    assert cooldown >= 0

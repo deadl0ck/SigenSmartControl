@@ -31,6 +31,8 @@ FORECAST_REFRESH_INTERVAL_MINUTES = 30
 FORECAST_SOLAR_ARCHIVE_ENABLED = True
 # Minimum minutes between raw Forecast.Solar archive pulls (set to 5 to match scheduler tick).
 FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES = 5
+# Cooldown minutes applied after Forecast.Solar responds with HTTP 429.
+FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES = 60
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 # Number of live-solar samples used in rolling average calculations.

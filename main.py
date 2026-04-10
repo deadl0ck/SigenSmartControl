@@ -32,6 +32,7 @@ from config.settings import (
     FORECAST_REFRESH_INTERVAL_MINUTES,
     FORECAST_SOLAR_ARCHIVE_ENABLED,
     FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES,
+    FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
     NIGHT_SLEEP_MODE_ENABLED,
@@ -97,6 +98,7 @@ def _is_truthy_env(name: str) -> bool:
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 FORECAST_REFRESH_INTERVAL_SECONDS = FORECAST_REFRESH_INTERVAL_MINUTES * 60
 FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS = FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES * 60
+FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_SECONDS = FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
 _CANONICAL_DAYTIME_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve")
@@ -700,6 +702,7 @@ async def run_scheduler() -> None:
     auth_refreshed_for_date = None
     last_forecast_refresh_utc: datetime | None = None
     last_forecast_solar_archive_utc: datetime | None = None
+    forecast_solar_archive_cooldown_until_utc: datetime | None = None
     timed_export_override: dict[str, Any] = {
         "active": False,
         "started_at": None,
@@ -1352,19 +1355,34 @@ async def run_scheduler() -> None:
 
         if FORECAST_SOLAR_ARCHIVE_ENABLED and FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS > 0:
             should_archive = (
+                (forecast_solar_archive_cooldown_until_utc is None or now >= forecast_solar_archive_cooldown_until_utc)
+                and (
                 last_forecast_solar_archive_utc is None
                 or (now - last_forecast_solar_archive_utc).total_seconds()
                 >= FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS
+                )
             )
             if should_archive:
                 try:
                     archive_forecast_solar_snapshot(logger, now)
                     last_forecast_solar_archive_utc = now
+                    forecast_solar_archive_cooldown_until_utc = None
                 except Exception as exc:
-                    logger.warning(
-                        "[SCHEDULER] Forecast.Solar raw archive pull failed: %s",
-                        exc,
-                    )
+                    if "429" in str(exc):
+                        cooldown_seconds = max(0, FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_SECONDS)
+                        forecast_solar_archive_cooldown_until_utc = now + timedelta(
+                            seconds=cooldown_seconds
+                        )
+                        last_forecast_solar_archive_utc = now
+                        logger.warning(
+                            "[SCHEDULER] Forecast.Solar rate-limited (429). Cooling down until %s.",
+                            forecast_solar_archive_cooldown_until_utc.isoformat(),
+                        )
+                    else:
+                        logger.warning(
+                            "[SCHEDULER] Forecast.Solar raw archive pull failed: %s",
+                            exc,
+                        )
 
         await sample_live_solar_power(now)
 
