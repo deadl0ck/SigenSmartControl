@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import json
 import logging
 from pathlib import Path
-from typing import Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 from zoneinfo import ZoneInfo
 
 import requests
@@ -34,6 +34,7 @@ from config.constants import (
     ESB_FORECAST_API_SUBSCRIPTION_KEY,
     FORECAST_SOLAR_API_BASE_URL,
     FORECAST_SOLAR_API_KEY,
+    FORECAST_SOLAR_ARCHIVE_PATH,
     FORECAST_SOLAR_PLANE_AZIMUTH,
     FORECAST_SOLAR_PLANE_DECLINATION,
     FORECAST_SOLAR_SITE_KWP,
@@ -350,6 +351,98 @@ class QuartzSolarForecast(_BaseSolarForecast):
         self._log_table()
 
 
+def _build_forecast_solar_endpoint() -> str:
+    """Build Forecast.Solar watts endpoint based on account mode."""
+    lat = f"{LATITUDE:.4f}"
+    lon = f"{LONGITUDE:.4f}"
+    dec = str(FORECAST_SOLAR_PLANE_DECLINATION)
+    az = str(FORECAST_SOLAR_PLANE_AZIMUTH)
+    kwp = f"{FORECAST_SOLAR_SITE_KWP:.3f}".rstrip("0").rstrip(".")
+
+    if FORECAST_SOLAR_API_KEY:
+        return (
+            f"{FORECAST_SOLAR_API_BASE_URL}/{FORECAST_SOLAR_API_KEY}"
+            f"/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
+        )
+    return f"{FORECAST_SOLAR_API_BASE_URL}/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
+
+
+def _extract_forecast_solar_watts_map(payload: Any) -> tuple[dict[str, float], str]:
+    """Extract Forecast.Solar point map from supported response shapes.
+
+    Args:
+        payload: Decoded JSON response from Forecast.Solar.
+
+    Returns:
+        Tuple of (timestamp->watts map, source format label).
+    """
+    if not isinstance(payload, dict):
+        return {}, "missing"
+
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return {}, "missing"
+
+    # Historical format: result.watts holds the timestamp-value map.
+    watts_nested = result.get("watts")
+    if isinstance(watts_nested, dict) and watts_nested:
+        nested_normalized = {
+            str(ts): float(value)
+            for ts, value in watts_nested.items()
+            if isinstance(value, (int, float))
+        }
+        if nested_normalized:
+            return nested_normalized, "result.watts"
+
+    # Current observed format: result itself is the timestamp-value map.
+    direct_normalized = {
+        str(ts): float(value)
+        for ts, value in result.items()
+        if isinstance(value, (int, float))
+    }
+    if direct_normalized:
+        return direct_normalized, "result"
+
+    return {}, "missing"
+
+
+def archive_forecast_solar_snapshot(logger: logging.Logger, now_utc: datetime) -> None:
+    """Pull and persist one raw Forecast.Solar reading snapshot.
+
+    Args:
+        logger: Project logger.
+        now_utc: Scheduler tick timestamp in UTC.
+    """
+    endpoint = _build_forecast_solar_endpoint()
+    response = requests.get(endpoint, timeout=FORECAST_SOLAR_API_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    body = response.json()
+    readings, source_format = _extract_forecast_solar_watts_map(body)
+    if not readings:
+        raise ValueError("Forecast.Solar response did not include usable watts data")
+
+    archive_path = Path(FORECAST_SOLAR_ARCHIVE_PATH)
+    snapshot = {
+        "captured_at_utc": now_utc.isoformat(),
+        "source": "forecast_solar",
+        "endpoint": endpoint,
+        "source_format": source_format,
+        "point_count": len(readings),
+        "readings": readings,
+    }
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with archive_path.open("a", encoding="utf-8") as archive_file:
+        json.dump(snapshot, archive_file, sort_keys=True)
+        archive_file.write("\n")
+
+    logger.info(
+        "[FORECAST-SOLAR] Archived %s raw points to %s",
+        len(readings),
+        archive_path,
+    )
+
+
 class ForecastSolarForecast(_BaseSolarForecast):
     """Forecast.Solar provider using public or API-key estimate endpoints."""
 
@@ -387,18 +480,7 @@ class ForecastSolarForecast(_BaseSolarForecast):
 
     def _build_endpoint(self) -> str:
         """Build Forecast.Solar watts endpoint based on account mode."""
-        lat = f"{LATITUDE:.4f}"
-        lon = f"{LONGITUDE:.4f}"
-        dec = str(FORECAST_SOLAR_PLANE_DECLINATION)
-        az = str(FORECAST_SOLAR_PLANE_AZIMUTH)
-        kwp = f"{FORECAST_SOLAR_SITE_KWP:.3f}".rstrip("0").rstrip(".")
-
-        if FORECAST_SOLAR_API_KEY:
-            return (
-                f"{FORECAST_SOLAR_API_BASE_URL}/{FORECAST_SOLAR_API_KEY}"
-                f"/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
-            )
-        return f"{FORECAST_SOLAR_API_BASE_URL}/estimate/watts/{lat}/{lon}/{dec}/{az}/{kwp}"
+        return _build_forecast_solar_endpoint()
 
     def _load_forecast_solar_table(self) -> None:
         """Load and normalize Forecast.Solar output into project period rows."""
@@ -407,14 +489,17 @@ class ForecastSolarForecast(_BaseSolarForecast):
         response.raise_for_status()
         body = response.json()
 
-        result = body.get("result") if isinstance(body, dict) else None
-        watts_by_timestamp = result.get("watts") if isinstance(result, dict) else None
-        if not isinstance(watts_by_timestamp, dict) or not watts_by_timestamp:
-            raise ValueError("Forecast.Solar response did not include result.watts")
+        watts_by_timestamp, _source_name = _extract_forecast_solar_watts_map(body)
+        if not watts_by_timestamp:
+            raise ValueError("Forecast.Solar response did not include usable watts data")
 
         info = body.get("message", {}).get("info", {}) if isinstance(body, dict) else {}
         provider_tz_name = info.get("timezone") if isinstance(info, dict) else None
-        local_tz = ZoneInfo(provider_tz_name) if isinstance(provider_tz_name, str) else self._local_timezone()
+        local_tz = (
+            ZoneInfo(provider_tz_name)
+            if isinstance(provider_tz_name, str)
+            else self._local_timezone()
+        )
 
         grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
         for timestamp, watts_value in watts_by_timestamp.items():

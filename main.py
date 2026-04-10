@@ -16,7 +16,11 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
-from weather.forecast import SolarForecastProvider, create_solar_forecast_provider
+from weather.forecast import (
+    SolarForecastProvider,
+    archive_forecast_solar_snapshot,
+    create_solar_forecast_provider,
+)
 from integrations.sigen_interaction import SigenInteraction
 from integrations.sigen_auth import refresh_sigen_instance
 from config.settings import (
@@ -26,6 +30,8 @@ from config.settings import (
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
     FORECAST_REFRESH_INTERVAL_MINUTES,
+    FORECAST_SOLAR_ARCHIVE_ENABLED,
+    FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
     NIGHT_SLEEP_MODE_ENABLED,
@@ -90,6 +96,7 @@ def _is_truthy_env(name: str) -> bool:
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 FORECAST_REFRESH_INTERVAL_SECONDS = FORECAST_REFRESH_INTERVAL_MINUTES * 60
+FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS = FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES * 60
 # How far ahead of a period start we begin monitoring SOC for a potential pre-export.
 MAX_PRE_PERIOD_WINDOW = timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES)
 _CANONICAL_DAYTIME_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve")
@@ -692,6 +699,7 @@ async def run_scheduler() -> None:
     refresh_auth_on_wake = False
     auth_refreshed_for_date = None
     last_forecast_refresh_utc: datetime | None = None
+    last_forecast_solar_archive_utc: datetime | None = None
     timed_export_override: dict[str, Any] = {
         "active": False,
         "started_at": None,
@@ -1268,6 +1276,14 @@ async def run_scheduler() -> None:
     else:
         logger.info("[SCHEDULER] Intra-day forecast refresh disabled.")
 
+    if FORECAST_SOLAR_ARCHIVE_ENABLED and FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS > 0:
+        logger.info(
+            "[SCHEDULER] Forecast.Solar raw archiving enabled every %s minutes.",
+            FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES,
+        )
+    else:
+        logger.info("[SCHEDULER] Forecast.Solar raw archiving disabled.")
+
     while True:
         now = datetime.now(timezone.utc)
         today = now.date()
@@ -1333,6 +1349,22 @@ async def run_scheduler() -> None:
                     "[SCHEDULER] Intra-day forecast refresh failed: %s. Will retry next tick.",
                     exc,
                 )
+
+        if FORECAST_SOLAR_ARCHIVE_ENABLED and FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS > 0:
+            should_archive = (
+                last_forecast_solar_archive_utc is None
+                or (now - last_forecast_solar_archive_utc).total_seconds()
+                >= FORECAST_SOLAR_ARCHIVE_INTERVAL_SECONDS
+            )
+            if should_archive:
+                try:
+                    archive_forecast_solar_snapshot(logger, now)
+                    last_forecast_solar_archive_utc = now
+                except Exception as exc:
+                    logger.warning(
+                        "[SCHEDULER] Forecast.Solar raw archive pull failed: %s",
+                        exc,
+                    )
 
         await sample_live_solar_power(now)
 

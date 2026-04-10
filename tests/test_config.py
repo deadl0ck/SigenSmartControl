@@ -81,3 +81,14 @@ def test_forecast_refresh_interval_minutes() -> None:
     value = config.FORECAST_REFRESH_INTERVAL_MINUTES
     assert isinstance(value, int)
     assert value >= 0
+
+
+def test_forecast_solar_archive_settings() -> None:
+    """Validate Forecast.Solar raw archive scheduler settings."""
+    assert hasattr(config, "FORECAST_SOLAR_ARCHIVE_ENABLED")
+    assert isinstance(config.FORECAST_SOLAR_ARCHIVE_ENABLED, bool)
+
+    assert hasattr(config, "FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES")
+    interval = config.FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES
+    assert isinstance(interval, int)
+    assert interval >= 0

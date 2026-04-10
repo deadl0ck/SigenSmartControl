@@ -167,6 +167,12 @@ FORECAST_CALIBRATION_PATH: Final[str] = os.getenv(
     "data/forecast_calibration.json",
 ).strip()
 
+# Local archive file for raw Forecast.Solar point-in-time pulls.
+FORECAST_SOLAR_ARCHIVE_PATH: Final[str] = os.getenv(
+    "FORECAST_SOLAR_ARCHIVE_PATH",
+    "data/forecast_solar_readings.jsonl",
+).strip()
+
 # Numeric weights used to score whether the day is considered good for solar.
 RED_VAL: Final[int] = 0
 AMBER_VAL: Final[float] = 0.5
