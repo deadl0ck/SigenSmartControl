@@ -123,7 +123,7 @@ BATTERY_KWH = 24
 POLL_INTERVAL_MINUTES = 5
 FORECAST_REFRESH_INTERVAL_MINUTES = 30
 FORECAST_SOLAR_ARCHIVE_ENABLED = True
-FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES = 10
+FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES = 30
 MAX_PRE_PERIOD_WINDOW_MINUTES = 120
 FULL_SIMULATION_MODE = True
 NIGHT_MODE_ENABLED = True
@@ -145,7 +145,7 @@ Meaning:
 - `POLL_INTERVAL_MINUTES`: how often the scheduler wakes up to evaluate each period
 - `FORECAST_REFRESH_INTERVAL_MINUTES`: how often forecast data refreshes during the day (`0` disables intra-day refresh)
 - `FORECAST_SOLAR_ARCHIVE_ENABLED`: enables per-tick raw Forecast.Solar pulls to local archive
-- `FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES`: minimum minutes between raw Forecast.Solar archive pulls
+- `FORECAST_SOLAR_ARCHIVE_INTERVAL_MINUTES`: minimum minutes between raw Forecast.Solar archive pulls; `30` is a sensible default for the public tier because its forecast resolution is hourly
 - `MAX_PRE_PERIOD_WINDOW_MINUTES`: how far ahead of a period start the scheduler begins checking SOC for possible export
 - `FULL_SIMULATION_MODE`: when `True`, run full logic and logging but do not send inverter mode-change commands
 - `NIGHT_MODE_ENABLED`: whether the scheduler explicitly applies the configured night mode overnight
