@@ -15,9 +15,9 @@ Run from the project root:
 For each date/period that has telemetry data, prints:
     - ESB solar forecast index + status (primary provider, county-level synthetic)
     - Quartz power forecast in watts + status (secondary provider, site-level)
-    - Forecast accuracy percentage versus measured average
+    - Forecast accuracy percentage versus measured period energy
     - Calibrated forecast equivalent (ESB index × fitted period multiplier)
-    - Actual average kW measured by the inverter
+    - Actual period energy (kWh) from sum of hourly averages
     - Average battery SOC (%) measured in that period
     - Actual classification with explicit basis (Array or Inverter)
     - Clipping events flagged in that window
@@ -250,8 +250,8 @@ def describe_period(
     quartz_kw: float | None,
     quartz_pct: int | None,
     actual_status: str,
-    buffered_kw: float,
-    avg_actual_kw: float,
+    buffered_kwh: float,
+    actual_period_kwh: float,
     clipping_count: int,
     n: int,
 ) -> str:
@@ -267,8 +267,8 @@ def describe_period(
         quartz_kw: Quartz forecast in kW, or None if unavailable.
         quartz_pct: Quartz percentage of actual, or None.
         actual_status: Red/Amber/Green status derived from measured output.
-        buffered_kw: ESB forecast × power_multiplier, in kW.
-        avg_actual_kw: Mean measured solar output across all samples, in kW.
+        buffered_kwh: ESB forecast × power_multiplier converted to period kWh.
+        actual_period_kwh: Actual period energy (kWh) from sum of hourly averages.
         clipping_count: Number of samples flagged as likely clipping.
         n: Total telemetry samples in this period.
 
@@ -309,7 +309,7 @@ def describe_period(
 
     # Did calibration help?
     if esb_kw is not None:
-        buf_ratio = avg_actual_kw / buffered_kw if buffered_kw > 0 else 0.0
+        buf_ratio = actual_period_kwh / buffered_kwh if buffered_kwh > 0 else 0.0
         if buf_ratio <= 1.25:
             parts.append("Calibration brought ESB on target.")
         elif buf_ratio > 2.0:
@@ -340,11 +340,17 @@ def build_period_rows(
         Returns:
                 Dict keyed by (date, period). Each value contains:
                     - actual_kw: per-sample solar kW readings
+                    - hourly_samples: per-sample tuples of (local_hour, solar_kW)
                     - soc_percent: per-sample battery SOC values
                     - clipping_count: samples with likely_clipping=True
     """
     rows: dict[tuple[str, str], dict[str, Any]] = defaultdict(
-                lambda: {"actual_kw": [], "soc_percent": [], "clipping_count": 0}
+                lambda: {
+                    "actual_kw": [],
+                    "hourly_samples": [],
+                    "soc_percent": [],
+                    "clipping_count": 0,
+                }
     )
     for rec in records:
         if not isinstance(rec, dict):
@@ -369,6 +375,7 @@ def build_period_rows(
         if solar_kw is None:
             continue
         rows[key]["actual_kw"].append(solar_kw)
+        rows[key]["hourly_samples"].append((hour, float(solar_kw)))
 
         soc_percent = metrics.get("battery_soc_percent")
         if isinstance(soc_percent, (int, float)):
@@ -381,6 +388,26 @@ def build_period_rows(
         )
 
     return rows
+
+
+def period_energy_kwh_from_hourly_means(hourly_samples: list[tuple[int, float]]) -> float:
+    """Compute period energy as the sum of hourly average kW values.
+
+    Args:
+        hourly_samples: Tuples of (local_hour, solar_kW) for one date/period.
+
+    Returns:
+        Energy in kWh computed by averaging kW within each hour bucket and
+        summing those hourly averages across the period.
+    """
+    if not hourly_samples:
+        return 0.0
+
+    by_hour: dict[int, list[float]] = defaultdict(list)
+    for hour, value_kw in hourly_samples:
+        by_hour[hour].append(value_kw)
+
+    return sum(sum(values) / len(values) for values in by_hour.values())
 
 
 def build_daily_pv_totals(records: list[dict[str, Any]]) -> dict[str, float]:
@@ -558,8 +585,8 @@ def print_report(
     print("=" * 176)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
-        f"{'ESB Forecast':>12}  {'ForecastSolar':>14}  {'FS Status':>10}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated kW':>12}  "
-        f"{'Avg Act kW':>10}  {'Avg SOC %':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
+        f"{'ESB Forecast':>12}  {'ForecastSolar':>14}  {'FS Status':>10}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated':>12}  "
+        f"{'Act kWh':>10}  {'Avg SOC %':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
     print("-" * 176)
@@ -584,6 +611,10 @@ def print_report(
         if not actuals:
             continue
         avg_actual = round(sum(actuals) / len(actuals), 2)
+        actual_period_kwh = round(
+            period_energy_kwh_from_hourly_means(telem.get("hourly_samples", [])),
+            2,
+        )
         n = len(actuals)
         clipping_count = telem["clipping_count"]
         soc_samples = telem.get("soc_percent", [])
@@ -609,35 +640,42 @@ def print_report(
         esb_kw = round(esb_w / 1000, 3) if esb_w is not None else None
         forecast_solar_kw = round(forecast_solar_w / 1000, 3) if forecast_solar_w is not None else None
         quartz_kw = round(quartz_w / 1000, 3) if quartz_w is not None else None
+        period_start_hour, period_end_hour = _PERIOD_WINDOWS[period]
+        period_hours = max(0, period_end_hour - period_start_hour)
+        esb_kwh = round(esb_kw * period_hours, 3) if esb_kw is not None else None
+        forecast_solar_kwh = (
+            round(forecast_solar_kw * period_hours, 3) if forecast_solar_kw is not None else None
+        )
+        quartz_kwh = round(quartz_kw * period_hours, 3) if quartz_kw is not None else None
 
         # Calculate percentage of actual (forecast as % of actual)
         quartz_pct = None
-        if quartz_kw is not None and avg_actual > 0:
-            quartz_pct = round((quartz_kw / avg_actual) * 100)
+        if quartz_kwh is not None and actual_period_kwh > 0:
+            quartz_pct = round((quartz_kwh / actual_period_kwh) * 100)
         forecast_solar_pct = None
-        if forecast_solar_kw is not None and avg_actual > 0:
-            forecast_solar_pct = round((forecast_solar_kw / avg_actual) * 100)
+        if forecast_solar_kwh is not None and actual_period_kwh > 0:
+            forecast_solar_pct = round((forecast_solar_kwh / actual_period_kwh) * 100)
 
         cal = calibration.get(period, {})
         multiplier = fitted_multipliers.get(period, cal.get("power_multiplier", 1.0))
-        buffered_kw = round(esb_kw * multiplier, 3) if esb_kw is not None else None
+        buffered_kwh = round(esb_kwh * multiplier, 3) if esb_kwh is not None else None
 
         # Format columns with percentages
         esb_s = esb_status if esb_status is not None else "N/A"
 
         fs_status = forecast_solar_status if forecast_solar_status is not None else "N/A"
         fs_s = (
-            f"{forecast_solar_kw:.3f} ({forecast_solar_pct}%)"
-            if forecast_solar_kw is not None and forecast_solar_pct is not None
+            f"{forecast_solar_kwh:.3f} ({forecast_solar_pct}%)"
+            if forecast_solar_kwh is not None and forecast_solar_pct is not None
             else "N/A"
         )
         quartz_s_status = quartz_status if quartz_status is not None else "N/A"
         quartz_s = (
-            f"{quartz_kw:.3f} ({quartz_pct}%)"
-            if quartz_kw is not None and quartz_pct is not None
+            f"{quartz_kwh:.3f} ({quartz_pct}%)"
+            if quartz_kwh is not None and quartz_pct is not None
             else "N/A"
         )
-        buf_s = f"{buffered_kw:.3f}" if buffered_kw is not None else "N/A"
+        buf_s = f"{buffered_kwh:.3f}" if buffered_kwh is not None else "N/A"
 
         # Derive status from measured output using SOC-aware basis selection.
         derived_status, actual_basis = derive_actual_reading_status(
@@ -652,24 +690,24 @@ def print_report(
         print(
             f"  {date:<12}  {period:<6}  "
             f"{esb_s:>12}  {fs_s:>14}  {fs_status:>10}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
-            f"{avg_actual:>10.2f}  {f'{avg_soc:.1f}' if avg_soc is not None else 'N/A':>10}  "
+            f"{actual_period_kwh:>10.2f}  {f'{avg_soc:.1f}' if avg_soc is not None else 'N/A':>10}  "
             f"{actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
 
-        if esb_kw is not None and buffered_kw is not None:
+        if esb_kwh is not None and buffered_kwh is not None:
             verdicts_by_date[date].append(
                 f"  {date} {period}: "
                 + describe_period(
                     period=period,
                     esb_kw=esb_kw,
                     esb_status=esb_status,
-                    forecast_solar_kw=forecast_solar_kw,
+                    forecast_solar_kw=forecast_solar_kwh,
                     forecast_solar_pct=forecast_solar_pct,
-                    quartz_kw=quartz_kw,
+                    quartz_kw=quartz_kwh,
                     quartz_pct=quartz_pct,
                     actual_status=derived_status,
-                    buffered_kw=buffered_kw,
-                    avg_actual_kw=avg_actual,
+                    buffered_kwh=buffered_kwh,
+                    actual_period_kwh=actual_period_kwh,
                     clipping_count=clipping_count,
                     n=n,
                 )

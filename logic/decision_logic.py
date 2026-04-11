@@ -14,11 +14,43 @@ Implements a hierarchical decision tree:
 
 from config.settings import (
     FORECAST_TO_MODE,
+    LIVE_CLIPPING_RISK_VALID_PERIODS,
     MORNING_HIGH_SOC_PROTECTION_ENABLED,
     MORNING_HIGH_SOC_THRESHOLD_PERCENT,
     PERIOD_TO_MODE,
     SIGEN_MODES,
 )
+
+
+def _normalize_live_clipping_period_codes() -> set[str]:
+    """Normalize configured live clipping period codes to a validated set.
+
+    Returns:
+        Set of period codes where live clipping-risk logic is allowed.
+        Supported codes: M (Morning), A (Afternoon), E (Evening).
+    """
+    raw_codes = {
+        token.strip().upper() for token in LIVE_CLIPPING_RISK_VALID_PERIODS.split(",") if token.strip()
+    }
+    valid_codes = raw_codes & {"M", "A", "E"}
+    return valid_codes or {"M", "A"}
+
+
+def is_live_clipping_period_enabled(period: str) -> bool:
+    """Return whether live clipping-risk logic is enabled for a period.
+
+    Args:
+        period: Period name (e.g., Morn, Aftn, Eve).
+
+    Returns:
+        True when period is enabled by LIVE_CLIPPING_RISK_VALID_PERIODS.
+    """
+    period_key = (period or "").upper()
+    period_to_code = {"MORN": "M", "AFTN": "A", "EVE": "E"}
+    period_code = period_to_code.get(period_key)
+    if period_code is None:
+        return False
+    return period_code in _normalize_live_clipping_period_codes()
 
 
 def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:
@@ -53,7 +85,7 @@ def decide_operational_mode(
     
     Implements a hierarchical decision tree:
     1. Export if headroom is below the physics-derived target before a Green period
-    2. Morning high-SOC protection for Amber/Green morning periods
+    2. Daytime high-SOC protection for Amber/Green morning and afternoon periods
     3. Use tariff mode if night period
     4. Evening bridge: use self-powered if battery can cover load until cheap rate
     5. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
@@ -96,7 +128,7 @@ def decide_operational_mode(
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and period_key == "MORN"
+        and is_live_clipping_period_enabled(period)
         and status_key in {"AMBER", "GREEN"}
         and soc is not None
         and soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
@@ -104,8 +136,13 @@ def decide_operational_mode(
         and headroom_kwh < headroom_target_kwh
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
+        period_label = {
+            "MORN": "Morning",
+            "AFTN": "Afternoon",
+            "EVE": "Evening",
+        }.get(period_key, period)
         reason = (
-            "Morning high-SOC protection: "
+            f"{period_label} high-SOC protection: "
             f"SOC ({soc:.1f}%) >= {MORNING_HIGH_SOC_THRESHOLD_PERCENT:.1f}% and "
             f"headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
             "Preemptively exporting to grid."

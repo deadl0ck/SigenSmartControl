@@ -144,9 +144,17 @@ ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 # Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
-# Morning clipping protection: allow export for Amber/Green mornings when battery is very full.
+# High-SOC protection: allow export for Amber/Green periods when battery is very full.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
+# Comma-separated period codes where live clipping-risk promotion and high-SOC
+# protection are allowed: M=Morning, A=Afternoon, E=Evening.
+# Example: "M,A" enables morning and afternoon.
+LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
+# Live clipping-risk promotion thresholds used by the scheduler to treat Amber as Green
+# when real-time generation indicates stronger-than-forecast solar conditions.
+LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
 # Enable AI Mode transition for evening periods approaching cheap-rate window.
 # When enabled, the Evening period will switch to AI Mode (with profit-max configured
 # in mySigen app) to allow automatic battery arbitrage: discharge at day/peak rates,

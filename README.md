@@ -136,6 +136,11 @@ HEADROOM_TARGET_KWH = 10.2
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
+MORNING_HIGH_SOC_PROTECTION_ENABLED = True
+MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
+LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
+LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
 ENABLE_EVENING_AI_MODE_TRANSITION = True
 EVENING_AI_MODE_START_HOUR = 17
 ```
@@ -169,6 +174,11 @@ Meaning:
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
+- `MORNING_HIGH_SOC_PROTECTION_ENABLED`: enables high-SOC export protection rule for selected daytime periods
+- `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC threshold for high-SOC export protection
+- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk logic is allowed (`M`=Morning, `A`=Afternoon, `E`=Evening), for example `M,A`
+- `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold used by live clipping-risk promotion (`Amber` to `Green`) and period-level high-SOC export checks
+- `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW trigger used for clipping-risk promotion
 - `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
 - `EVENING_AI_MODE_START_HOUR`: local hour after which Evening can transition to AI mode
 
@@ -271,6 +281,8 @@ The runtime does not just apply one mapping directly. It uses this order:
 
 1. Export rules first (highest priority):
 If forecast is Green and battery headroom is too low, use `GRID_EXPORT`.
+Live clipping-risk can promote Amber to Green when configured period, SOC, and live-solar triggers are met.
+High-SOC export protection can also force export in configured periods when SOC is high and headroom is below target.
 2. Evening bridge rule second:
 If period is Evening and battery can safely cover expected household demand until cheap-rate starts, use `SELF_POWERED`.
 3. Peak-price rule third:

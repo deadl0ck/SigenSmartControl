@@ -46,13 +46,14 @@ from config.settings import (
     LIVE_SOLAR_AVERAGE_SAMPLE_COUNT,
     MIN_EFFECTIVE_BATTERY_EXPORT_KW,
     DEFAULT_SIMULATED_SOC_PERCENT,
-    CLIPPING_BATTERY_SOC_HIGH_PERCENT,
-    CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW,
+    LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
+    LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW,
     MAX_TIMED_EXPORT_MINUTES,
 )
 from logic.decision_logic import (
     decide_operational_mode,
     calc_headroom_kwh,
+    is_live_clipping_period_enabled,
 )
 from logic.schedule_utils import (
     _parse_utc,
@@ -136,6 +137,25 @@ _EMAIL_CONFIG_LOGGED = False
 def _is_truthy_env(name: str) -> bool:
     """Return True when an environment variable is set to a truthy value."""
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _describe_payload_shape(payload: Any) -> str:
+    """Return a compact payload shape description for warning logs.
+
+    Args:
+        payload: Arbitrary payload returned by an API call.
+
+    Returns:
+        Human-readable payload shape summary.
+    """
+    if isinstance(payload, dict):
+        keys = list(payload.keys())
+        preview = ", ".join(str(key) for key in keys[:8])
+        suffix = ", ..." if len(keys) > 8 else ""
+        return f"dict keys=[{preview}{suffix}]"
+    if isinstance(payload, list):
+        return f"list len={len(payload)}"
+    return f"type={type(payload).__name__}"
 
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
@@ -1059,7 +1079,39 @@ async def run_scheduler() -> None:
 
         try:
             energy_flow = await sigen.get_energy_flow()
+        except KeyError as exc:
+            logger.warning(
+                "[TELEMETRY] get_energy_flow payload missing key %r. "
+                "Snapshot skipped for this tick.",
+                exc,
+            )
+            return
+        except Exception as exc:
+            logger.warning(
+                "[TELEMETRY] get_energy_flow failed: %s. Snapshot skipped for this tick.",
+                exc,
+            )
+            return
+
+        if not isinstance(energy_flow, dict):
+            logger.warning(
+                "[TELEMETRY] get_energy_flow returned unexpected payload shape (%s). "
+                "Snapshot skipped for this tick.",
+                _describe_payload_shape(energy_flow),
+            )
+            return
+
+        try:
             operational_mode = await sigen.get_operational_mode()
+        except Exception as exc:
+            logger.warning(
+                "[TELEMETRY] get_operational_mode failed: %s. "
+                "Snapshot skipped for this tick.",
+                exc,
+            )
+            return
+
+        try:
             append_inverter_telemetry_snapshot(
                 energy_flow=energy_flow,
                 operational_mode=operational_mode,
@@ -1069,7 +1121,13 @@ async def run_scheduler() -> None:
                 forecast_tomorrow=tomorrow_period_forecast,
             )
         except Exception as exc:
-            logger.warning(f"[TELEMETRY] Failed to capture inverter snapshot: {exc}")
+            logger.warning(
+                "[TELEMETRY] Failed to write inverter snapshot: %s | energy_flow=%s | "
+                "operational_mode_shape=%s",
+                exc,
+                _describe_payload_shape(energy_flow),
+                _describe_payload_shape(operational_mode),
+            )
 
     async def sample_live_solar_power(now_utc: datetime) -> None:
         """Capture one live solar reading for rolling export-capacity calculations.
@@ -1151,23 +1209,23 @@ async def run_scheduler() -> None:
         status_key = (status or "").upper()
         period_key = (period or "").upper()
 
-        if period_key not in {"MORN", "AFTN"}:
+        if not is_live_clipping_period_enabled(period):
             return status, None
         if status_key != "AMBER":
             return status, None
-        if soc is None or soc < CLIPPING_BATTERY_SOC_HIGH_PERCENT:
+        if soc is None or soc < LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
             return status, None
         if avg_live_solar_kw is None:
             return status, None
 
-        trigger_kw = INVERTER_KW - CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW
+        trigger_kw = LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW
         if avg_live_solar_kw < trigger_kw:
             return status, None
 
         reason = (
             "Live clipping-risk override: promoting AMBER to GREEN because "
             f"SOC={soc:.1f}% and avg live solar={avg_live_solar_kw:.2f} kW is near "
-            f"inverter ceiling ({INVERTER_KW:.1f} kW)."
+            f"or above configured trigger ({trigger_kw:.1f} kW)."
         )
         return "Green", reason
 
