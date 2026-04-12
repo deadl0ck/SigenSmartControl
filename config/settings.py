@@ -144,16 +144,22 @@ ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 # Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
-# High-SOC protection: allow export for Amber/Green periods when battery is very full.
+# High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
+# full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
-# Comma-separated period codes where live clipping-risk promotion and high-SOC
-# protection are allowed: M=Morning, A=Afternoon, E=Evening.
-# Example: "M,A" enables morning and afternoon.
+# Comma-separated period codes where high-SOC export protection is allowed.
+# Codes: M=Morning, A=Afternoon, E=Evening. Example: "M,A" enables morning and afternoon.
+HIGH_SOC_PROTECTION_VALID_PERIODS = "M,A"
+# Live clipping-risk promotion: promote Amber to Green during a scheduler tick when
+# live solar generation and battery SOC both exceed configured thresholds, allowing
+# the headroom export rule to trigger early even on an underforecast day.
+# Comma-separated period codes where live clipping-risk promotion is allowed.
+# Codes: M=Morning, A=Afternoon, E=Evening. Example: "M,A" enables morning and afternoon.
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
-# Live clipping-risk promotion thresholds used by the scheduler to treat Amber as Green
-# when real-time generation indicates stronger-than-forecast solar conditions.
+# SOC threshold for live clipping-risk Amber→Green promotion.
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
+# Rolling live-solar kW threshold for live clipping-risk promotion.
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
 # Enable AI Mode transition for evening periods approaching cheap-rate window.
 # When enabled, the Evening period will switch to AI Mode (with profit-max configured

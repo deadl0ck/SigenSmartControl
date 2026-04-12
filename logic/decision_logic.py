@@ -14,6 +14,7 @@ Implements a hierarchical decision tree:
 
 from config.settings import (
     FORECAST_TO_MODE,
+    HIGH_SOC_PROTECTION_VALID_PERIODS,
     LIVE_CLIPPING_RISK_VALID_PERIODS,
     MORNING_HIGH_SOC_PROTECTION_ENABLED,
     MORNING_HIGH_SOC_THRESHOLD_PERCENT,
@@ -22,35 +23,60 @@ from config.settings import (
 )
 
 
-def _normalize_live_clipping_period_codes() -> set[str]:
-    """Normalize configured live clipping period codes to a validated set.
+def _parse_period_codes(codes_str: str) -> set[str]:
+    """Parse a comma-separated period code string into a validated set.
+
+    Args:
+        codes_str: Comma-separated period codes (e.g., ``"M,A"``). Supported
+            codes are M (Morning), A (Afternoon), and E (Evening).
 
     Returns:
-        Set of period codes where live clipping-risk logic is allowed.
-        Supported codes: M (Morning), A (Afternoon), E (Evening).
+        Validated set of period codes. Falls back to ``{"M", "A"}`` when the
+        string is empty or contains no recognised codes.
     """
-    raw_codes = {
-        token.strip().upper() for token in LIVE_CLIPPING_RISK_VALID_PERIODS.split(",") if token.strip()
-    }
-    valid_codes = raw_codes & {"M", "A", "E"}
-    return valid_codes or {"M", "A"}
+    raw = {token.strip().upper() for token in codes_str.split(",") if token.strip()}
+    valid = raw & {"M", "A", "E"}
+    return valid or {"M", "A"}
+
+
+def is_high_soc_protection_period_enabled(period: str) -> bool:
+    """Return whether high-SOC export protection is enabled for a period.
+
+    Reads ``HIGH_SOC_PROTECTION_VALID_PERIODS`` from settings. This controls
+    the rule that forces GRID_EXPORT when the battery is very full and headroom
+    is below target, independent of the live clipping-risk promotion signal.
+
+    Args:
+        period: Scheduler period name (e.g., Morn, Aftn, Eve).
+
+    Returns:
+        True when the period is covered by ``HIGH_SOC_PROTECTION_VALID_PERIODS``.
+    """
+    period_to_code = {"MORN": "M", "AFTN": "A", "EVE": "E"}
+    period_code = period_to_code.get((period or "").upper())
+    if period_code is None:
+        return False
+    return period_code in _parse_period_codes(HIGH_SOC_PROTECTION_VALID_PERIODS)
 
 
 def is_live_clipping_period_enabled(period: str) -> bool:
-    """Return whether live clipping-risk logic is enabled for a period.
+    """Return whether live clipping-risk Amber→Green promotion is enabled for a period.
+
+    Reads ``LIVE_CLIPPING_RISK_VALID_PERIODS`` from settings. This controls only
+    the scheduler's intra-tick signal that promotes an Amber forecast to Green when
+    live solar generation and battery SOC both exceed their configured thresholds.
 
     Args:
-        period: Period name (e.g., Morn, Aftn, Eve).
+        period: Scheduler period name (e.g., Morn, Aftn, Eve).
 
     Returns:
-        True when period is enabled by LIVE_CLIPPING_RISK_VALID_PERIODS.
+        True when the period is covered by ``LIVE_CLIPPING_RISK_VALID_PERIODS``.
     """
-    period_key = (period or "").upper()
     period_to_code = {"MORN": "M", "AFTN": "A", "EVE": "E"}
-    period_code = period_to_code.get(period_key)
+    period_code = period_to_code.get((period or "").upper())
     if period_code is None:
         return False
-    return period_code in _normalize_live_clipping_period_codes()
+    return period_code in _parse_period_codes(LIVE_CLIPPING_RISK_VALID_PERIODS)
 
 
 def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:
@@ -128,7 +154,7 @@ def decide_operational_mode(
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and is_live_clipping_period_enabled(period)
+        and is_high_soc_protection_period_enabled(period)
         and status_key in {"AMBER", "GREEN"}
         and soc is not None
         and soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT

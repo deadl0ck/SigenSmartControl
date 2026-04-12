@@ -138,6 +138,7 @@ ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
+HIGH_SOC_PROTECTION_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
@@ -175,10 +176,11 @@ Meaning:
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
 - `MORNING_HIGH_SOC_PROTECTION_ENABLED`: enables high-SOC export protection rule for selected daytime periods
-- `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC threshold for high-SOC export protection
-- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk logic is allowed (`M`=Morning, `A`=Afternoon, `E`=Evening), for example `M,A`
-- `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold used by live clipping-risk promotion (`Amber` to `Green`) and period-level high-SOC export checks
-- `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW trigger used for clipping-risk promotion
+- `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC threshold for the high-SOC export protection rule
+- `HIGH_SOC_PROTECTION_VALID_PERIODS`: comma-separated period codes where the high-SOC export protection rule is active (`M`=Morning, `A`=Afternoon, `E`=Evening). This is independent of the live clipping-risk check.
+- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active. Only applies to the intra-tick live solar check; does not affect the high-SOC export rule.
+- `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
+- `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
 - `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
 - `EVENING_AI_MODE_START_HOUR`: local hour after which Evening can transition to AI mode
 
