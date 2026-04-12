@@ -14,7 +14,6 @@ Implements a hierarchical decision tree:
 
 from config.settings import (
     FORECAST_TO_MODE,
-    HIGH_SOC_PROTECTION_VALID_PERIODS,
     LIVE_CLIPPING_RISK_VALID_PERIODS,
     MORNING_HIGH_SOC_PROTECTION_ENABLED,
     MORNING_HIGH_SOC_THRESHOLD_PERCENT,
@@ -37,26 +36,6 @@ def _parse_period_codes(codes_str: str) -> set[str]:
     raw = {token.strip().upper() for token in codes_str.split(",") if token.strip()}
     valid = raw & {"M", "A", "E"}
     return valid or {"M", "A"}
-
-
-def is_high_soc_protection_period_enabled(period: str) -> bool:
-    """Return whether high-SOC export protection is enabled for a period.
-
-    Reads ``HIGH_SOC_PROTECTION_VALID_PERIODS`` from settings. This controls
-    the rule that forces GRID_EXPORT when the battery is very full and headroom
-    is below target, independent of the live clipping-risk promotion signal.
-
-    Args:
-        period: Scheduler period name (e.g., Morn, Aftn, Eve).
-
-    Returns:
-        True when the period is covered by ``HIGH_SOC_PROTECTION_VALID_PERIODS``.
-    """
-    period_to_code = {"MORN": "M", "AFTN": "A", "EVE": "E"}
-    period_code = period_to_code.get((period or "").upper())
-    if period_code is None:
-        return False
-    return period_code in _parse_period_codes(HIGH_SOC_PROTECTION_VALID_PERIODS)
 
 
 def is_live_clipping_period_enabled(period: str) -> bool:
@@ -154,7 +133,6 @@ def decide_operational_mode(
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and is_high_soc_protection_period_enabled(period)
         and status_key in {"AMBER", "GREEN"}
         and soc is not None
         and soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT

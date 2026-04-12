@@ -130,6 +130,7 @@ NIGHT_MODE_ENABLED = True
 LOCAL_TIMEZONE = "Europe/Dublin"
 QUARTZ_RED_CAPACITY_FRACTION = 0.20
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
+FORECAST_SOLAR_POWER_MULTIPLIER = 1.53
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
 HEADROOM_TARGET_KWH = 10.2
@@ -138,7 +139,6 @@ ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
-HIGH_SOC_PROTECTION_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
@@ -165,6 +165,7 @@ Meaning:
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
+- `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
 ```python
 HEADROOM_TARGET_KWH = 10.2
 ```
@@ -177,8 +178,7 @@ Meaning:
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
 - `MORNING_HIGH_SOC_PROTECTION_ENABLED`: enables high-SOC export protection rule for selected daytime periods
 - `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC threshold for the high-SOC export protection rule
-- `HIGH_SOC_PROTECTION_VALID_PERIODS`: comma-separated period codes where the high-SOC export protection rule is active (`M`=Morning, `A`=Afternoon, `E`=Evening). This is independent of the live clipping-risk check.
-- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active. Only applies to the intra-tick live solar check; does not affect the high-SOC export rule.
+- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Only applies to the intra-tick live solar check.
 - `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
 - `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
 - `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
@@ -809,6 +809,26 @@ Clipping-aware promotion:
 
 This report-fit calibration is intentionally analysis-oriented so you can see whether ESB can be
 brought closer to observed generation in each period.
+
+### Provider-vs-actual accuracy comparison
+
+Run:
+
+```sh
+python scripts/compare_forecast_accuracy.py
+```
+
+What it does:
+
+- Compares ESB, Forecast.Solar, and Quartz against measured inverter telemetry so far
+- Uses the latest forecast captured before each period start (`Morn`, `Aftn`, `Eve`)
+- Reports status accuracy, MAE, MAPE, and `actual/forecast` bias ratio
+- Prints suggested Forecast.Solar multiplier candidates (median and mean)
+
+Notes:
+
+- ESB period watts are synthetic status placeholders, so ESB watt MAE/MAPE should be interpreted cautiously; ESB status accuracy is the more meaningful metric.
+- After updating `FORECAST_SOLAR_POWER_MULTIPLIER`, only new scheduler/provider refreshes will reflect the change in future archive snapshots.
 
 ## Web Simulator
 

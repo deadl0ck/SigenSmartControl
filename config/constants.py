@@ -18,6 +18,13 @@ except ImportError:
 import logging
 logger = logging.getLogger(__name__)
 
+from config.settings import (
+    FORECAST_SOLAR_PLANE_AZIMUTH as SETTINGS_FORECAST_SOLAR_PLANE_AZIMUTH,
+    FORECAST_SOLAR_PLANE_DECLINATION as SETTINGS_FORECAST_SOLAR_PLANE_DECLINATION,
+    FORECAST_SOLAR_SITE_KWP as SETTINGS_FORECAST_SOLAR_SITE_KWP,
+    QUARTZ_SITE_CAPACITY_KWP as SETTINGS_QUARTZ_SITE_CAPACITY_KWP,
+)
+
 def _get_env_float_required(var: str) -> float:
     """Load a required floating-point environment variable.
     
@@ -125,7 +132,7 @@ QUARTZ_FORECAST_API_URL: Final[str] = os.getenv(
     "QUARTZ_FORECAST_API_URL",
     "https://open.quartz.solar/forecast/",
 ).strip()
-QUARTZ_SITE_CAPACITY_KWP: Final[float] = float(os.getenv("QUARTZ_SITE_CAPACITY_KWP", "8.9"))
+QUARTZ_SITE_CAPACITY_KWP: Final[float] = float(SETTINGS_QUARTZ_SITE_CAPACITY_KWP)
 
 # Optional Forecast.Solar provider settings.
 FORECAST_SOLAR_API_BASE_URL: Final[str] = os.getenv(
@@ -133,15 +140,9 @@ FORECAST_SOLAR_API_BASE_URL: Final[str] = os.getenv(
     "https://api.forecast.solar",
 ).strip().rstrip("/")
 FORECAST_SOLAR_API_KEY: Final[str] = os.getenv("FORECAST_SOLAR_API_KEY", "").strip()
-FORECAST_SOLAR_PLANE_DECLINATION: Final[int] = int(
-    os.getenv("FORECAST_SOLAR_PLANE_DECLINATION", "37")
-)
-FORECAST_SOLAR_PLANE_AZIMUTH: Final[int] = int(
-    os.getenv("FORECAST_SOLAR_PLANE_AZIMUTH", "0")
-)
-FORECAST_SOLAR_SITE_KWP: Final[float] = float(
-    os.getenv("FORECAST_SOLAR_SITE_KWP", str(QUARTZ_SITE_CAPACITY_KWP))
-)
+FORECAST_SOLAR_PLANE_DECLINATION: Final[int] = int(SETTINGS_FORECAST_SOLAR_PLANE_DECLINATION)
+FORECAST_SOLAR_PLANE_AZIMUTH: Final[int] = int(SETTINGS_FORECAST_SOLAR_PLANE_AZIMUTH)
+FORECAST_SOLAR_SITE_KWP: Final[float] = float(SETTINGS_FORECAST_SOLAR_SITE_KWP)
 
 # Local archive file for side-by-side ESB vs Quartz comparison snapshots.
 FORECAST_COMPARISON_ARCHIVE_PATH: Final[str] = os.getenv(

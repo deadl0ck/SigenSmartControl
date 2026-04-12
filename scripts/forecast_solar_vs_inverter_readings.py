@@ -1,5 +1,5 @@
-"""scripts/forecast_solar_vs_pvdaynrg.py
------------------------------------------
+"""scripts/forecast_solar_vs_inverter_readings.py
+-------------------------------------------------
 Compare Forecast.Solar hourly averages against inverter hourly generation.
 
 This script derives actual hourly generation from the inverter telemetry archive by
@@ -7,16 +7,16 @@ taking positive `pvDayNrg` deltas within each local-hour bucket. It compares tho
 actuals against the average Forecast.Solar snapshots captured in the same hour.
 
 Run from the project root:
-    python scripts/forecast_solar_vs_pvdaynrg.py
-    python scripts/forecast_solar_vs_pvdaynrg.py --date 2026-04-10
-    python scripts/forecast_solar_vs_pvdaynrg.py --all
+    python scripts/forecast_solar_vs_inverter_readings.py
 
 For each daylight hour, prints:
     - Forecast.Solar average power for that hour (kW)
-    - Forecast-equivalent hourly energy (kWh)
-    - Inverter hourly energy from `pvDayNrg` deltas (kWh)
+    - Inverter hourly energy from `pvDayNrg` deltas (kWh), or N/A if not yet available
     - Difference between inverter and forecast (kWh)
     - Forecast snapshot count and telemetry delta count
+
+Dates with Forecast.Solar data are always shown even if inverter telemetry is
+not yet available (e.g. today's future hours).
 
 Sunrise and sunset are fetched from the same public API used by the scheduler. If
 that lookup fails, the script falls back to the earliest and latest non-zero
@@ -62,7 +62,7 @@ class HourlyComparisonRow:
     hour_start: datetime
     forecast_avg_kw: float | None
     forecast_samples: int
-    actual_kwh: float
+    actual_kwh: float | None
     actual_deltas: int
 
 
@@ -75,18 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Compare Forecast.Solar hourly averages against inverter hourly "
-            "generation derived from pvDayNrg."
+            "generation derived from pvDayNrg for today (local date)."
         )
-    )
-    parser.add_argument(
-        "--date",
-        dest="date_text",
-        help="Local date to analyse in YYYY-MM-DD format. Defaults to latest common date.",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Print all dates that have both telemetry and Forecast.Solar data.",
     )
     return parser.parse_args()
 
@@ -363,7 +353,7 @@ def build_forecast_hourly_averages(
     target_hours: set[int],
     local_tz: ZoneInfo,
 ) -> tuple[dict[int, float], dict[int, int]]:
-    """Average Forecast.Solar snapshots captured within each local hour.
+    """Build hourly forecast values from the latest Forecast.Solar snapshot.
 
     Args:
         forecast_records: Parsed Forecast.Solar archive rows.
@@ -374,9 +364,10 @@ def build_forecast_hourly_averages(
     Returns:
         Tuple of dictionaries keyed by local hour:
             - average forecast power in kW
-            - number of Forecast.Solar snapshots used for that hour
+            - number of points contributing to the hour in the latest snapshot
     """
-    per_hour_values_w: dict[int, list[float]] = defaultdict(list)
+    latest_captured_at_utc: datetime | None = None
+    latest_readings: dict[str, Any] | None = None
 
     for record in forecast_records:
         captured_at_utc = parse_iso_datetime(record.get("captured_at_utc"))
@@ -384,21 +375,37 @@ def build_forecast_hourly_averages(
         if captured_at_utc is None or not isinstance(readings, dict):
             continue
 
-        captured_local = captured_at_utc.astimezone(local_tz)
-        if captured_local.date() != target_date or captured_local.hour not in target_hours:
-            continue
-
-        target_hour = captured_local.hour
-        row_values: list[float] = []
+        has_target_points = False
         for reading_key, reading_value in readings.items():
             point_dt = parse_forecast_local_point(reading_key, local_tz)
-            if point_dt is None or point_dt.date() != target_date or point_dt.hour != target_hour:
+            if point_dt is None or point_dt.date() != target_date:
+                continue
+            if point_dt.hour not in target_hours:
                 continue
             if isinstance(reading_value, (int, float)):
-                row_values.append(float(reading_value))
+                has_target_points = True
+                break
 
-        if row_values:
-            per_hour_values_w[target_hour].append(sum(row_values) / len(row_values))
+        if not has_target_points:
+            continue
+
+        if latest_captured_at_utc is None or captured_at_utc > latest_captured_at_utc:
+            latest_captured_at_utc = captured_at_utc
+            latest_readings = readings
+
+    if latest_readings is None:
+        return {}, {}
+
+    per_hour_values_w: dict[int, list[float]] = defaultdict(list)
+
+    for reading_key, reading_value in latest_readings.items():
+        point_dt = parse_forecast_local_point(reading_key, local_tz)
+        if point_dt is None or point_dt.date() != target_date:
+            continue
+        if point_dt.hour not in target_hours:
+            continue
+        if isinstance(reading_value, (int, float)):
+            per_hour_values_w[point_dt.hour].append(float(reading_value))
 
     averages_kw = {
         hour: (sum(values_w) / len(values_w)) / 1000.0
@@ -453,7 +460,11 @@ def build_hourly_rows(
             hour_start=bucket_start,
             forecast_avg_kw=forecast_avg_kw_by_hour.get(bucket_start.hour),
             forecast_samples=forecast_sample_counts.get(bucket_start.hour, 0),
-            actual_kwh=round(actual_kwh_by_hour.get(bucket_start.hour, 0.0), 3),
+            actual_kwh=(
+                round(actual_kwh_by_hour[bucket_start.hour], 3)
+                if bucket_start.hour in actual_kwh_by_hour
+                else None
+            ),
             actual_deltas=actual_delta_counts.get(bucket_start.hour, 0),
         )
         for bucket_start in bucket_starts
@@ -489,26 +500,29 @@ def print_report_for_date(
         f"({daylight_source})"
     )
     print(
-        f"  {'Hour':<11}  {'FS Avg kW':>9}  {'FS Eqv kWh':>10}  {'Actual kWh':>10}  "
+        f"  {'Hour':<11}  {'FS Avg kW':>9}  {'Actual kWh':>10}  "
         f"{'Act-FS':>8}  {'FS n':>4}  {'deltas':>6}"
     )
-    print("  " + "-" * 73)
+    print("  " + "-" * 61)
 
     total_forecast_kwh = 0.0
     total_actual_kwh = 0.0
+    total_actual_count = 0
     total_forecast_samples = 0
     total_actual_deltas = 0
 
     for row in rows:
-        forecast_kwh = row.forecast_avg_kw if row.forecast_avg_kw is not None else None
+        forecast_kwh = row.forecast_avg_kw
         delta_kwh = (
             row.actual_kwh - forecast_kwh
-            if forecast_kwh is not None
+            if forecast_kwh is not None and row.actual_kwh is not None
             else None
         )
 
         total_forecast_kwh += forecast_kwh or 0.0
-        total_actual_kwh += row.actual_kwh
+        if row.actual_kwh is not None:
+            total_actual_kwh += row.actual_kwh
+            total_actual_count += 1
         total_forecast_samples += row.forecast_samples
         total_actual_deltas += row.actual_deltas
 
@@ -521,23 +535,31 @@ def print_report_for_date(
             if row.forecast_avg_kw is not None
             else f"{'N/A':>9}"
         )
-        forecast_kwh_text = (
-            f"{forecast_kwh:>10.3f}"
-            if forecast_kwh is not None
+        actual_text = (
+            f"{row.actual_kwh:>10.3f}"
+            if row.actual_kwh is not None
             else f"{'N/A':>10}"
         )
         delta_text = f"{delta_kwh:>8.3f}" if delta_kwh is not None else f"{'N/A':>8}"
 
         print(
-            f"  {hour_label:<11}  {forecast_avg_text}  {forecast_kwh_text}  "
-            f"{row.actual_kwh:>10.3f}  {delta_text}  {row.forecast_samples:>4}  "
+            f"  {hour_label:<11}  {forecast_avg_text}  "
+            f"{actual_text}  {delta_text}  {row.forecast_samples:>4}  "
             f"{row.actual_deltas:>6}"
         )
 
-    print("  " + "-" * 73)
+    total_actual_text = (
+        f"{total_actual_kwh:>10.3f}" if total_actual_count > 0 else f"{'N/A':>10}"
+    )
+    total_delta_text = (
+        f"{(total_actual_kwh - total_forecast_kwh):>8.3f}"
+        if total_actual_count > 0
+        else f"{'N/A':>8}"
+    )
+    print("  " + "-" * 61)
     print(
-        f"  {'Total':<11}  {'':>9}  {total_forecast_kwh:>10.3f}  {total_actual_kwh:>10.3f}  "
-        f"{(total_actual_kwh - total_forecast_kwh):>8.3f}  {total_forecast_samples:>4}  "
+        f"  {'Total':<11}  {total_forecast_kwh:>9.3f}  {total_actual_text}  "
+        f"{total_delta_text}  {total_forecast_samples:>4}  "
         f"{total_actual_deltas:>6}"
     )
     print()
@@ -549,40 +571,16 @@ def main() -> int:
     Returns:
         Process exit code.
     """
-    args = parse_args()
+    parse_args()
     local_tz = ZoneInfo(LOCAL_TIMEZONE)
     telemetry_records = load_jsonl(_ROOT / INVERTER_TELEMETRY_ARCHIVE_PATH)
     forecast_records = load_jsonl(_ROOT / FORECAST_SOLAR_ARCHIVE_PATH)
 
-    if not telemetry_records:
-        print("No inverter telemetry archive found.", file=sys.stderr)
-        return 1
-    if not forecast_records:
-        print("No Forecast.Solar archive found.", file=sys.stderr)
+    if not telemetry_records and not forecast_records:
+        print("No telemetry or Forecast.Solar archive data found.", file=sys.stderr)
         return 1
 
-    common_dates = default_target_dates(telemetry_records, forecast_records, local_tz)
-    if not common_dates:
-        print("No common dates found in telemetry and Forecast.Solar archives.", file=sys.stderr)
-        return 1
-
-    if args.all:
-        target_dates = common_dates
-    elif args.date_text:
-        try:
-            requested_date = datetime.strptime(args.date_text, "%Y-%m-%d").date()
-        except ValueError:
-            print("--date must be in YYYY-MM-DD format.", file=sys.stderr)
-            return 1
-        if requested_date not in common_dates:
-            print(
-                f"No common telemetry/forecast data found for {requested_date.isoformat()}.",
-                file=sys.stderr,
-            )
-            return 1
-        target_dates = [requested_date]
-    else:
-        target_dates = [common_dates[-1]]
+    target_dates = [datetime.now(local_tz).date()]
 
     for target_date in target_dates:
         print_report_for_date(telemetry_records, forecast_records, target_date, local_tz)

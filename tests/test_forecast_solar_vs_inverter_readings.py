@@ -1,11 +1,11 @@
-"""Tests for the hourly Forecast.Solar vs pvDayNrg comparison script."""
+"""Tests for the hourly Forecast.Solar vs inverter readings comparison script."""
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from scripts.forecast_solar_vs_pvdaynrg import (
+from scripts.forecast_solar_vs_inverter_readings import (
     build_forecast_hourly_averages,
     build_inverter_hourly_generation,
 )
@@ -47,8 +47,8 @@ def test_build_inverter_hourly_generation_sums_positive_pvdaynrg_deltas() -> Non
     assert hourly_counts == {8: 2, 9: 1}
 
 
-def test_build_forecast_hourly_averages_uses_snapshots_captured_in_same_hour() -> None:
-    """Forecast averages should use same-hour captured snapshots only."""
+def test_build_forecast_hourly_averages_uses_latest_snapshot_only() -> None:
+    """Forecast averages should use only the most recent snapshot with target points."""
     local_tz = ZoneInfo("Europe/Dublin")
     target_date = date(2026, 4, 10)
     forecast_records = [
@@ -81,5 +81,5 @@ def test_build_forecast_hourly_averages_uses_snapshots_captured_in_same_hour() -
         local_tz,
     )
 
-    assert averages_kw == {10: 1.3, 11: 2.0}
-    assert sample_counts == {10: 2, 11: 1}
+    assert averages_kw == {11: 2.0}
+    assert sample_counts == {11: 1}

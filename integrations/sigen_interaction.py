@@ -6,6 +6,8 @@ recovery when token refresh fails (refresh -> full re-auth -> retry once).
 
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
+import os
+import sys
 
 from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
 from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
@@ -13,6 +15,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
+ACTION_DIVIDER = "*" * 96
+_PURPLE = "\033[95m"
+_RESET = "\033[0m"
+
+
+def _divider_line() -> str:
+    """Return divider line, colorized purple when terminal output supports ANSI colors."""
+    force_color = os.getenv("FORCE_COLOR", "").strip().lower() in {"1", "true", "yes", "on"}
+    is_tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
+    if (is_tty or force_color) and not os.getenv("NO_COLOR"):
+        return f"{_PURPLE}{ACTION_DIVIDER}{_RESET}"
+    return ACTION_DIVIDER
 
 
 class SigenApiProtocol(Protocol):
@@ -119,8 +133,8 @@ class SigenInteraction:
         """
         mode_label = MODE_NAMES.get(mode, f"UNKNOWN({mode})")
         try:
-            logger.info("************************************************************************************************")
-            logger.info("************************************************************************************************")
+            logger.info(_divider_line())
+            logger.info(_divider_line())
             if FULL_SIMULATION_MODE:
                 logger.info(
                     f"[SIMULATION] set_operational_mode(mode={mode_label}, value={mode}) "
@@ -135,8 +149,8 @@ class SigenInteraction:
                 "set_operational_mode",
             )
         finally:
-            logger.info("************************************************************************************************")
-            logger.info("************************************************************************************************")
+            logger.info(_divider_line())
+            logger.info(_divider_line())
 
     async def export_to_grid(self, num_mins: int) -> Any:
         """Switch the inverter to fully fed-to-grid mode.

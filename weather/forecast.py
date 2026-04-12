@@ -20,6 +20,7 @@ import requests
 from config.settings import (
     ESB_API_TIMEOUT_SECONDS,
     FORECAST_SOLAR_API_TIMEOUT_SECONDS,
+    FORECAST_SOLAR_POWER_MULTIPLIER,
     LOCAL_TIMEZONE,
     QUARTZ_API_TIMEOUT_SECONDS,
     QUARTZ_GREEN_CAPACITY_FRACTION,
@@ -76,8 +77,9 @@ class SolarForecastProvider(Protocol):
 class _BaseSolarForecast:
     """Shared behavior for provider implementations backed by normalized table rows."""
 
-    def __init__(self, logger: logging.Logger) -> None:
+    def __init__(self, logger: logging.Logger, provider_label: str) -> None:
         self.logger = logger
+        self.provider_label = provider_label
         self.table_data: list[TableRow] = []
 
     @staticmethod
@@ -113,6 +115,7 @@ class _BaseSolarForecast:
     def _log_table(self) -> None:
         """Print normalized table rows in an ASCII table."""
         header = f"| {'Day':^9} | {'Period':^8} | {'Solar Value':^11} | {'Status':^6} |"
+        self.logger.info("[FORECAST-TABLE] %s", self.provider_label)
         self.logger.info(DIVIDER)
         self.logger.info(header)
         self.logger.info(DIVIDER)
@@ -131,7 +134,11 @@ class _BaseSolarForecast:
         today_day = self._get_today()
         values: list[str] = []
 
-        self.logger.info(f"Solar Values for today ({today_day}):")
+        self.logger.info(
+            "Solar Values for today (%s) [%s]:",
+            today_day,
+            self.provider_label,
+        )
         self.logger.info(DIVIDER)
         for day, period, value, status in self.table_data:
             if day == today_day and period != "NIGHT":
@@ -208,7 +215,7 @@ class SolarForecast(_BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load county forecast rows from ESB API."""
-        super().__init__(logger)
+        super().__init__(logger, "ESB county forecast")
         self._load_esb_api_table(COUNTY)
 
     @staticmethod
@@ -264,7 +271,7 @@ class QuartzSolarForecast(_BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Open Quartz API."""
-        super().__init__(logger)
+        super().__init__(logger, "Quartz site-level forecast")
         self._load_quartz_table()
 
     @staticmethod
@@ -448,7 +455,7 @@ class ForecastSolarForecast(_BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Forecast.Solar API."""
-        super().__init__(logger)
+        super().__init__(logger, "Forecast.Solar site-level forecast")
         self._load_forecast_solar_table()
 
     @staticmethod
@@ -485,6 +492,10 @@ class ForecastSolarForecast(_BaseSolarForecast):
     def _load_forecast_solar_table(self) -> None:
         """Load and normalize Forecast.Solar output into project period rows."""
         endpoint = self._build_endpoint()
+        self.logger.info(
+            "[FORECAST-SOLAR] Applying configured power multiplier x%.2f",
+            FORECAST_SOLAR_POWER_MULTIPLIER,
+        )
         response = requests.get(endpoint, timeout=FORECAST_SOLAR_API_TIMEOUT_SECONDS)
         response.raise_for_status()
         body = response.json()
@@ -516,7 +527,7 @@ class ForecastSolarForecast(_BaseSolarForecast):
 
         normalized_rows: list[TableRow] = []
         for (day_label, period), kw_values in grouped.items():
-            avg_kw = sum(kw_values) / len(kw_values)
+            avg_kw = (sum(kw_values) / len(kw_values)) * FORECAST_SOLAR_POWER_MULTIPLIER
             value = int(round(avg_kw * 1000.0))
             status = self._status_from_avg_kw(avg_kw)
             normalized_rows.append((day_label, period, value, status))
@@ -714,6 +725,7 @@ class ComparingSolarForecastProvider:
                 "quartz_period_timezone": LOCAL_TIMEZONE,
                 "quartz_red_lt_fraction": QUARTZ_RED_CAPACITY_FRACTION,
                 "quartz_amber_lt_fraction": QUARTZ_GREEN_CAPACITY_FRACTION,
+                "forecast_solar_power_multiplier": FORECAST_SOLAR_POWER_MULTIPLIER,
                 "esb_values_are_synthetic": True,
             },
             "today": self._build_day_snapshot_with_optional_tertiary(
