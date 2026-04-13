@@ -61,10 +61,13 @@ see exactly what values were used and why each decision was made.
 │   └── tools/                        # Sigen diagnostics scripts (mode listing and API config checks)
 ├── weather/
 │   ├── forecast.py                   # Solar forecast parsing
+│   ├── greengrid_forecast.py         # GREEN-GRID Shiny app browser automation (optional)
 │   └── sunrise_sunset.py             # Sunrise/sunset lookup used to derive period windows
 ├── telemetry/
 │   └── forecast_calibration.py       # Daily bounded calibration generation from telemetry
 ├── scripts/
+│   ├── compare_forecast_accuracy.py  # ESB/Forecast.Solar/Quartz vs inverter telemetry analysis
+│   ├── compare_greengrid_vs_actuals.py # GREEN-GRID vs inverter telemetry analysis
 │   ├── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
 │   ├── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
 │   └── test_mode_change_email.py     # Sends a test mode-change email via scheduler simulation path
@@ -669,12 +672,19 @@ Important:
 
 All files under `scripts/` are documented below.
 
-- `scripts/forecast_vs_actual.py`
-	- Compares ESB, Forecast.Solar, and Quartz forecasts against measured telemetry by period.
-	- Adds a daily telemetry total line per date: `Day PV total (pvDayNrg): <kWh>`.
-	- Run: `python scripts/forecast_vs_actual.py`
+- `scripts/compare_forecast_accuracy.py`
+	- Period-level accuracy analysis for ESB, Forecast.Solar, and Quartz against inverter telemetry.
+	- Reports status accuracy %, MAE, MAPE, and bias ratio; suggests Forecast.Solar multiplier.
+	- Run: `python scripts/compare_forecast_accuracy.py`
 
-- `scripts/test.sh`
+- `scripts/compare_greengrid_vs_actuals.py`
+	- Period-level accuracy analysis for GREEN-GRID forecasts against inverter telemetry.
+	- Requires GREEN-GRID forecast data captured via `weather/greengrid_forecast.py` (Playwright required).
+	- Aggregates hourly GREEN-GRID forecasts into periods and compares status accuracy, MAE, MAPE, ratio.
+	- Suggests a GREEN-GRID multiplier if bias is detected.
+	- Run: `python scripts/compare_greengrid_vs_actuals.py`
+
+- `scripts/forecast_vs_actual.py`
 	- Convenience wrapper to run tests from shell.
 	- Run: `bash scripts/test.sh`
 
@@ -829,6 +839,73 @@ Notes:
 
 - ESB period watts are synthetic status placeholders, so ESB watt MAE/MAPE should be interpreted cautiously; ESB status accuracy is the more meaningful metric.
 - After updating `FORECAST_SOLAR_POWER_MULTIPLIER`, only new scheduler/provider refreshes will reflect the change in future archive snapshots.
+
+### GREEN-GRID forecast comparison (optional)
+
+GREEN-GRID is an alternative solar forecast provider available at https://greengrid.shinyapps.io/greengrid_energy_app/. It uses advanced climate-corrected modeling to produce hourly solar power estimates for Irish locations.
+
+**Setup (Playwright browser automation required):**
+
+```sh
+pip install playwright
+playwright install chromium
+```
+
+**Capturing GREEN-GRID forecasts:**
+
+The `weather/greengrid_forecast.py` module provides a `GreenGridForecast` class that automates the browser interaction to query the app:
+
+```python
+import asyncio
+from weather.greengrid_forecast import GreenGridForecast
+
+async def main():
+    provider = GreenGridForecast()
+    forecast = await provider.fetch_forecast(
+        eircode="N91 F752",
+        direction="SE",
+        roof_pitch_degrees=27,
+        num_panels=20,
+    )
+    if forecast:
+        print(f"Total kWh forecast: {forecast['total_forecast_kwh']}")
+
+asyncio.run(main())
+```
+
+Forecast data is automatically appended to `data/greengrid_forecasts.jsonl` for later analysis. Each entry includes:
+- `captured_at`: timestamp of the forecast query
+- `forecast_points`: list of `{date, time, forecast_kwh}` hourly values
+- `total_forecast_kwh`: sum across all hours
+- `inputs`: the query parameters (eircode, direction, roof pitch, panel count)
+
+**Comparing GREEN-GRID vs actuals:**
+
+Run:
+
+```sh
+python scripts/compare_greengrid_vs_actuals.py
+```
+
+This script:
+- Aggregates GREEN-GRID hourly forecasts into project periods (Morn/Aftn/Eve)
+- Compares against measured inverter telemetry for the same periods
+- Reports status accuracy, MAE, MAPE, and bias ratio
+- Suggests a multiplier if significant bias is detected
+
+Example output:
+
+```text
+GREEN-GRID   n= 12 status_acc= 75.0% MAE=  850W MAPE= 35.2% actual/forecast median=1.12 mean=1.15
+GREEN-GRID multiplier candidates: median x1.12, mean x1.15
+```
+
+**Notes:**
+
+- Requires an active inverter telemetry archive (`data/inverter_telemetry.jsonl`).
+- Forecast resolution is 1 hour; periods are aggregated as simple averages.
+- Status accuracy reflects the Red/Amber/Green classification match.
+- If you plan to integrate GREEN-GRID as an active decision provider, capture a few weeks of forecasts first to validate local accuracy and determine if a multiplier is needed.
 
 ## Web Simulator
 
