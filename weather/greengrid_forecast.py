@@ -183,14 +183,36 @@ class GreenGridForecast:
                     document.querySelector('#direction').selectize.setValue('{norm_direction}');
                 """)
                 
-                # Set roof pitch (regular input)
-                await page.fill("#roof_angle", str(roof_pitch_degrees))
+                # Wait for form to be ready after setting direction (it might trigger validation)
+                await asyncio.sleep(0.5)
+                
+                # Scroll form input into view and fill with JavaScript to avoid visibility issues
+                roof_angle_input = await page.locator("#roof_angle").element_handle()
+                if roof_angle_input:
+                    await roof_angle_input.scroll_into_view_if_needed()
+                
+                # Use JavaScript to set value to avoid Playwright's interactive checks
+                await page.evaluate(f"""
+                    document.getElementById('roof_angle').value = '{roof_pitch_degrees}';
+                    document.getElementById('roof_angle').dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    document.getElementById('roof_angle').dispatchEvent(new Event('change', {{ bubbles: true }}));
+                """)
+                
+                # Scroll panel input into view and fill
+                panel_input = await page.locator("#number_panel").element_handle()
+                if panel_input:
+                    await panel_input.scroll_into_view_if_needed()
+                
+                await page.evaluate(f"""
+                    document.getElementById('number_panel').value = '{num_panels}';
+                    document.getElementById('number_panel').dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    document.getElementById('number_panel').dispatchEvent(new Event('change', {{ bubbles: true }}));
+                """)
 
-                # Set panel count (regular input)
-                await page.fill("#number_panel", str(num_panels))
-
-                # Click Submit button
-                await page.click("#input_dataframe")
+# Click Submit button - use JavaScript to avoid visibility checks
+                await page.evaluate("""
+                    document.getElementById('input_dataframe').click();
+                """)
 
                 # Wait for forecast tab to become available (when calculation completes)
                 # This can take a while as the app calculates the forecast
