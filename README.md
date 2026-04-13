@@ -863,6 +863,21 @@ playwright install chromium
 
 Use the `scripts/capture_greengrid_forecast.py` script to query the app and save the forecast:
 
+**Option 1: Using the shell script (easiest)**
+
+```sh
+# First, edit scripts/capture_greengrid_forecast.sh and set your parameters
+# Then run:
+./scripts/capture_greengrid_forecast.sh
+```
+
+This script automatically:
+- Sets all required environment variables
+- Activates the virtual environment
+- Runs the forecast capture
+
+**Option 2: Manual environment setup**
+
 ```sh
 # Set your installation parameters via environment variables
 export GREENGRID_EIRCODE="N91 F752"
@@ -870,11 +885,10 @@ export GREENGRID_DIRECTION="SE"
 export GREENGRID_ROOF_PITCH_DEGREES="27"
 export GREENGRID_NUM_PANELS="20"
 
-# Run the capture script (takes 5-10 seconds)
+# Run the capture script
+source .venv/bin/activate
 python scripts/capture_greengrid_forecast.py
 ```
-
-The script:
 - Automates browser interaction with the Shiny app
 - Saves the forecast to `data/greengrid_forecasts.jsonl`
 - Prints status and forecast summary
