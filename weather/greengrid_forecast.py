@@ -13,6 +13,7 @@ Setup:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -163,11 +164,12 @@ class GreenGridForecast:
                 self.logger.info("[GREEN-GRID] Waiting for Shiny app initialization...")
                 await page.wait_for_load_state("domcontentloaded")
                 
-                # Additional wait for Selectize widgets to initialize (they can take time)
-                # Try to detect when selectize is ready by checking if the custom widget exists
-                await page.wait_for_selector(".selectize-control", timeout=30000)
+                # Wait for Selectize widgets to initialize
+                # Use state="attached" instead of "visible" - element exists in DOM even if hidden
+                await page.wait_for_selector(".selectize-control", timeout=30000, state="attached")
                 
-                self.logger.info("[GREEN-GRID] Waiting for form inputs to be interactive...")
+                # Small delay to let Selectize fully initialize and become interactive
+                await asyncio.sleep(1)
 
                 # Fill form fields
                 self.logger.info(
