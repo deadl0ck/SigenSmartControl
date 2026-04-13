@@ -41,7 +41,8 @@ FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES = 60
 
 # Live solar and pre-period export calculations.
 # How far ahead of a period start we begin monitoring SOC for a possible export.
-MAX_PRE_PERIOD_WINDOW_MINUTES = 120
+# Increased to start proactive headroom checks earlier on fast-ramp solar mornings.
+MAX_PRE_PERIOD_WINDOW_MINUTES = 180
 # Number of live-solar samples used in rolling average calculations.
 LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
 # Lower bound for effective battery export capacity in pre-period calculations.
@@ -175,7 +176,7 @@ BRIDGE_BATTERY_RESERVE_KWH = 1.0
 # High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
-MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
+MORNING_HIGH_SOC_THRESHOLD_PERCENT = 92.0
 # Live clipping-risk promotion: promote Amber to Green during a scheduler tick when
 # live solar generation and battery SOC both exceed configured thresholds, allowing
 # the headroom export rule to trigger early even on an underforecast day.
@@ -183,9 +184,11 @@ MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
 # Codes: M=Morning, A=Afternoon, E=Evening. Example: "M,A" enables morning and afternoon.
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 # SOC threshold for live clipping-risk Amber→Green promotion.
-LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
+# Lowered to trigger protective export before the battery is almost full.
+LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 85.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
-LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
+# Lowered so underforecast high-irradiance ramps are caught earlier.
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
 # Enable AI Mode transition for evening periods approaching cheap-rate window.
 # When enabled, the Evening period will switch to AI Mode (with profit-max configured
 # in mySigen app) to allow automatic battery arbitrage: discharge at day/peak rates,
@@ -194,6 +197,20 @@ ENABLE_EVENING_AI_MODE_TRANSITION = True
 # Hour (local time) after which Evening period should use AI Mode for profit-max optimization.
 # E.g., if set to 17, Evening mode will switch to AI after 17:00 (5 PM).
 EVENING_AI_MODE_START_HOUR = 17
+# Controlled evening export settings.
+# Enables bounded battery export in evening to create headroom, while preserving
+# enough energy to avoid avoidable grid import before cheap-rate charging.
+ENABLE_EVENING_CONTROLLED_EXPORT = True
+# Minimum SOC floor that controlled evening export must preserve.
+EVENING_EXPORT_MIN_SOC_PERCENT = 45.0
+# SOC threshold to consider starting controlled evening export.
+EVENING_EXPORT_TRIGGER_SOC_PERCENT = 75.0
+# Additional surplus above protected energy required before exporting.
+EVENING_EXPORT_MIN_EXCESS_KWH = 1.0
+# Conservative assumed net battery discharge power used to size export window.
+EVENING_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
+# Safety cap for one evening controlled export window.
+EVENING_EXPORT_MAX_DURATION_MINUTES = 120
 
 # ==============================
 # Sigen Modes
@@ -212,6 +229,22 @@ SIGEN_MODES = {
     "REMOTE_EMS": 7,  # Remote EMS Mode
     # User-defined custom operation logic
     "CUSTOM": 9,  # Custom Operation Mode
+}
+
+# Mapping of API label responses to numeric mode values.
+# This is used when get_operational_mode returns a text label rather than an integer.
+# Keys are matched case-insensitively after basic normalization.
+SIGEN_MODE_LABEL_TO_VALUE = {
+    "Sigen AI Mode": SIGEN_MODES["AI"],
+    "Signe AI Mode": SIGEN_MODES["AI"],
+    "AI Mode": SIGEN_MODES["AI"],
+    "Maximum Self-Powered": SIGEN_MODES["SELF_POWERED"],
+    "Self-Powered": SIGEN_MODES["SELF_POWERED"],
+    "TOU": SIGEN_MODES["TOU"],
+    "Fully Fed to Grid": SIGEN_MODES["GRID_EXPORT"],
+    "Grid Export": SIGEN_MODES["GRID_EXPORT"],
+    "Remote EMS Mode": SIGEN_MODES["REMOTE_EMS"],
+    "Custom Operation Mode": SIGEN_MODES["CUSTOM"],
 }
 
 # ==============================

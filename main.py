@@ -49,6 +49,12 @@ from config.settings import (
     LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
     LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW,
     MAX_TIMED_EXPORT_MINUTES,
+    ENABLE_EVENING_CONTROLLED_EXPORT,
+    EVENING_EXPORT_MIN_SOC_PERCENT,
+    EVENING_EXPORT_TRIGGER_SOC_PERCENT,
+    EVENING_EXPORT_MIN_EXCESS_KWH,
+    EVENING_EXPORT_ASSUMED_DISCHARGE_KW,
+    EVENING_EXPORT_MAX_DURATION_MINUTES,
 )
 from logic.decision_logic import (
     decide_operational_mode,
@@ -84,6 +90,7 @@ class LevelColorFormatter(logging.Formatter):
     """Apply ANSI colors to warning/error levels for terminal readability."""
 
     _RESET = "\033[0m"
+    _GREEN = "\033[32m"
     _ORANGE = "\033[38;5;214m"
     _RED = "\033[31m"
 
@@ -111,6 +118,8 @@ class LevelColorFormatter(logging.Formatter):
             return super().format(record)
 
         rendered = super().format(record)
+        if record.levelno == logging.INFO and "[MODE STATUS]" in rendered:
+            return f"{self._GREEN}{rendered}{self._RESET}"
         if record.levelno == logging.WARNING:
             return f"{self._ORANGE}{rendered}{self._RESET}"
         if record.levelno >= logging.ERROR:
@@ -156,6 +165,27 @@ def _describe_payload_shape(payload: Any) -> str:
     if isinstance(payload, list):
         return f"list len={len(payload)}"
     return f"type={type(payload).__name__}"
+
+
+def log_mode_status(context: str, current_mode_raw: Any, mode_names: dict[int, str]) -> None:
+    """Log pulled inverter mode state in a standardized format.
+
+    Args:
+        context: Human-readable context for where mode status was pulled.
+        current_mode_raw: Raw mode payload returned by inverter API.
+        mode_names: Mapping of numeric mode value to mode label.
+    """
+    current_mode = extract_mode_value(current_mode_raw)
+    if current_mode is not None:
+        logger.info(
+            "[MODE STATUS] %s -> %s (value=%s), raw=%s",
+            context,
+            mode_names.get(current_mode, current_mode),
+            current_mode,
+            current_mode_raw,
+        )
+        return
+    logger.info("[MODE STATUS] %s -> unparsed raw=%s", context, current_mode_raw)
 
 # How often the scheduler wakes up to re-evaluate each period.
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
@@ -418,15 +448,7 @@ async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[
 
     try:
         current_mode_raw = await sigen.get_operational_mode()
-        current_mode = extract_mode_value(current_mode_raw)
-        if current_mode is not None:
-            logger.info(
-                "Startup current mode: %s (value=%s)",
-                mode_names.get(current_mode, current_mode),
-                current_mode,
-            )
-        else:
-            logger.info("Startup current mode response (unparsed): %s", current_mode_raw)
+        log_mode_status("startup pull", current_mode_raw, mode_names)
     except Exception as e:
         logger.error("Failed to fetch current inverter mode on startup: %s", e)
 
@@ -521,6 +543,7 @@ async def apply_mode_change(
 
     try:
         current_mode_raw = await sigen.get_operational_mode()
+        log_mode_status(f"pre-change pull ({period})", current_mode_raw, mode_names)
         if mode_matches_target(current_mode_raw, mode, mode_names):
             logger.info(ACTION_DIVIDER)
             logger.info("Skipping inverter set_operational_mode (already at target mode)")
@@ -836,6 +859,11 @@ async def run_scheduler() -> None:
         if sigen is not None:
             try:
                 current_mode_raw = await sigen.get_operational_mode()
+                log_mode_status(
+                    f"pre-timed-export pull ({period})",
+                    current_mode_raw,
+                    mode_names,
+                )
                 restore_mode = extract_mode_value(current_mode_raw)
                 if restore_mode is None:
                     logger.warning(
@@ -1182,6 +1210,70 @@ async def run_scheduler() -> None:
         adjusted_watts = solar_value * period_calibration["power_multiplier"]
         kw = min(adjusted_watts / 1000.0, SOLAR_PV_KW)
         return kw * 3.0  # assume 3-hour period
+
+    def plan_evening_controlled_export(
+        *,
+        period: str,
+        soc: float | None,
+        now_utc: datetime,
+    ) -> tuple[int | None, str | None]:
+        """Return bounded evening export duration and rationale when conditions allow.
+
+        The planner is intentionally conservative: it only considers evening export,
+        enforces an SOC floor, protects expected home usage until cheap rate starts,
+        and requires minimum excess energy before enabling timed export.
+
+        Args:
+            period: Current scheduler period name.
+            soc: Current battery state-of-charge percentage.
+            now_utc: Current scheduler timestamp in UTC.
+
+        Returns:
+            Tuple of (duration_minutes, reason). Returns (None, None) when export
+            should not be started.
+        """
+        if not ENABLE_EVENING_CONTROLLED_EXPORT:
+            return None, None
+        if (period or "").upper() != "EVE":
+            return None, None
+        if soc is None:
+            return None, None
+        if soc < EVENING_EXPORT_TRIGGER_SOC_PERCENT:
+            return None, None
+
+        # Never begin controlled evening export during peak tariff hours.
+        if get_schedule_period_for_time(now_utc) == "PEAK":
+            return None, None
+
+        hours_until_cheap_rate = get_hours_until_cheap_rate(now_utc)
+        if hours_until_cheap_rate <= 0:
+            return None, None
+
+        battery_energy_kwh = BATTERY_KWH * (soc / 100.0)
+        soc_floor_kwh = BATTERY_KWH * (EVENING_EXPORT_MIN_SOC_PERCENT / 100.0)
+        expected_load_until_cheap_kwh = hours_until_cheap_rate * ESTIMATED_HOME_LOAD_KW
+        protected_kwh = max(
+            soc_floor_kwh,
+            expected_load_until_cheap_kwh + BRIDGE_BATTERY_RESERVE_KWH,
+        )
+        exportable_excess_kwh = max(0.0, battery_energy_kwh - protected_kwh)
+        if exportable_excess_kwh < EVENING_EXPORT_MIN_EXCESS_KWH:
+            return None, None
+
+        required_minutes = math.ceil(
+            (exportable_excess_kwh / EVENING_EXPORT_ASSUMED_DISCHARGE_KW) * 60
+        )
+        duration_minutes = max(
+            1,
+            min(required_minutes, EVENING_EXPORT_MAX_DURATION_MINUTES),
+        )
+        reason = (
+            "Controlled evening export: surplus battery energy available above protected "
+            f"reserve. SOC={soc:.1f}%, exportable_excess={exportable_excess_kwh:.2f} kWh, "
+            f"hours_until_cheap_rate={hours_until_cheap_rate:.2f}, "
+            f"duration={duration_minutes} minutes."
+        )
+        return duration_minutes, reason
 
     def promote_status_for_live_clipping_risk(
         period: str,
@@ -1772,6 +1864,45 @@ async def run_scheduler() -> None:
                     if use_ai_mode:
                         mode = SIGEN_MODES["AI"]
                         reason = ai_mode_reason
+
+                    evening_export_minutes, evening_export_reason = plan_evening_controlled_export(
+                        period=period,
+                        soc=soc,
+                        now_utc=now,
+                    )
+                    if evening_export_minutes is not None and evening_export_reason is not None:
+                        log_check(
+                            period,
+                            "PERIOD-START",
+                            now_utc=now,
+                            period_start_utc=period_start,
+                            solar_value=solar_value,
+                            status=decision_status,
+                            period_solar_kwh=period_solar_kwh,
+                            soc=soc,
+                            headroom_kwh=headroom_kwh,
+                            headroom_target_kwh=headroom_target_kwh,
+                            headroom_deficit_kwh=headroom_deficit,
+                            export_by_utc=period_start,
+                            mode=SIGEN_MODES["GRID_EXPORT"],
+                            reason=evening_export_reason,
+                            outcome="controlled evening timed export started",
+                        )
+                        override_started = await start_timed_grid_export(
+                            period=period,
+                            reason=evening_export_reason,
+                            duration_minutes=evening_export_minutes,
+                            now_utc=now,
+                        )
+                        if override_started:
+                            s["start_set"] = True
+                            s["pre_set"] = True
+                            continue
+                        logger.warning(
+                            "[%s] Controlled evening export was eligible but failed to start. "
+                            "Falling back to standard period-start mode.",
+                            period,
+                        )
                     
                     log_check(
                         period,

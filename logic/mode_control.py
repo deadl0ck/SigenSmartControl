@@ -14,11 +14,30 @@ from integrations.sigen_interaction import SigenInteraction
 from config.settings import (
     ENABLE_EVENING_AI_MODE_TRANSITION,
     EVENING_AI_MODE_START_HOUR,
+    SIGEN_MODE_LABEL_TO_VALUE,
 )
 from logic.schedule_utils import LOCAL_TZ
 
 logger = logging.getLogger("sigen_control")
 ACTION_DIVIDER = "=" * 100
+
+
+def _normalize_mode_label(label: str) -> str:
+    """Normalize a mode label for tolerant matching.
+
+    Args:
+        label: Raw mode label text from API or configuration.
+
+    Returns:
+        Lower-cased and whitespace-normalized label string.
+    """
+    return " ".join(label.strip().lower().split())
+
+
+_NORMALIZED_LABEL_MODE_MAP: dict[str, int] = {
+    _normalize_mode_label(label): value
+    for label, value in SIGEN_MODE_LABEL_TO_VALUE.items()
+}
 
 
 def should_use_ai_mode_for_evening(period: str, now_utc: Any) -> tuple[bool, str]:
@@ -70,6 +89,10 @@ def extract_mode_value(raw_mode: Any) -> int | None:
     if isinstance(raw_mode, str):
         if raw_mode.isdigit():
             return int(raw_mode)
+        normalized = _normalize_mode_label(raw_mode)
+        mapped = _NORMALIZED_LABEL_MODE_MAP.get(normalized)
+        if mapped is not None:
+            return mapped
         return None
     if isinstance(raw_mode, dict):
         for key in ("mode", "operationalMode", "operational_mode", "value"):
@@ -78,6 +101,18 @@ def extract_mode_value(raw_mode: Any) -> int | None:
                 return value
             if isinstance(value, str) and value.isdigit():
                 return int(value)
+            if isinstance(value, str):
+                normalized = _normalize_mode_label(value)
+                mapped = _NORMALIZED_LABEL_MODE_MAP.get(normalized)
+                if mapped is not None:
+                    return mapped
+        for key in ("label", "name"):
+            value = raw_mode.get(key)
+            if isinstance(value, str):
+                normalized = _normalize_mode_label(value)
+                mapped = _NORMALIZED_LABEL_MODE_MAP.get(normalized)
+                if mapped is not None:
+                    return mapped
     return None
 
 
