@@ -157,10 +157,17 @@ class GreenGridForecast:
                 except Exception as exc:
                     self.logger.warning(f"[GREEN-GRID] Page load warning: {exc}. Continuing anyway...")
 
-                # Wait for Shiny to initialize and form inputs to become visible (30 second timeout)
-                # The app can take time to hydrate after loading
-                self.logger.info("[GREEN-GRID] Waiting for form inputs to be ready...")
-                await page.wait_for_selector("#direction", timeout=30000, state="visible")
+                # Wait for Shiny to initialize
+                # The app uses Selectize.js which hides the native select and creates a custom widget
+                # Wait for the page body and any shiny initialization to complete
+                self.logger.info("[GREEN-GRID] Waiting for Shiny app initialization...")
+                await page.wait_for_load_state("domcontentloaded")
+                
+                # Additional wait for Selectize widgets to initialize (they can take time)
+                # Try to detect when selectize is ready by checking if the custom widget exists
+                await page.wait_for_selector(".selectize-control", timeout=30000)
+                
+                self.logger.info("[GREEN-GRID] Waiting for form inputs to be interactive...")
 
                 # Fill form fields
                 self.logger.info(
@@ -168,13 +175,16 @@ class GreenGridForecast:
                     f"pitch={roof_pitch_degrees}, panels={num_panels}"
                 )
 
-                # Set direction dropdown
-                await page.select_option("#direction", norm_direction)
-
-                # Set roof pitch
+                # Set direction dropdown (Selectize.js widget)
+                # Use JavaScript to set the value since Selectize hijacks the native select
+                await page.evaluate(f"""
+                    document.querySelector('#direction').selectize.setValue('{norm_direction}');
+                """)
+                
+                # Set roof pitch (regular input)
                 await page.fill("#roof_angle", str(roof_pitch_degrees))
 
-                # Set panel count
+                # Set panel count (regular input)
                 await page.fill("#number_panel", str(num_panels))
 
                 # Click Submit button
