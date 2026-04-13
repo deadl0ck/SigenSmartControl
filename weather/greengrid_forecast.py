@@ -150,10 +150,12 @@ class GreenGridForecast:
                 page = await browser.new_page()
 
                 self.logger.info(f"[GREEN-GRID] Loading app: {self.app_url}")
-                await page.goto(self.app_url, wait_until="networkidle")
+                await page.goto(self.app_url, wait_until="networkidle", timeout=30000)
 
-                # Wait for input form ready
-                await page.wait_for_selector("#direction", timeout=10000)
+                # Wait for Shiny to initialize and form inputs to become visible (30 second timeout)
+                # The app can take time to hydrate after loading
+                self.logger.info("[GREEN-GRID] Waiting for form inputs to be ready...")
+                await page.wait_for_selector("#direction", timeout=30000, state="visible")
 
                 # Fill form fields
                 self.logger.info(
@@ -174,10 +176,16 @@ class GreenGridForecast:
                 await page.click("#input_dataframe")
 
                 # Wait for forecast tab to become available (when calculation completes)
-                await page.wait_for_selector("#forecast_sol_table", timeout=30000)
+                # This can take a while as the app calculates the forecast
+                self.logger.info("[GREEN-GRID] Calculating forecast (this may take 20-30 seconds)...")
+                await page.wait_for_selector("#forecast_sol_table", timeout=60000)
 
-                # Click forecast tab to navigate to results
-                await page.click('a[href="#tab-7913-4"]')
+                # Click forecast tab to navigate to results (if needed)
+                try:
+                    await page.click('a[href="#tab-7913-4"]', timeout=5000)
+                except Exception:
+                    # Tab may already be active, continue anyway
+                    pass
 
                 # Extract forecast table data
                 table_rows = await page.query_selector_all(
@@ -185,6 +193,7 @@ class GreenGridForecast:
                 )
 
                 if table_rows:
+                    self.logger.info(f"[GREEN-GRID] Found {len(table_rows)} forecast rows")
                     forecast_points = []
                     for row in table_rows:
                         cells = await row.query_selector_all("td")
@@ -219,6 +228,7 @@ class GreenGridForecast:
                         self.logger.info(
                             f"[GREEN-GRID] Retrieved {len(forecast_points)} forecast points"
                         )
+                        await browser.close()
                         return forecast_data
 
                 self.logger.warning("[GREEN-GRID] No forecast table data found")
@@ -227,6 +237,7 @@ class GreenGridForecast:
 
         except Exception as exc:
             self.logger.error(f"[GREEN-GRID] Forecast retrieval failed: {exc}")
+            self.logger.debug(f"[GREEN-GRID] Exception details: {type(exc).__name__}: {exc}")
             return None
 
     def __str__(self) -> str:
