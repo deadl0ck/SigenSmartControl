@@ -672,6 +672,14 @@ Important:
 
 All files under `scripts/` are documented below.
 
+- `scripts/capture_greengrid_forecast.py`
+	- Captures a GREEN-GRID solar forecast snapshot using Playwright automation.
+	- Requires Playwright (`pip install playwright && playwright install chromium`).
+	- Solar parameters via environment variables: `GREENGRID_EIRCODE`, `GREENGRID_DIRECTION`, `GREENGRID_ROOF_PITCH_DEGREES`, `GREENGRID_NUM_PANELS`.
+	- Appends forecast to `data/greengrid_forecasts.jsonl`.
+	- Run: `export GREENGRID_EIRCODE="N91 F752" GREENGRID_DIRECTION="SE" GREENGRID_ROOF_PITCH_DEGREES="27" GREENGRID_NUM_PANELS="20" && python scripts/capture_greengrid_forecast.py`
+	- Can be scheduled daily via cron for automatic collection.
+
 - `scripts/compare_forecast_accuracy.py`
 	- Period-level accuracy analysis for ESB, Forecast.Solar, and Quartz against inverter telemetry.
 	- Reports status accuracy %, MAE, MAPE, and bias ratio; suggests Forecast.Solar multiplier.
@@ -853,27 +861,26 @@ playwright install chromium
 
 **Capturing GREEN-GRID forecasts:**
 
-The `weather/greengrid_forecast.py` module provides a `GreenGridForecast` class that automates the browser interaction to query the app:
+Use the `scripts/capture_greengrid_forecast.py` script to query the app and save the forecast:
 
-```python
-import asyncio
-from weather.greengrid_forecast import GreenGridForecast
+```sh
+# Set your installation parameters via environment variables
+export GREENGRID_EIRCODE="N91 F752"
+export GREENGRID_DIRECTION="SE"
+export GREENGRID_ROOF_PITCH_DEGREES="27"
+export GREENGRID_NUM_PANELS="20"
 
-async def main():
-    provider = GreenGridForecast()
-    forecast = await provider.fetch_forecast(
-        eircode="N91 F752",
-        direction="SE",
-        roof_pitch_degrees=27,
-        num_panels=20,
-    )
-    if forecast:
-        print(f"Total kWh forecast: {forecast['total_forecast_kwh']}")
-
-asyncio.run(main())
+# Run the capture script (takes 5-10 seconds)
+python scripts/capture_greengrid_forecast.py
 ```
 
-Forecast data is automatically appended to `data/greengrid_forecasts.jsonl` for later analysis. Each entry includes:
+The script:
+- Automates browser interaction with the Shiny app
+- Saves the forecast to `data/greengrid_forecasts.jsonl`
+- Prints status and forecast summary
+- Can be run on a manual schedule (daily, weekly, etc.)
+
+Output format in `data/greengrid_forecasts.jsonl`:
 - `captured_at`: timestamp of the forecast query
 - `forecast_points`: list of `{date, time, forecast_kwh}` hourly values
 - `total_forecast_kwh`: sum across all hours
@@ -900,12 +907,21 @@ GREEN-GRID   n= 12 status_acc= 75.0% MAE=  850W MAPE= 35.2% actual/forecast medi
 GREEN-GRID multiplier candidates: median x1.12, mean x1.15
 ```
 
+**Scheduling captures (optional):**
+
+To capture forecasts on a daily schedule, add a cron job:
+
+```bash
+# Daily at 09:00
+0 9 * * * cd /path/to/Sigen && export GREENGRID_EIRCODE="N91 F752" GREENGRID_DIRECTION="SE" GREENGRID_ROOF_PITCH_DEGREES="27" GREENGRID_NUM_PANELS="20" && /path/to/.venv/bin/python scripts/capture_greengrid_forecast.py >> /tmp/greengrid_capture.log 2>&1
+```
+
 **Notes:**
 
-- Requires an active inverter telemetry archive (`data/inverter_telemetry.jsonl`).
+- Requires an active inverter telemetry archive (`data/inverter_telemetry.jsonl`) before comparisons are meaningful.
 - Forecast resolution is 1 hour; periods are aggregated as simple averages.
 - Status accuracy reflects the Red/Amber/Green classification match.
-- If you plan to integrate GREEN-GRID as an active decision provider, capture a few weeks of forecasts first to validate local accuracy and determine if a multiplier is needed.
+- Capture a few weeks of forecasts before drawing conclusions on accuracy or needing a multiplier.
 
 ## Web Simulator
 
