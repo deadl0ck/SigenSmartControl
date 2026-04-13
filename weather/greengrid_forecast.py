@@ -233,14 +233,34 @@ class GreenGridForecast:
 
                 # Wait for forecast tab to become available (when calculation completes)
                 # This can take a while as the app calculates the forecast
-                self.logger.info("[GREEN-GRID] Calculating forecast (this may take 20-30 seconds)...")
-                await page.wait_for_selector("#forecast_sol_table", timeout=60000)
+                self.logger.info("[GREEN-GRID] Calculating forecast (this may take 20-60 seconds)...")
+                # Wait for the table to be attached (not necessarily visible - it might be in a hidden div)
+                await page.wait_for_selector("#forecast_sol_table", timeout=120000, state="attached")
+                
+                # The table exists but might still be calculating. Wait for it to stop recalculating
+                self.logger.info("[GREEN-GRID] Waiting for calculation to complete...")
+                # Poll every 2 seconds to check if recalculating class is gone
+                for attempt in range(60):  # Try for up to 2 minutes
+                    try:
+                        is_recalculating = await page.query_selector(".recalculating")
+                        if not is_recalculating:
+                            self.logger.info("[GREEN-GRID] Calculation complete")
+                            break
+                        await asyncio.sleep(2)
+                    except Exception:
+                        break
 
                 # Click forecast tab to navigate to results (if needed)
+                # The app might auto-show the forecast, so this is optional
                 try:
-                    await page.click('a[href="#tab-7913-4"]', timeout=5000)
+                    # Try to find and click a "1 Day Forecast" tab button
+                    forecast_tab = await page.query_selector('a[href="#tab-forecast"], [data-value="1_day_forecast"], .nav-link:has-text("1 Day")')
+                    if forecast_tab:
+                        await forecast_tab.click(timeout=5000)
+                        self.logger.info("[GREEN-GRID] Clicked forecast tab")
                 except Exception:
-                    # Tab may already be active, continue anyway
+                    # Tab may already be visible, continue anyway
+                    self.logger.debug("[GREEN-GRID] No forecast tab found or already visible")
                     pass
 
                 # Extract forecast table data
