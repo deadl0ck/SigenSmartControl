@@ -150,7 +150,12 @@ class GreenGridForecast:
                 page = await browser.new_page()
 
                 self.logger.info(f"[GREEN-GRID] Loading app: {self.app_url}")
-                await page.goto(self.app_url, wait_until="networkidle", timeout=30000)
+                # Use load event instead of networkidle - Shiny apps may have persistent connections
+                # that prevent networkidle. This gives the app up to 60 seconds to load
+                try:
+                    await page.goto(self.app_url, wait_until="load", timeout=60000)
+                except Exception as exc:
+                    self.logger.warning(f"[GREEN-GRID] Page load warning: {exc}. Continuing anyway...")
 
                 # Wait for Shiny to initialize and form inputs to become visible (30 second timeout)
                 # The app can take time to hydrate after loading
