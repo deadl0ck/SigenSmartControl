@@ -179,40 +179,57 @@ class GreenGridForecast:
 
                 # Set direction dropdown (Selectize.js widget)
                 # Use JavaScript to set the value since Selectize hijacks the native select
-                await page.evaluate(f"""
-                    document.querySelector('#direction').selectize.setValue('{norm_direction}');
-                """)
+                self.logger.info("[GREEN-GRID] Setting direction...")
+                try:
+                    await page.evaluate(f"""
+                        document.querySelector('#direction').selectize.setValue('{norm_direction}');
+                    """)
+                    self.logger.info(f"[GREEN-GRID] Direction set to {norm_direction}")
+                except Exception as exc:
+                    self.logger.warning(f"[GREEN-GRID] Direction setting warning: {exc}")
                 
-                # Wait for form to be ready after setting direction (it might trigger validation)
+                # Wait for form to be ready after setting direction
                 await asyncio.sleep(0.5)
                 
-                # Scroll form input into view and fill with JavaScript to avoid visibility issues
-                roof_angle_input = await page.locator("#roof_angle").element_handle()
-                if roof_angle_input:
-                    await roof_angle_input.scroll_into_view_if_needed()
+                # Set roof pitch using JavaScript (without scrolling - element may be hidden)
+                self.logger.info("[GREEN-GRID] Setting roof pitch...")
+                try:
+                    await page.evaluate(f"""
+                        var elem = document.getElementById('roof_angle');
+                        if (elem) {{
+                            elem.value = '{roof_pitch_degrees}';
+                            elem.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            elem.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                    """)
+                    self.logger.info(f"[GREEN-GRID] Roof pitch set to {roof_pitch_degrees}°")
+                except Exception as exc:
+                    self.logger.warning(f"[GREEN-GRID] Roof pitch setting warning: {exc}")
                 
-                # Use JavaScript to set value to avoid Playwright's interactive checks
-                await page.evaluate(f"""
-                    document.getElementById('roof_angle').value = '{roof_pitch_degrees}';
-                    document.getElementById('roof_angle').dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    document.getElementById('roof_angle').dispatchEvent(new Event('change', {{ bubbles: true }}));
-                """)
-                
-                # Scroll panel input into view and fill
-                panel_input = await page.locator("#number_panel").element_handle()
-                if panel_input:
-                    await panel_input.scroll_into_view_if_needed()
-                
-                await page.evaluate(f"""
-                    document.getElementById('number_panel').value = '{num_panels}';
-                    document.getElementById('number_panel').dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    document.getElementById('number_panel').dispatchEvent(new Event('change', {{ bubbles: true }}));
-                """)
+                # Set panel count using JavaScript
+                self.logger.info("[GREEN-GRID] Setting panel count...")
+                try:
+                    await page.evaluate(f"""
+                        var elem = document.getElementById('number_panel');
+                        if (elem) {{
+                            elem.value = '{num_panels}';
+                            elem.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            elem.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                    """)
+                    self.logger.info(f"[GREEN-GRID] Panel count set to {num_panels}")
+                except Exception as exc:
+                    self.logger.warning(f"[GREEN-GRID] Panel count setting warning: {exc}")
 
-# Click Submit button - use JavaScript to avoid visibility checks
-                await page.evaluate("""
-                    document.getElementById('input_dataframe').click();
-                """)
+# Click Submit button using JavaScript
+                self.logger.info("[GREEN-GRID] Submitting form...")
+                try:
+                    await page.evaluate("""
+                        var btn = document.getElementById('input_dataframe');
+                        if (btn) btn.click();
+                    """)
+                except Exception as exc:
+                    self.logger.warning(f"[GREEN-GRID] Form submit warning: {exc}")
 
                 # Wait for forecast tab to become available (when calculation completes)
                 # This can take a while as the app calculates the forecast
