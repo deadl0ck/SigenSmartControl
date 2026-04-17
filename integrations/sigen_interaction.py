@@ -82,6 +82,13 @@ class SigenInteraction:
             )
         )
 
+    @staticmethod
+    def _is_missing_data_key_error(exc: Exception) -> bool:
+        """Return True when upstream response parsing failed on missing 'data' key."""
+        if not isinstance(exc, KeyError):
+            return False
+        return any("data" in str(part).lower() for part in exc.args)
+
     async def _call_with_reauth_once(
         self,
         operation: Callable[[SigenApiProtocol], Awaitable[Any]],
@@ -180,10 +187,55 @@ class SigenInteraction:
         Returns:
             Raw energy_flow payload with PV power, battery state, exports, etc.
         """
-        return await self._call_with_reauth_once(
-            lambda client: client.get_energy_flow(),
-            "get_energy_flow",
-        )
+        operation = lambda client: client.get_energy_flow()
+        try:
+            return await self._call_with_reauth_once(operation, "get_energy_flow")
+        except KeyError as exc:
+            # Some upstream payload variants intermittently omit expected wrappers
+            # (for example, missing 'data'). Retry once before surfacing failure.
+            if not self._is_missing_data_key_error(exc):
+                raise
+            diagnostic_attrs: dict[str, str] = {}
+            for attr_name in (
+                "response",
+                "raw_response",
+                "payload",
+                "data",
+                "body",
+                "status_code",
+                "request",
+            ):
+                if hasattr(exc, attr_name):
+                    try:
+                        diagnostic_attrs[attr_name] = repr(getattr(exc, attr_name))
+                    except Exception:  # pragma: no cover - defensive logging only
+                        diagnostic_attrs[attr_name] = "<unavailable>"
+
+            logger.error(
+                "[ENERGY FLOW] First fetch failed before payload could be returned. "
+                "exc_type=%s exc_args=%s exc_details=%s",
+                type(exc).__name__,
+                exc.args,
+                diagnostic_attrs,
+                exc_info=True,
+            )
+            logger.warning(
+                "[ENERGY FLOW] Missing expected key during fetch (%s). "
+                "Retrying once.",
+                exc,
+            )
+            try:
+                return await self._call_with_reauth_once(operation, "get_energy_flow(retry)")
+            except KeyError as retry_exc:
+                if not self._is_missing_data_key_error(retry_exc):
+                    raise
+                logger.error(
+                    "[ENERGY FLOW] Retry also failed due to missing expected key (%s). "
+                    "Returning empty payload for this tick.",
+                    retry_exc,
+                    exc_info=True,
+                )
+                return {}
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
         """Get the list of supported operational modes.

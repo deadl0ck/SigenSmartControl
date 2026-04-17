@@ -85,7 +85,7 @@ def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
         enable_pre_cheap_rate_battery_bridge=True,
     )
 
-    assert mode == SIGEN_MODES["AI"]
+    assert mode == SIGEN_MODES["SELF_POWERED"]
     assert "Default mapping for Red" in reason
 
 
@@ -115,5 +115,5 @@ def test_morning_high_soc_protection_does_not_trigger_below_threshold():
         headroom_target_kwh=10.2,
     )
 
-    assert mode == SIGEN_MODES["AI"]
+    assert mode == SIGEN_MODES["SELF_POWERED"]
     assert "Default mapping for Amber" in reason

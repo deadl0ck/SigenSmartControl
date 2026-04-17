@@ -1,0 +1,241 @@
+Scenario Set,Hour,SOC,Forecast,Current Mode,Period,Schedule Period,Target Mode,Target Mode Value,Action,Reason
+1,00:00,72,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,01:00,67,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,02:00,62,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,03:00,62,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,04:00,64,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,05:00,67,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,06:00,70,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,07:00,72,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+1,08:00,80,GREEN,SELF_POWERED,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (4.80 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,09:00,88,GREEN,SELF_POWERED,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (2.88 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,10:00,92,GREEN,SELF_POWERED,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (1.92 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,11:00,98,GREEN,SELF_POWERED,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (0.48 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,12:00,98,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (0.48 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,13:00,94,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (1.44 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,14:00,90,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (2.40 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,15:00,86,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (3.36 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+1,16:00,88,AMBER,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (20.12 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+1,17:00,84,AMBER,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (19.16 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+1,18:00,80,AMBER,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (18.20 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+1,19:00,82,AMBER,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (18.68 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+1,20:00,78,AMBER,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (17.72 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+1,21:00,74,AMBER,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (16.76 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+1,22:00,74,AMBER,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (16.76 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+1,23:00,72,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,00:00,56,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,01:00,51,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,02:00,46,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,03:00,46,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,04:00,48,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,05:00,51,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,06:00,54,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,07:00,56,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+2,08:00,64,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+2,09:00,72,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+2,10:00,76,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+2,11:00,82,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+2,12:00,82,GREEN,TOU,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (4.32 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+2,13:00,78,GREEN,TOU,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (5.28 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+2,14:00,74,GREEN,TOU,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (6.24 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+2,15:00,70,GREEN,TOU,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (7.20 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+2,16:00,72,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (16.28 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+2,17:00,68,RED,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (15.32 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+2,18:00,64,RED,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (14.36 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+2,19:00,60,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (13.40 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+2,20:00,56,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (12.44 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+2,21:00,52,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (11.48 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+2,22:00,52,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (11.48 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+2,23:00,50,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+3,00:00,34,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,01:00,29,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,02:00,24,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,03:00,24,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,04:00,26,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,05:00,29,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,06:00,32,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,07:00,34,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+3,08:00,42,RED,GRID_EXPORT,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+3,09:00,50,RED,GRID_EXPORT,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+3,10:00,48,RED,GRID_EXPORT,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+3,11:00,54,RED,GRID_EXPORT,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+3,12:00,54,AMBER,GRID_EXPORT,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+3,13:00,50,AMBER,GRID_EXPORT,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+3,14:00,46,AMBER,GRID_EXPORT,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+3,15:00,42,AMBER,GRID_EXPORT,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+3,16:00,44,RED,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (9.56 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+3,17:00,40,RED,GRID_EXPORT,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (8.60 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+3,18:00,36,RED,GRID_EXPORT,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (7.64 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+3,19:00,36,RED,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (7.64 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+3,20:00,32,RED,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (6.68 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+3,21:00,28,RED,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (5.72 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+3,22:00,28,RED,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (5.72 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+3,23:00,26,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+4,00:00,48,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,01:00,43,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,02:00,38,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,03:00,38,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,04:00,40,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,05:00,43,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,06:00,46,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,07:00,48,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+4,08:00,56,RED,AI,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+4,09:00,64,RED,AI,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+4,10:00,82,RED,AI,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+4,11:00,88,RED,AI,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+4,12:00,88,AMBER,AI,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+4,13:00,84,AMBER,AI,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+4,14:00,80,AMBER,AI,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+4,15:00,76,AMBER,AI,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+4,16:00,78,GREEN,SELF_POWERED,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (5.28 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,17:00,74,GREEN,SELF_POWERED,Eve,PEAK,GRID_EXPORT,5,CHANGE_MODE,Headroom (6.24 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,18:00,70,GREEN,SELF_POWERED,Eve,PEAK,GRID_EXPORT,5,CHANGE_MODE,Headroom (7.20 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,19:00,68,GREEN,SELF_POWERED,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (7.68 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,20:00,64,GREEN,SELF_POWERED,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (8.64 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,21:00,60,GREEN,SELF_POWERED,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (9.60 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,22:00,60,GREEN,SELF_POWERED,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (9.60 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+4,23:00,58,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+5,00:00,80,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,01:00,75,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,02:00,70,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,03:00,70,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,04:00,72,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,05:00,75,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,06:00,78,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,07:00,80,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+5,08:00,88,GREEN,GRID_EXPORT,Morn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Headroom (2.88 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,09:00,96,GREEN,GRID_EXPORT,Morn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Headroom (0.96 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,10:00,94,GREEN,GRID_EXPORT,Morn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Headroom (1.44 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,11:00,100,GREEN,GRID_EXPORT,Morn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Headroom (0.00 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,12:00,100,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (100.0%) >= 92.0% and headroom (0.00 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,13:00,96,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (96.0%) >= 92.0% and headroom (0.96 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,14:00,92,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (92.0%) >= 92.0% and headroom (1.92 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+5,15:00,88,AMBER,GRID_EXPORT,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+5,16:00,90,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (20.60 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+5,17:00,86,AMBER,AI,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (19.64 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+5,18:00,82,AMBER,AI,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (18.68 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+5,19:00,86,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (19.64 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+5,20:00,82,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (18.68 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+5,21:00,78,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (17.72 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+5,22:00,78,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (17.72 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+5,23:00,76,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+6,00:00,28,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,01:00,23,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,02:00,18,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,03:00,18,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,04:00,20,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,05:00,23,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,06:00,26,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,07:00,28,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+6,08:00,36,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+6,09:00,44,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+6,10:00,56,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+6,11:00,62,AMBER,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+6,12:00,62,RED,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+6,13:00,58,RED,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+6,14:00,54,RED,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+6,15:00,50,RED,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+6,16:00,52,RED,TOU,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (11.48 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+6,17:00,48,RED,TOU,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (10.52 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+6,18:00,44,RED,TOU,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (9.56 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+6,19:00,32,RED,TOU,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (6.68 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+6,20:00,28,RED,TOU,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (5.72 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+6,21:00,24,RED,TOU,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (4.76 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+6,22:00,24,RED,TOU,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (4.76 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+6,23:00,22,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+7,00:00,58,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,01:00,56,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,02:00,54,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,03:00,52,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,04:00,50,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,05:00,48,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,06:00,46,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,07:00,44,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+7,08:00,46,AMBER,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+7,09:00,50,AMBER,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+7,10:00,54,AMBER,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+7,11:00,58,AMBER,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+7,12:00,62,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (9.12 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+7,13:00,66,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (8.16 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+7,14:00,70,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (7.20 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+7,15:00,72,GREEN,SELF_POWERED,Aftn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (6.72 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+7,16:00,70,AMBER,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (15.80 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+7,17:00,68,AMBER,GRID_EXPORT,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (15.32 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+7,18:00,66,AMBER,GRID_EXPORT,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (14.84 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+7,19:00,64,AMBER,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (14.36 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+7,20:00,62,AMBER,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (13.88 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+7,21:00,60,AMBER,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (13.40 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+7,22:00,58,AMBER,GRID_EXPORT,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (12.92 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+7,23:00,56,RED,AI,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,00:00,35,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,01:00,33,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,02:00,31,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,03:00,29,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,04:00,27,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,05:00,25,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,06:00,20,RED,GRID_EXPORT,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,07:00,15,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+8,08:00,18,RED,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+8,09:00,22,RED,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+8,10:00,28,RED,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+8,11:00,35,RED,TOU,Morn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for RED.
+8,12:00,42,AMBER,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+8,13:00,48,AMBER,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+8,14:00,52,AMBER,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+8,15:00,55,AMBER,TOU,Aftn,DAY,SELF_POWERED,0,CHANGE_MODE,Default mapping for AMBER.
+8,16:00,54,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (11.96 kWh) to cover expected load until cheap-rate starts (5.60 kWh required). Prioritizing self-powered mode.
+8,17:00,50,RED,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (11.00 kWh) to cover expected load until cheap-rate starts (4.80 kWh required). Prioritizing self-powered mode.
+8,18:00,46,RED,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (10.04 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+8,19:00,42,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (9.08 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+8,20:00,38,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (8.12 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+8,21:00,34,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (7.16 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+8,22:00,30,RED,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Evening bridge rule: battery has enough usable energy (6.20 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+8,23:00,26,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,00:00,96,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,01:00,95,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,02:00,94,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,03:00,93,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,04:00,92,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,05:00,91,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,06:00,95,RED,AI,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,07:00,92,RED,AI,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+9,08:00,90,GREEN,TOU,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (2.40 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,09:00,88,GREEN,TOU,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (2.88 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,10:00,90,GREEN,TOU,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (2.40 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,11:00,94,GREEN,TOU,Morn,DAY,GRID_EXPORT,5,CHANGE_MODE,Headroom (1.44 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,12:00,97,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (97.0%) >= 92.0% and headroom (0.72 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,13:00,99,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (99.0%) >= 92.0% and headroom (0.24 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,14:00,100,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (100.0%) >= 92.0% and headroom (0.00 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,15:00,98,AMBER,GRID_EXPORT,Aftn,DAY,GRID_EXPORT,5,KEEP_CURRENT_MODE,Afternoon high-SOC protection: SOC (98.0%) >= 92.0% and headroom (0.48 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,16:00,95,AMBER,AI,Eve,DAY,GRID_EXPORT,5,CHANGE_MODE,Evening high-SOC protection: SOC (95.0%) >= 92.0% and headroom (1.20 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,17:00,92,AMBER,AI,Eve,PEAK,GRID_EXPORT,5,CHANGE_MODE,Evening high-SOC protection: SOC (92.0%) >= 92.0% and headroom (1.92 kWh) < target (10.20 kWh). Preemptively exporting to grid.
+9,18:00,90,AMBER,AI,Eve,PEAK,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (20.60 kWh) to cover expected load until cheap-rate starts (4.00 kWh required). Prioritizing self-powered mode.
+9,19:00,88,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (20.12 kWh) to cover expected load until cheap-rate starts (3.20 kWh required). Prioritizing self-powered mode.
+9,20:00,86,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (19.64 kWh) to cover expected load until cheap-rate starts (2.40 kWh required). Prioritizing self-powered mode.
+9,21:00,84,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (19.16 kWh) to cover expected load until cheap-rate starts (1.60 kWh required). Prioritizing self-powered mode.
+9,22:00,82,AMBER,AI,Eve,DAY,SELF_POWERED,0,CHANGE_MODE,Evening bridge rule: battery has enough usable energy (18.68 kWh) to cover expected load until cheap-rate starts (0.80 kWh required). Prioritizing self-powered mode.
+9,23:00,80,RED,SELF_POWERED,NIGHT,NIGHT,TOU,2,CHANGE_MODE,Night period detected. Applying configured night mode.
+10,00:00,40,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,01:00,38,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,02:00,36,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,03:00,34,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,04:00,32,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,05:00,30,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,06:00,28,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,07:00,26,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.
+10,08:00,30,RED,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for RED.
+10,09:00,36,RED,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for RED.
+10,10:00,42,RED,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for RED.
+10,11:00,48,RED,SELF_POWERED,Morn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for RED.
+10,12:00,44,AMBER,SELF_POWERED,Aftn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+10,13:00,38,AMBER,SELF_POWERED,Aftn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+10,14:00,34,AMBER,SELF_POWERED,Aftn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+10,15:00,30,AMBER,SELF_POWERED,Aftn,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for AMBER.
+10,16:00,24,GREEN,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for GREEN.
+10,17:00,20,GREEN,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,"Default mapping for GREEN. Schedule period is Peak, so prioritizing self-powered mode to reduce grid import."
+10,18:00,16,GREEN,SELF_POWERED,Eve,PEAK,SELF_POWERED,0,KEEP_CURRENT_MODE,"Default mapping for GREEN. Schedule period is Peak, so prioritizing self-powered mode to reduce grid import."
+10,19:00,14,GREEN,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for GREEN.
+10,20:00,12,GREEN,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for GREEN.
+10,21:00,9,GREEN,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for GREEN.
+10,22:00,7,GREEN,SELF_POWERED,Eve,DAY,SELF_POWERED,0,KEEP_CURRENT_MODE,Default mapping for GREEN.
+10,23:00,12,RED,TOU,NIGHT,NIGHT,TOU,2,KEEP_CURRENT_MODE,Night period detected. Applying configured night mode.

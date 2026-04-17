@@ -8,7 +8,9 @@ grid arbitrage, and cost-minimization based on real-time conditions.
 
 import asyncio
 from collections import deque
+from html import escape
 import importlib.util
+import json
 import math
 import logging
 import os
@@ -36,6 +38,10 @@ from config.settings import (
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     NIGHT_MODE_ENABLED,
     NIGHT_SLEEP_MODE_ENABLED,
+    ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE,
+    PRE_SUNRISE_DISCHARGE_MONTHS,
+    PRE_SUNRISE_DISCHARGE_LEAD_MINUTES,
+    PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT,
     HEADROOM_TARGET_KWH,
     ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     ESTIMATED_HOME_LOAD_KW,
@@ -48,6 +54,7 @@ from config.settings import (
     DEFAULT_SIMULATED_SOC_PERCENT,
     LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
     LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW,
+    LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT,
     MAX_TIMED_EXPORT_MINUTES,
     ENABLE_EVENING_CONTROLLED_EXPORT,
     EVENING_EXPORT_MIN_SOC_PERCENT,
@@ -55,6 +62,9 @@ from config.settings import (
     EVENING_EXPORT_MIN_EXCESS_KWH,
     EVENING_EXPORT_ASSUMED_DISCHARGE_KW,
     EVENING_EXPORT_MAX_DURATION_MINUTES,
+    ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT,
+    PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT,
+    PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW,
 )
 from logic.decision_logic import (
     decide_operational_mode,
@@ -66,18 +76,19 @@ from logic.schedule_utils import (
     derive_period_windows,
     get_first_period_info,
     get_hours_until_cheap_rate,
+    is_cheap_rate_window,
+    is_pre_sunrise_discharge_window,
     get_schedule_period_for_time,
     suppress_elapsed_periods_except_latest,
     LOCAL_TZ,
 )
 from logic.mode_control import (
-    should_use_ai_mode_for_evening,
     extract_mode_value,
     mode_matches_target,
     ACTION_DIVIDER,
 )
 from weather.sunrise_sunset import get_sunrise_sunset
-from config.constants import LATITUDE, LONGITUDE
+from config.constants import LATITUDE, LONGITUDE, MODE_CHANGE_EVENTS_ARCHIVE_PATH
 from telemetry.forecast_calibration import build_and_save_forecast_calibration, get_period_calibration
 from telemetry.telemetry_archive import (
     append_inverter_telemetry_snapshot,
@@ -141,6 +152,17 @@ _EMAIL_RECEIVER_ADDRESS = os.getenv("EMAIL_RECEIVER", "").strip()
 _EMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").strip()
 _EMAIL_SENDER_INSTANCE: Any | None = None
 _EMAIL_CONFIG_LOGGED = False
+_EMAIL_MODE_LABELS = {
+    "TOU": "Time of Use",
+    "SELF_POWERED": "Self Consumption",
+    "GRID_EXPORT": "Feed to Grid",
+    "AI": "Sigen AI Mode",
+    "SIGEN_AI_MODE": "Sigen AI Mode",
+    "NORTH_BOUND": "North Bound",
+    "REMOTE_EMS_MODE": "Remote EMS Mode",
+    "CUSTOM_OPERATION_MODE": "Custom Operation Mode",
+    "MAXIMUM_SELF_CONSUMPTION": "Self Consumption",
+}
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -165,6 +187,92 @@ def _describe_payload_shape(payload: Any) -> str:
     if isinstance(payload, list):
         return f"list len={len(payload)}"
     return f"type={type(payload).__name__}"
+
+
+def _format_email_mode_label(mode_label: Any) -> str:
+    """Return a user-friendly mode label for email notifications."""
+    label = str(mode_label or "Unknown").strip()
+    if not label:
+        return "Unknown"
+    normalized = label.upper().replace(" ", "_").replace("-", "_")
+    return _EMAIL_MODE_LABELS.get(normalized, label.replace("_", " ").title())
+
+
+def _format_email_local_timestamp(event_time_utc: datetime) -> str:
+    """Return local timestamp formatted as dd-mm-yyyy HH:MM:SS."""
+    return event_time_utc.astimezone(LOCAL_TZ).strftime("%d-%m-%Y %H:%M:%S")
+
+
+def _format_email_period_label(period: str) -> str:
+    """Return a more human-readable scheduler context label for email content."""
+    label = (period or "").strip()
+    if not label:
+        return "Scheduler update"
+
+    period_name_map = {
+        "Morn": "Morning",
+        "Aftn": "Afternoon",
+        "Eve": "Evening",
+    }
+    for short_name, full_name in period_name_map.items():
+        label = label.replace(short_name, full_name)
+
+    if "->" in label:
+        from_period, to_period = [part.strip() for part in label.split("->", 1)]
+        if from_period and to_period:
+            return f"Transitioning from {from_period} to {to_period}"
+
+    return label
+
+
+def _format_email_payload(value: Any) -> str:
+    """Return a readable string form for email payload fields."""
+    if value is None:
+        return "None"
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            return json.dumps(value, indent=2, default=str)
+        except TypeError:
+            return repr(value)
+    return str(value)
+
+
+def _load_recent_transitions(since_local: datetime) -> list[dict[str, Any]]:
+    """Load mode-change events from the archive since a given local datetime.
+
+    Args:
+        since_local: Only return events at or after this local datetime.
+
+    Returns:
+        List of event dicts in chronological order.
+    """
+    path = Path(MODE_CHANGE_EVENTS_ARCHIVE_PATH)
+    if not path.exists():
+        return []
+    results: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for raw_line in fh:
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    continue
+                try:
+                    event = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                captured_at_str = event.get("captured_at")
+                if not captured_at_str:
+                    continue
+                try:
+                    captured_at = datetime.fromisoformat(captured_at_str).astimezone(LOCAL_TZ)
+                except ValueError:
+                    continue
+                if captured_at >= since_local and not event.get("simulated", False):
+                    event["_captured_local"] = captured_at
+                    results.append(event)
+    except OSError:
+        pass
+    return results
 
 
 def log_mode_status(context: str, current_mode_raw: Any, mode_names: dict[int, str]) -> None:
@@ -362,6 +470,140 @@ def _get_email_sender_instance() -> Any | None:
         return None
 
 
+def _should_archive_mode_change_events() -> bool:
+    """Return whether mode-change events should be written to the live archive.
+
+    Returns:
+        True during normal runtime. False during pytest unless explicitly enabled.
+    """
+    running_under_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
+    allow_pytest_archives = _is_truthy_env("SIGEN_ALLOW_MODE_CHANGE_ARCHIVE_IN_TESTS")
+    return not running_under_pytest or allow_pytest_archives
+
+
+async def _notify_startup_email(
+    *,
+    current_mode_raw: Any,
+    battery_soc: float | None,
+    mode_names: dict[int, str],
+    event_time_utc: datetime,
+) -> None:
+    """Send a startup email with current mode, SOC, and recent transition summary.
+
+    Args:
+        current_mode_raw: Current mode payload returned at startup.
+        battery_soc: Battery state-of-charge percentage, when available.
+        mode_names: Mapping from mode value to human-readable mode label.
+        event_time_utc: Startup timestamp in UTC.
+    """
+    sender = _get_email_sender_instance()
+    if sender is None:
+        logger.info("[EMAIL] Skipping startup notification (sender unavailable).")
+        return
+
+    current_mode_value = extract_mode_value(current_mode_raw)
+    if current_mode_value is not None:
+        current_mode_label = _format_email_mode_label(mode_names.get(current_mode_value, current_mode_value))
+    else:
+        current_mode_label = "Unknown"
+
+    local_time = _format_email_local_timestamp(event_time_utc)
+    soc_text = f"{battery_soc:.1f}%" if battery_soc is not None else "Unknown"
+    subject = f"Solar Update • Startup • {current_mode_label} • SOC {soc_text}"
+
+    now_local = event_time_utc.astimezone(LOCAL_TZ)
+    previous_2230 = (now_local - timedelta(days=1)).replace(hour=22, minute=30, second=0, microsecond=0)
+    recent_events = _load_recent_transitions(previous_2230)
+    recent_events = recent_events[-12:]
+
+    if recent_events:
+        timeline_lines = []
+        timeline_rows = ""
+        for ev in recent_events:
+            ev_local: datetime = ev["_captured_local"]
+            ev_time_str = ev_local.strftime("%H:%M")
+            ev_mode = _format_email_mode_label(ev.get("requested_mode_label", ""))
+            ev_period = _format_email_period_label(ev.get("period", ""))
+            ev_ok = "OK" if ev.get("success", True) else "FAIL"
+            timeline_lines.append(f"- {ev_time_str} | {ev_mode} | {ev_period} | {ev_ok}")
+            dot_color = "#1f6f43" if ev.get("success", True) else "#b42318"
+            timeline_rows += (
+                f'<tr>'
+                f'<td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">{escape(ev_time_str)}</td>'
+                f'<td style="padding:4px 8px;font-size:12px;font-weight:600;color:#172033;">{escape(ev_mode)}</td>'
+                f'<td style="padding:4px 0;font-size:11px;color:#5b6b82;">{escape(ev_period)}</td>'
+                f'<td style="padding:4px 0 4px 8px;font-size:11px;color:{dot_color};font-weight:700;">{ev_ok}</td>'
+                f'</tr>'
+            )
+        timeline_text = "\n".join(timeline_lines)
+        timeline_html = (
+            f'<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">'
+            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:6px;">Transitions since 10:30 PM</div>'
+            f'<table role="presentation" style="width:100%;border-collapse:collapse;">{timeline_rows}</table>'
+            f'</div>'
+        )
+    else:
+        timeline_text = "- No mode transitions recorded since 10:30 PM"
+        timeline_html = (
+            '<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;font-size:12px;color:#5b6b82;">'
+            'No mode transitions recorded since 10:30 PM.'
+            '</div>'
+        )
+
+    body = (
+        "Sigen Inverter Startup\n"
+        "=====================\n\n"
+        f"Local Time: {local_time}\n"
+        f"Current Mode: {current_mode_label}\n"
+        f"Battery SOC: {soc_text}\n\n"
+        "Transitions Since 10:30 PM\n"
+        "---------------------------\n"
+        f"{timeline_text}\n"
+    )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+    <body style="margin:0;padding:12px;background:#f4f7fb;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#172033;">
+        <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(23,32,51,0.08);">
+            <div style="padding:14px 18px;background:linear-gradient(135deg,#143a52 0%,#1e5f74 100%);color:#ffffff;">
+                <div style="font-size:11px;letter-spacing:0.10em;text-transform:uppercase;opacity:0.75;">Solar Update</div>
+                <div style="margin-top:3px;font-size:18px;font-weight:700;line-height:1.2;">System startup</div>
+                <div style="margin-top:6px;">
+                    <span style="font-size:12px;opacity:0.85;">{escape(local_time)}</span>
+                    <span style="margin-left:10px;padding:2px 9px;border-radius:999px;background:#e8f7ee;color:#1f6f43;font-size:11px;font-weight:700;">ONLINE</span>
+                </div>
+            </div>
+            <div style="padding:14px 18px;">
+                <table role="presentation" style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+                    <tr>
+                        <td style="width:50%;padding:0 6px 0 0;vertical-align:top;">
+                            <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Current Mode</div>
+                                <div style="font-size:14px;font-weight:700;color:#172033;">{escape(current_mode_label)}</div>
+                            </div>
+                        </td>
+                        <td style="width:50%;padding:0 0 0 6px;vertical-align:top;">
+                            <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Battery SOC</div>
+                                <div style="font-size:14px;font-weight:700;color:#172033;">{escape(soc_text)}</div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+                {timeline_html}
+            </div>
+        </div>
+    </body>
+</html>"""
+
+    try:
+        logger.info("[EMAIL] Sending startup notification.")
+        await asyncio.to_thread(sender.send, _EMAIL_RECEIVER_ADDRESS, subject, body, html_body)
+        logger.info("[EMAIL] Sent startup notification.")
+    except Exception as exc:
+        logger.error("[EMAIL] Failed to send startup notification: %s", exc)
+
+
 async def _notify_mode_change_email(
     *,
     success: bool,
@@ -372,6 +614,7 @@ async def _notify_mode_change_email(
     current_mode_raw: Any,
     mode_names: dict[int, str],
     event_time_utc: datetime,
+    battery_soc: float | None = None,
     response: Any | None = None,
     error: str | None = None,
 ) -> None:
@@ -386,6 +629,7 @@ async def _notify_mode_change_email(
         current_mode_raw: Current mode payload before command.
         mode_names: Mapping from mode value to label.
         event_time_utc: Timestamp for this command attempt.
+        battery_soc: Battery state of charge at the time of command, when known.
         response: Optional API response payload on success.
         error: Optional error message on failure.
     """
@@ -402,26 +646,129 @@ async def _notify_mode_change_email(
 
     current_mode_value = extract_mode_value(current_mode_raw)
     if current_mode_value is not None:
-        previous_mode_label = str(mode_names.get(current_mode_value, current_mode_value))
+        previous_mode_label = _format_email_mode_label(
+            mode_names.get(current_mode_value, current_mode_value)
+        )
         previous_mode_value = str(current_mode_value)
     else:
         previous_mode_label = "Unknown"
         previous_mode_value = str(current_mode_raw)
 
     status = "SUCCESS" if success else "FAILED"
-    local_time = event_time_utc.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
-    subject = f"[Sigen] Mode command {status}: {requested_mode_label} ({period})"
-    body = (
-        f"Mode command status: {status}\n"
-        f"Local time: {local_time}\n"
-        f"UTC time: {event_time_utc.isoformat()}\n"
-        f"Context/period: {period}\n"
-        f"Previous mode: {previous_mode_label} (raw={previous_mode_value})\n"
-        f"Requested mode: {requested_mode_label} (value={requested_mode})\n"
-        f"Reason: {reason}\n"
-        f"Error: {error if error else 'None'}\n"
-        f"Response: {response if response is not None else 'None'}\n"
+    local_time = _format_email_local_timestamp(event_time_utc)
+    requested_mode_friendly = _format_email_mode_label(requested_mode_label)
+    friendly_period = _format_email_period_label(period)
+    soc_text = f"{battery_soc:.1f}%" if battery_soc is not None else "Unknown"
+    soc_subject = f" • SOC {soc_text}" if battery_soc is not None else ""
+    subject = (
+        f"Solar Update • {status.title()} • "
+        f"{previous_mode_label} → {requested_mode_friendly} • {friendly_period}{soc_subject}"
     )
+    response_text = _format_email_payload(response)
+    error_text = error if error else "None"
+    body = (
+        "Sigen Inverter Mode Change\n"
+        "==========================\n\n"
+        f"Status: {status}\n"
+        f"Local Time: {local_time}\n"
+        f"Context / Period: {friendly_period}\n"
+        f"Battery State of Charge (SOC): {soc_text}\n\n"
+        "Mode Transition\n"
+        "---------------\n"
+        f"Previous Mode: {previous_mode_label} (raw={previous_mode_value})\n"
+        f"Requested Mode: {requested_mode_friendly} (value={requested_mode})\n\n"
+        "Decision Reason\n"
+        "---------------\n"
+        f"{reason}\n\n"
+        "Command Details\n"
+        "---------------\n"
+        f"Error: {error_text}\n"
+        f"Response: {response_text}\n"
+    )
+    status_bg = "#e8f7ee" if success else "#fdecea"
+    status_fg = "#1f6f43" if success else "#b42318"
+    status_dot = "\u25cf"
+
+    # Build the transitions-since-last-night summary.
+    now_local = event_time_utc.astimezone(LOCAL_TZ)
+    previous_2230 = (now_local - timedelta(days=1)).replace(hour=22, minute=30, second=0, microsecond=0)
+    recent_events = _load_recent_transitions(previous_2230)
+    if recent_events:
+        timeline_rows = ""
+        for ev in recent_events:
+            ev_local: datetime = ev["_captured_local"]
+            ev_time_str = ev_local.strftime("%H:%M")
+            ev_mode = _format_email_mode_label(ev.get("requested_mode_label", ""))
+            ev_period = _format_email_period_label(ev.get("period", ""))
+            ev_ok = ev.get("success", True)
+            ev_dot_color = "#1f6f43" if ev_ok else "#b42318"
+            ev_sim = ev.get("simulated", False)
+            sim_tag = ' <span style="opacity:0.55;font-size:10px;">(sim)</span>' if ev_sim else ""
+            timeline_rows += (
+                f'<tr>'
+                f'<td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">'
+                f'{escape(ev_time_str)}</td>'
+                f'<td style="padding:4px 8px;font-size:12px;font-weight:600;color:#172033;">{escape(ev_mode)}{sim_tag}</td>'
+                f'<td style="padding:4px 0;font-size:11px;color:#5b6b82;">{escape(ev_period)}</td>'
+                f'<td style="padding:4px 0 4px 8px;font-size:14px;color:{ev_dot_color};">&#9679;</td>'
+                f'</tr>'
+            )
+        timeline_section = (
+            f'<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">'
+            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:6px;">'
+            f'Transitions since 10:30 PM</div>'
+            f'<table role="presentation" style="width:100%;border-collapse:collapse;">{timeline_rows}</table>'
+            f'</div>'
+        )
+    else:
+        timeline_section = ""
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+    <body style="margin:0;padding:12px;background:#f4f7fb;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#172033;">
+        <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(23,32,51,0.08);">
+            <div style="padding:14px 18px;background:linear-gradient(135deg,#143a52 0%,#1e5f74 100%);color:#ffffff;">
+                <div style="font-size:11px;letter-spacing:0.10em;text-transform:uppercase;opacity:0.75;">Solar Update</div>
+                <div style="margin-top:3px;font-size:18px;font-weight:700;line-height:1.2;">{escape(previous_mode_label)} &#8594; {escape(requested_mode_friendly)}</div>
+                <div style="margin-top:6px;">
+                    <span style="font-size:12px;opacity:0.85;">{escape(friendly_period)}</span>
+                    <span style="margin-left:10px;padding:2px 9px;border-radius:999px;background:{status_bg};color:{status_fg};font-size:11px;font-weight:700;">{escape(status)}</span>
+                </div>
+            </div>
+            <div style="padding:14px 18px;">
+                <table role="presentation" style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+                    <tr>
+                        <td style="width:50%;padding:0 6px 0 0;vertical-align:top;">
+                            <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Time</div>
+                                <div style="font-size:14px;font-weight:700;color:#172033;">{escape(local_time)}</div>
+                            </div>
+                        </td>
+                        <td style="width:50%;padding:0 0 0 6px;vertical-align:top;">
+                            <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Battery SOC</div>
+                                <div style="font-size:14px;font-weight:700;color:#172033;">{escape(soc_text)}</div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+                <div style="margin-bottom:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;font-size:13px;line-height:1.5;color:#26354d;">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:4px;">Reason</div>
+                    {escape(reason)}
+                </div>
+                <details style="margin-bottom:0;">
+                    <summary style="cursor:pointer;font-size:12px;color:#5b6b82;padding:6px 0;">Command details</summary>
+                    <div style="margin-top:8px;padding:10px 12px;background:#0f172a;border-radius:10px;color:#e5eef8;font-size:12px;">
+                        <div style="margin-bottom:6px;"><strong style="color:#ffffff;">Error:</strong> {escape(error_text)}</div>
+                        <div><strong style="color:#ffffff;">Response:</strong></div>
+                        <pre style="margin:6px 0 0 0;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.4;color:#d6e3f3;">{escape(response_text)}</pre>
+                    </div>
+                </details>
+                {timeline_section}
+            </div>
+        </div>
+    </body>
+</html>"""
 
     try:
         logger.info(
@@ -431,20 +778,29 @@ async def _notify_mode_change_email(
             requested_mode_label,
             requested_mode,
         )
-        await asyncio.to_thread(sender.send, _EMAIL_RECEIVER_ADDRESS, subject, body)
+        await asyncio.to_thread(sender.send, _EMAIL_RECEIVER_ADDRESS, subject, body, html_body)
         logger.info("[EMAIL] Sent mode-change notification for %s.", period)
     except Exception as exc:
         logger.error("[EMAIL] Failed to send mode-change notification: %s", exc)
 
-async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[int, str]) -> None:
-    """Log all retrievable inverter startup data.
-    
+async def log_current_mode_on_startup(
+    sigen: SigenInteraction,
+    mode_names: dict[int, str],
+) -> tuple[Any, float | None]:
+    """Log retrievable startup data and return current mode/SOC snapshot.
+
     Args:
         sigen: SigenInteraction instance for API calls.
         mode_names: Mapping from numeric mode to human-readable label.
+
+    Returns:
+        Tuple of (current_mode_raw, battery_soc).
     """
     logger.info(ACTION_DIVIDER)
     logger.info("STARTUP CHECK: fetching retrievable inverter data")
+
+    current_mode_raw: Any = None
+    battery_soc: float | None = None
 
     try:
         current_mode_raw = await sigen.get_operational_mode()
@@ -454,6 +810,10 @@ async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[
 
     try:
         energy_flow = await sigen.get_energy_flow()
+        if isinstance(energy_flow, dict):
+            soc_value = energy_flow.get("batterySoc")
+            if isinstance(soc_value, (int, float)):
+                battery_soc = float(soc_value)
         log_payload_tree("Startup energy flow payload", energy_flow)
     except Exception as e:
         logger.error("Failed to fetch energy flow payload on startup: %s", e)
@@ -468,6 +828,7 @@ async def log_current_mode_on_startup(sigen: SigenInteraction, mode_names: dict[
         logger.error("Failed to fetch supported operational modes on startup: %s", e)
 
     logger.info(ACTION_DIVIDER)
+    return current_mode_raw, battery_soc
 
 
 async def apply_mode_change(
@@ -478,6 +839,7 @@ async def apply_mode_change(
     reason: str,
     mode_names: dict[int, str],
     export_duration_minutes: int | None = None,
+    battery_soc: float | None = None,
 ) -> bool:
     """Attempt to change the inverter operational mode with idempotency checks.
     
@@ -491,6 +853,7 @@ async def apply_mode_change(
         reason: Explanation of why this mode change is being made.
         mode_names: Mapping from numeric mode to human-readable label.
         export_duration_minutes: Optional override window when forcing GRID_EXPORT.
+        battery_soc: Battery state of charge at the time of the command, when known.
         
     Returns:
         True if mode was set or already at target, False if set operation failed.
@@ -514,17 +877,18 @@ async def apply_mode_change(
             logger.info("[SIMULATION] Context=%s | reason=%s", period, reason)
             logger.info(ACTION_DIVIDER)
             logger.info(ACTION_DIVIDER)
-            append_mode_change_event(
-                scheduler_now_utc=event_time,
-                period=period,
-                requested_mode=mode,
-                requested_mode_label=str(mode_label),
-                reason=reason,
-                simulated=True,
-                success=True,
-                current_mode=None,
-                response=simulated_response,
-            )
+            if _should_archive_mode_change_events():
+                append_mode_change_event(
+                    scheduler_now_utc=event_time,
+                    period=period,
+                    requested_mode=mode,
+                    requested_mode_label=str(mode_label),
+                    reason=reason,
+                    simulated=True,
+                    success=True,
+                    current_mode=None,
+                    response=simulated_response,
+                )
             await _notify_mode_change_email(
                 success=True,
                 period=period,
@@ -534,6 +898,7 @@ async def apply_mode_change(
                 current_mode_raw=None,
                 mode_names=mode_names,
                 event_time_utc=event_time,
+                battery_soc=battery_soc,
                 response=simulated_response,
             )
             return True
@@ -572,17 +937,18 @@ async def apply_mode_change(
         else:
             response = await sigen.set_operational_mode(mode)
         logger.info(f"Set mode response for {period}: {response}")
-        append_mode_change_event(
-            scheduler_now_utc=event_time,
-            period=period,
-            requested_mode=mode,
-            requested_mode_label=str(mode_label),
-            reason=reason,
-            simulated=FULL_SIMULATION_MODE,
-            success=True,
-            current_mode=current_mode_raw,
-            response=response,
-        )
+        if _should_archive_mode_change_events():
+            append_mode_change_event(
+                scheduler_now_utc=event_time,
+                period=period,
+                requested_mode=mode,
+                requested_mode_label=str(mode_label),
+                reason=reason,
+                simulated=FULL_SIMULATION_MODE,
+                success=True,
+                current_mode=current_mode_raw,
+                response=response,
+            )
         logger.info(
             "[EMAIL] Queueing mode-change notification: status=SUCCESS period=%s target=%s(%s) "
             "simulated=%s",
@@ -600,22 +966,24 @@ async def apply_mode_change(
             current_mode_raw=current_mode_raw,
             mode_names=mode_names,
             event_time_utc=event_time,
+            battery_soc=battery_soc,
             response=response,
         )
         return True
     except Exception as e:
         logger.error(f"Failed to set mode for {period}: {e}")
-        append_mode_change_event(
-            scheduler_now_utc=event_time,
-            period=period,
-            requested_mode=mode,
-            requested_mode_label=str(mode_label),
-            reason=reason,
-            simulated=FULL_SIMULATION_MODE,
-            success=False,
-            current_mode=current_mode_raw,
-            error=str(e),
-        )
+        if _should_archive_mode_change_events():
+            append_mode_change_event(
+                scheduler_now_utc=event_time,
+                period=period,
+                requested_mode=mode,
+                requested_mode_label=str(mode_label),
+                reason=reason,
+                simulated=FULL_SIMULATION_MODE,
+                success=False,
+                current_mode=current_mode_raw,
+                error=str(e),
+            )
         logger.info(
             "[EMAIL] Queueing mode-change notification: status=FAILED period=%s target=%s(%s) "
             "simulated=%s",
@@ -633,6 +1001,7 @@ async def apply_mode_change(
             current_mode_raw=current_mode_raw,
             mode_names=mode_names,
             event_time_utc=event_time,
+            battery_soc=battery_soc,
             error=str(e),
         )
         return False
@@ -669,7 +1038,13 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                 "[SCHEDULER] Inverter interaction created successfully: %s",
                 type(sigen).__name__,
             )
-            await log_current_mode_on_startup(sigen, mode_names)
+            startup_mode_raw, startup_soc = await log_current_mode_on_startup(sigen, mode_names)
+            await _notify_startup_email(
+                current_mode_raw=startup_mode_raw,
+                battery_soc=startup_soc,
+                mode_names=mode_names,
+                event_time_utc=datetime.now(timezone.utc),
+            )
             return sigen
         except Exception as e:
             logger.warning(
@@ -780,7 +1155,7 @@ async def run_scheduler() -> None:
     # day_state[period] = {"pre_set": bool, "start_set": bool}
     day_state: dict[str, dict[str, bool]] = {}
     night_state: dict[str, Any] = {
-        "mode_set_for": None,
+        "mode_set_key": None,
         "sleep_snapshot_for_date": None,
     }
     sleep_override_seconds: int | None = None
@@ -797,6 +1172,9 @@ async def run_scheduler() -> None:
         "restore_mode_label": None,
         "trigger_period": None,
         "duration_minutes": None,
+        "is_clipping_export": False,
+        "clipping_soc_floor": None,
+        "export_soc_floor": None,
     }
     live_solar_kw_samples: deque[float] = deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)
     tick_mode_change_attempts = 0
@@ -820,6 +1198,8 @@ async def run_scheduler() -> None:
         reason: str,
         duration_minutes: int,
         now_utc: datetime,
+        is_clipping_export: bool = False,
+        export_soc_floor: float | None = None,
     ) -> bool:
         """Switch to GRID_EXPORT for a bounded duration, then restore prior mode later.
 
@@ -828,6 +1208,8 @@ async def run_scheduler() -> None:
             reason: Decision explanation for audit logs.
             duration_minutes: Requested export duration in minutes.
             now_utc: Current scheduler timestamp in UTC.
+            is_clipping_export: If True, apply SOC floor check during export window.
+            export_soc_floor: Optional SOC floor that triggers early restore.
 
         Returns:
             True when timed export is activated, False otherwise.
@@ -914,6 +1296,9 @@ async def run_scheduler() -> None:
             "restore_mode_label": restore_label,
             "trigger_period": period,
             "duration_minutes": clamped_minutes,
+            "is_clipping_export": is_clipping_export,
+            "clipping_soc_floor": LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT if is_clipping_export else None,
+            "export_soc_floor": export_soc_floor,
         }
         return True
 
@@ -931,6 +1316,94 @@ async def run_scheduler() -> None:
             return False
 
         restore_at = timed_export_override["restore_at"]
+        is_clipping = timed_export_override.get("is_clipping_export", False)
+        clipping_soc_floor = timed_export_override.get("clipping_soc_floor")
+        export_soc_floor = timed_export_override.get("export_soc_floor")
+        
+        if export_soc_floor is not None:
+            current_soc = await fetch_soc("timed-export-soc-check")
+            if current_soc is not None and current_soc <= export_soc_floor:
+                restore_mode = timed_export_override["restore_mode"]
+                restore_label = timed_export_override["restore_mode_label"]
+                trigger_period = timed_export_override["trigger_period"]
+                if restore_mode is not None:
+                    logger.info(ACTION_DIVIDER)
+                    logger.info(
+                        "[TIMED EXPORT] Export SOC floor reached (%.1f%% <= %.1f%%). Restoring %s early.",
+                        current_soc,
+                        export_soc_floor,
+                        restore_label,
+                    )
+                    logger.info(ACTION_DIVIDER)
+                    restore_ok = await _apply_mode_change_tracked(
+                        sigen=sigen,
+                        mode=restore_mode,
+                        period=f"{trigger_period} (timed-export-soc-floor)",
+                        reason=(
+                            f"Timed export SOC floor reached at {current_soc:.1f}%. "
+                            f"Restoring {restore_label}."
+                        ),
+                        mode_names=mode_names,
+                        battery_soc=current_soc,
+                    )
+                    if restore_ok:
+                        timed_export_override = {
+                            "active": False,
+                            "started_at": None,
+                            "restore_at": None,
+                            "restore_mode": None,
+                            "restore_mode_label": None,
+                            "trigger_period": None,
+                            "duration_minutes": None,
+                            "is_clipping_export": False,
+                            "clipping_soc_floor": None,
+                            "export_soc_floor": None,
+                        }
+                        return False
+
+        # Check if clipping export has hit SOC floor early
+        if is_clipping and clipping_soc_floor is not None:
+            current_soc = await fetch_soc("clipping-soc-check")
+            if current_soc is not None and current_soc <= clipping_soc_floor:
+                restore_mode = timed_export_override["restore_mode"]
+                restore_label = timed_export_override["restore_mode_label"]
+                trigger_period = timed_export_override["trigger_period"]
+                if restore_mode is not None:
+                    logger.info(ACTION_DIVIDER)
+                    logger.info(
+                        "[TIMED EXPORT] Clipping export SOC floor reached (%.1f%% <= %.1f%%). "
+                        "Restoring %s early.",
+                        current_soc,
+                        clipping_soc_floor,
+                        restore_label,
+                    )
+                    logger.info(ACTION_DIVIDER)
+                    restore_ok = await _apply_mode_change_tracked(
+                        sigen=sigen,
+                        mode=restore_mode,
+                        period=f"{trigger_period} (clipping-export-soc-floor)",
+                        reason=(
+                            f"Clipping export SOC floor reached at {current_soc:.1f}%. "
+                            f"Restoring {restore_label}."
+                        ),
+                        mode_names=mode_names,
+                        battery_soc=current_soc,
+                    )
+                    if restore_ok:
+                        timed_export_override = {
+                            "active": False,
+                            "started_at": None,
+                            "restore_at": None,
+                            "restore_mode": None,
+                            "restore_mode_label": None,
+                            "trigger_period": None,
+                            "duration_minutes": None,
+                            "is_clipping_export": False,
+                            "clipping_soc_floor": None,
+                            "export_soc_floor": None,
+                        }
+                        return False
+        
         if restore_at is None:
             logger.warning("[TIMED EXPORT] Override state missing restore_at; clearing state.")
             timed_export_override = {
@@ -941,6 +1414,9 @@ async def run_scheduler() -> None:
                 "restore_mode_label": None,
                 "trigger_period": None,
                 "duration_minutes": None,
+                "is_clipping_export": False,
+                "clipping_soc_floor": None,
+                "export_soc_floor": None,
             }
             return False
 
@@ -965,6 +1441,9 @@ async def run_scheduler() -> None:
                 "restore_mode_label": None,
                 "trigger_period": None,
                 "duration_minutes": None,
+                "is_clipping_export": False,
+                "clipping_soc_floor": None,
+                "export_soc_floor": None,
             }
             return False
 
@@ -998,6 +1477,9 @@ async def run_scheduler() -> None:
                 "restore_mode_label": None,
                 "trigger_period": None,
                 "duration_minutes": None,
+                "is_clipping_export": False,
+                "clipping_soc_floor": None,
+                "export_soc_floor": None,
             }
             return False
 
@@ -1065,10 +1547,10 @@ async def run_scheduler() -> None:
             logger.info(f"[SCHEDULER] Tomorrow period '{period}' starts at {start.isoformat()} UTC")
 
         if reset_day_state:
-            day_state = {p: {"pre_set": False, "start_set": False} for p in daytime_periods}
+            day_state = {p: {"pre_set": False, "start_set": False, "clipping_export_set": False} for p in daytime_periods}
         else:
             for period in daytime_periods:
-                day_state.setdefault(period, {"pre_set": False, "start_set": False})
+                day_state.setdefault(period, {"pre_set": False, "start_set": False, "clipping_export_set": False})
 
         last_forecast_refresh_utc = datetime.now(timezone.utc)
 
@@ -1093,6 +1575,15 @@ async def run_scheduler() -> None:
             return soc
         except Exception as e:
             logger.error(f"[{period}] Failed to fetch SOC: {e}")
+            try:
+                raw = await sigen.get_energy_flow()
+                logger.error(
+                    "\033[91m[%s] Raw energy_flow response for diagnosis: %s\033[0m",
+                    period,
+                    raw,
+                )
+            except Exception as e2:
+                logger.error(f"[{period}] Could not re-fetch energy_flow for diagnosis: {e2}")
             return None
 
     async def archive_inverter_telemetry(reason: str, now_utc: datetime) -> None:
@@ -1275,6 +1766,53 @@ async def run_scheduler() -> None:
         )
         return duration_minutes, reason
 
+    def plan_pre_cheap_rate_night_export(
+        *,
+        soc: float | None,
+        now_utc: datetime,
+    ) -> tuple[int | None, str | None]:
+        """Plan sunset-to-cheap-rate export duration bounded by SOC floor and time.
+
+        Args:
+            soc: Current battery SOC percentage.
+            now_utc: Current scheduler timestamp in UTC.
+
+        Returns:
+            Tuple of (duration_minutes, reason) when export should begin, else (None, None).
+        """
+        if not ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT:
+            return None, None
+        if soc is None:
+            return None, None
+        if soc <= PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:
+            return None, None
+
+        hours_until_cheap_rate = get_hours_until_cheap_rate(now_utc)
+        if hours_until_cheap_rate <= 0:
+            return None, None
+
+        energy_above_floor_kwh = BATTERY_KWH * (
+            (soc - PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT) / 100.0
+        )
+        if energy_above_floor_kwh <= 0:
+            return None, None
+
+        minutes_to_soc_floor = math.ceil(
+            (energy_above_floor_kwh / PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW) * 60
+        )
+        minutes_to_cheap_rate = max(1, int(hours_until_cheap_rate * 60))
+        duration_minutes = max(
+            1,
+            min(minutes_to_soc_floor, minutes_to_cheap_rate, MAX_TIMED_EXPORT_MINUTES),
+        )
+
+        reason = (
+            "Pre-cheap-rate export strategy: discharge battery for arbitrage until "
+            f"SOC floor {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}% or cheap-rate "
+            f"window opens. SOC={soc:.1f}%, duration={duration_minutes} minutes."
+        )
+        return duration_minutes, reason
+
     def promote_status_for_live_clipping_risk(
         period: str,
         status: str,
@@ -1315,9 +1853,9 @@ async def run_scheduler() -> None:
             return status, None
 
         reason = (
-            "Live clipping-risk override: promoting AMBER to GREEN because "
+            "\033[93mLive clipping-risk override: promoting AMBER to GREEN because "
             f"SOC={soc:.1f}% and avg live solar={avg_live_solar_kw:.2f} kW is near "
-            f"or above configured trigger ({trigger_kw:.1f} kW)."
+            f"or above configured trigger ({trigger_kw:.1f} kW).\033[0m"
         )
         return "Green", reason
 
@@ -1599,8 +2137,11 @@ async def run_scheduler() -> None:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
             continue
 
-        if night_state["mode_set_for"] is not None and night_state["mode_set_for"] < today:
-            night_state["mode_set_for"] = None
+        if (
+            night_state["mode_set_key"] is not None
+            and night_state["mode_set_key"][0] < today
+        ):
+            night_state["mode_set_key"] = None
 
         night_context = get_active_night_context(now)
         if NIGHT_MODE_ENABLED and night_context is not None:
@@ -1611,9 +2152,64 @@ async def run_scheduler() -> None:
             )
             night_headroom_target_kwh = HEADROOM_TARGET_KWH
             night_mode = PERIOD_TO_MODE["NIGHT"]
-            night_mode_reason = "Night window active. Forcing AI mode overnight."
+            night_mode_reason = "Night window active. Applying configured night mode."
 
-            if night_state["mode_set_for"] != night_context["target_date"]:
+            if (
+                night_context["window_name"] == "PRE-DAWN"
+                and is_pre_sunrise_discharge_window(
+                    now,
+                    night_context["target_start"],
+                    enabled=ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE,
+                    months_csv=PRE_SUNRISE_DISCHARGE_MONTHS,
+                    lead_minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES,
+                )
+            ):
+                soc = await fetch_soc(night_period_name)
+                if soc is not None and soc >= PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:
+                    night_mode = SIGEN_MODES["SELF_POWERED"]
+                    night_mode_reason = (
+                        "Summer pre-sunrise discharge window active. Switching to "
+                        "self-powered mode to create battery headroom before morning solar."
+                    )
+                else:
+                    night_mode_reason = (
+                        "Summer pre-sunrise discharge window active, but SOC is below "
+                        f"minimum threshold {PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:.1f}%. "
+                        "Keeping configured night mode instead of discharging."
+                    )
+
+            if night_context["window_name"] == "EVENING-NIGHT":
+                hours_until_cheap_rate = get_hours_until_cheap_rate(now)
+                if hours_until_cheap_rate > 0:
+                    soc = await fetch_soc(night_period_name)
+                    export_minutes, export_reason = plan_pre_cheap_rate_night_export(
+                        soc=soc,
+                        now_utc=now,
+                    )
+                    if export_minutes is not None and export_reason is not None:
+                        started = await start_timed_grid_export(
+                            period=night_period_name,
+                            reason=export_reason,
+                            duration_minutes=export_minutes,
+                            now_utc=now,
+                            export_soc_floor=PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT,
+                        )
+                        if started:
+                            continue
+                    night_mode = SIGEN_MODES["SELF_POWERED"]
+                    if soc is not None and soc <= PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:
+                        night_mode_reason = (
+                            "Pre-cheap-rate export floor reached. Switching to self-powered "
+                            f"at SOC floor {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}%."
+                        )
+                    else:
+                        night_mode_reason = (
+                            "Pre-cheap-rate window active. Holding self-powered mode until "
+                            "cheap-rate window opens."
+                        )
+
+            mode_set_key = (night_context["target_date"], night_mode)
+            if night_state["mode_set_key"] != mode_set_key:
                 log_check(
                     night_period_name,
                     "NIGHT-BASE",
@@ -1641,17 +2237,40 @@ async def run_scheduler() -> None:
                         period=night_period_name,
                         reason=night_mode_reason,
                         mode_names=mode_names,
+                        battery_soc=soc,
                     )
                     if ok:
-                        night_state["mode_set_for"] = night_context["target_date"]
+                        night_state["mode_set_key"] = mode_set_key
                 except Exception as e:
                     logger.error(f"[{night_period_name}] Unexpected error applying base night mode: {e}")
 
             if NIGHT_SLEEP_MODE_ENABLED:
                 pre_window_opens_at = night_context["target_start"] - MAX_PRE_PERIOD_WINDOW
+                wake_at = pre_window_opens_at
 
-                if now < pre_window_opens_at:
-                    sleep_seconds = max(1, int((pre_window_opens_at - now).total_seconds()))
+                if night_context["window_name"] == "EVENING-NIGHT":
+                    cheap_rate_start_local = now.astimezone(LOCAL_TZ).replace(
+                        hour=CHEAP_RATE_START_HOUR,
+                        minute=0,
+                        second=0,
+                        microsecond=0,
+                    )
+                    if now.astimezone(LOCAL_TZ) >= cheap_rate_start_local:
+                        cheap_rate_start_local = cheap_rate_start_local + timedelta(days=1)
+                    cheap_rate_start_utc = cheap_rate_start_local.astimezone(timezone.utc)
+                    wake_at = min(wake_at, cheap_rate_start_utc)
+
+                if (
+                    night_context["window_name"] == "PRE-DAWN"
+                    and ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE
+                ):
+                    pre_sunrise_wake_at = night_context["target_start"] - timedelta(
+                        minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES
+                    )
+                    wake_at = min(wake_at, pre_sunrise_wake_at)
+
+                if now < wake_at:
+                    sleep_seconds = max(1, int((wake_at - now).total_seconds()))
                     if sleep_seconds > POLL_INTERVAL_SECONDS:
                         local_date = now.astimezone(LOCAL_TZ).date()
                         if (
@@ -1669,8 +2288,8 @@ async def run_scheduler() -> None:
                             "[SCHEDULER] Night sleep mode active. Sleeping for %s minutes "
                             "until %s (%s).",
                             sleep_seconds // 60,
-                            pre_window_opens_at.isoformat(),
-                            "morning pre-period window",
+                            wake_at.isoformat(),
+                            "next critical night milestone",
                         )
 
         for period, period_start in today_period_windows.items():
@@ -1678,6 +2297,80 @@ async def run_scheduler() -> None:
             solar_value, status = today_period_forecast[period]
             period_solar_kwh = estimate_solar(period, solar_value)
             period_calibration = get_period_calibration(forecast_calibration, period)
+
+            # --- Mid-period live clipping export check ---
+            # When the period is already active but the forecast was Amber, check whether
+            # live conditions (high SOC + strong solar) warrant an immediate export to
+            # create headroom now rather than waiting for the next pre-period window.
+            if (
+                s["start_set"]
+                and not s["clipping_export_set"]
+                and not timed_export_override["active"]
+                and now >= period_start
+                and is_live_clipping_period_enabled(period)
+            ):
+                soc = await fetch_soc(period)
+                solar_avg_kw_3 = get_live_solar_average_kw()
+                decision_status, status_override_reason = promote_status_for_live_clipping_risk(
+                    period, status, soc, solar_avg_kw_3
+                )
+                if decision_status != status and soc is not None:
+                    headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
+                    headroom_target_kwh = HEADROOM_TARGET_KWH
+                    headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
+                    mode, reason = decide_operational_mode(
+                        period=period,
+                        status=decision_status,
+                        soc=soc,
+                        headroom_kwh=headroom_kwh,
+                        period_solar_kwh=period_solar_kwh,
+                        schedule_period=get_schedule_period_for_time(now),
+                        headroom_target_kwh=HEADROOM_TARGET_KWH,
+                        battery_kwh=BATTERY_KWH,
+                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
+                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+                    )
+                    if status_override_reason is not None:
+                        reason = f"{status_override_reason} {reason}"
+                    if mode == SIGEN_MODES["GRID_EXPORT"] and headroom_deficit > 0:
+                        # Estimate export duration: time to clear headroom deficit at effective rate,
+                        # bounded by time remaining until period end or MAX_TIMED_EXPORT_MINUTES.
+                        effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
+                        duration_minutes = math.ceil(
+                            (headroom_deficit / effective_battery_export_kw) * 60
+                        )
+                        log_check(
+                            period,
+                            "MID-PERIOD-CLIPPING",
+                            now_utc=now,
+                            period_start_utc=period_start,
+                            solar_value=solar_value,
+                            status=decision_status,
+                            period_solar_kwh=period_solar_kwh,
+                            soc=soc,
+                            headroom_kwh=headroom_kwh,
+                            headroom_target_kwh=headroom_target_kwh,
+                            headroom_deficit_kwh=headroom_deficit,
+                            export_by_utc=now,
+                            solar_avg_kw_3=solar_avg_kw_3,
+                            effective_battery_export_kw=effective_battery_export_kw,
+                            mode=mode,
+                            reason=reason,
+                            outcome="mid-period clipping export triggered",
+                        )
+                        override_started = await start_timed_grid_export(
+                            period=period,
+                            reason=reason,
+                            duration_minutes=duration_minutes,
+                            now_utc=now,
+                            is_clipping_export=True,
+                        )
+                        if override_started:
+                            s["clipping_export_set"] = True
+                            continue
+                    s["clipping_export_set"] = True
 
             # --- Pre-period export check ---
             # Active when within MAX_PRE_PERIOD_WINDOW of the period start.
@@ -1859,12 +2552,6 @@ async def run_scheduler() -> None:
                     if status_override_reason is not None:
                         reason = f"{status_override_reason} {reason}"
                     
-                    # Check if Evening period should use AI Mode for profit-max arbitrage
-                    use_ai_mode, ai_mode_reason = should_use_ai_mode_for_evening(period, now)
-                    if use_ai_mode:
-                        mode = SIGEN_MODES["AI"]
-                        reason = ai_mode_reason
-
                     evening_export_minutes, evening_export_reason = plan_evening_controlled_export(
                         period=period,
                         soc=soc,
@@ -1903,6 +2590,54 @@ async def run_scheduler() -> None:
                             "Falling back to standard period-start mode.",
                             period,
                         )
+
+                    if mode == SIGEN_MODES["GRID_EXPORT"]:
+                        effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
+                        duration_minutes = max(
+                            1,
+                            math.ceil((headroom_deficit / effective_battery_export_kw) * 60),
+                        )
+                        is_clipping_export = (
+                            (status or "").upper() == "AMBER"
+                            and (decision_status or "").upper() == "GREEN"
+                        )
+                        log_check(
+                            period,
+                            "PERIOD-START",
+                            now_utc=now,
+                            period_start_utc=period_start,
+                            solar_value=solar_value,
+                            status=decision_status,
+                            period_solar_kwh=period_solar_kwh,
+                            soc=soc,
+                            headroom_kwh=headroom_kwh,
+                            headroom_target_kwh=headroom_target_kwh,
+                            headroom_deficit_kwh=headroom_deficit,
+                            export_by_utc=period_start,
+                            solar_avg_kw_3=solar_avg_kw_3,
+                            effective_battery_export_kw=effective_battery_export_kw,
+                            mode=mode,
+                            reason=reason,
+                            outcome="period-start timed export started",
+                        )
+                        override_started = await start_timed_grid_export(
+                            period=period,
+                            reason=reason,
+                            duration_minutes=duration_minutes,
+                            now_utc=now,
+                            is_clipping_export=is_clipping_export,
+                        )
+                        if override_started:
+                            s["start_set"] = True
+                            s["pre_set"] = True
+                            continue
+
+                        logger.warning(
+                            "[%s] Period-start GRID_EXPORT decision could not start timed export. "
+                            "Skipping direct mode set to avoid unbounded export and retrying next tick.",
+                            period,
+                        )
+                        continue
                     
                     log_check(
                         period,
@@ -1921,16 +2656,26 @@ async def run_scheduler() -> None:
                         reason=reason,
                         outcome="period start mode applied",
                     )
-                    ok = await _apply_mode_change_tracked(
-                        sigen=sigen,
-                        mode=mode,
-                        period=f"{period} (period-start)",
-                        reason=reason,
-                        mode_names=mode_names,
-                    )
-                    if ok:
+                    if is_cheap_rate_window(now):
+                        logger.info(
+                            "[%s] Skipping period-start mode override — cheap-rate window active. "
+                            "Night branch owns mode during 23:00–08:00.",
+                            period,
+                        )
                         s["start_set"] = True
-                        s["pre_set"] = True  # Suppress further pre-period checks.
+                        s["pre_set"] = True
+                    else:
+                        ok = await _apply_mode_change_tracked(
+                            sigen=sigen,
+                            mode=mode,
+                            period=f"{period} (period-start)",
+                            reason=reason,
+                            mode_names=mode_names,
+                            battery_soc=soc,
+                        )
+                        if ok:
+                            s["start_set"] = True
+                            s["pre_set"] = True  # Suppress further pre-period checks.
 
         logger.info(
             "[SCHEDULER] Tick mode-change summary: attempted=%s successful=%s failed=%s",

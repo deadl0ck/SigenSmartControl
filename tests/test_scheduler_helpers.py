@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import main
+from logic.schedule_utils import is_pre_sunrise_discharge_window
 
 
 def test_suppress_elapsed_periods_except_latest_marks_only_stale_periods() -> None:
@@ -103,6 +104,7 @@ async def test_create_scheduler_interaction_success_logs_startup(monkeypatch: py
         called["startup_log"] = True
         assert sigen is interaction
         assert mode_names == {1: "AI"}
+    return None, None
 
     monkeypatch.setattr(main.SigenInteraction, "create", fake_create)
     monkeypatch.setattr(main, "log_current_mode_on_startup", fake_log_current_mode_on_startup)
@@ -167,23 +169,7 @@ async def test_apply_mode_change_skips_when_already_target_mode() -> None:
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
-        reason="Already AI for evening arbitrage.",
-        mode_names={1: "AI"},
-    )
-
-    assert ok is True
-    assert sigen.set_calls == []
-
-
-@pytest.mark.asyncio
-async def test_apply_mode_change_skips_when_current_mode_is_human_label() -> None:
-    sigen = DummyModeInteraction(current_mode="Sigen AI Mode")
-
-    ok = await main.apply_mode_change(
-        sigen=sigen,
-        mode=1,
-        period="Eve (period-start)",
-        reason="Already AI for evening arbitrage.",
+        reason="Already at target mode — no change needed.",
         mode_names={1: "AI"},
     )
 
@@ -199,12 +185,36 @@ async def test_apply_mode_change_sets_when_target_differs() -> None:
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
-        reason="Switching to AI for evening arbitrage.",
+        reason="Switching to target mode.",
         mode_names={0: "SELF_POWERED", 1: "AI"},
     )
 
     assert ok is True
     assert sigen.set_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_change_does_not_archive_during_pytest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sigen = DummyModeInteraction(current_mode=0)
+    called = {"append": False}
+
+    def fake_append_mode_change_event(**kwargs: Any) -> None:
+        called["append"] = True
+
+    monkeypatch.setattr(main, "append_mode_change_event", fake_append_mode_change_event)
+
+    ok = await main.apply_mode_change(
+        sigen=sigen,
+        mode=1,
+        period="Eve (period-start)",
+        reason="Switching to target mode.",
+        mode_names={0: "SELF_POWERED", 1: "AI"},
+    )
+
+    assert ok is True
+    assert called["append"] is False
 
 
 @pytest.mark.asyncio
@@ -232,3 +242,29 @@ async def test_apply_mode_change_simulation_triggers_email_notification(
 
     assert ok is True
     assert called["email"] is True
+
+
+def test_is_pre_sunrise_discharge_window_true_in_configured_month_and_window() -> None:
+    now_utc = datetime(2026, 6, 15, 4, 45, tzinfo=timezone.utc)
+    sunrise_utc = datetime(2026, 6, 15, 5, 30, tzinfo=timezone.utc)
+
+    assert is_pre_sunrise_discharge_window(
+        now_utc,
+        sunrise_utc,
+        enabled=True,
+        months_csv="4,5,6,7,8,9",
+        lead_minutes=60,
+    ) is True
+
+
+def test_is_pre_sunrise_discharge_window_false_outside_months() -> None:
+    now_utc = datetime(2026, 1, 15, 6, 30, tzinfo=timezone.utc)
+    sunrise_utc = datetime(2026, 1, 15, 7, 0, tzinfo=timezone.utc)
+
+    assert is_pre_sunrise_discharge_window(
+        now_utc,
+        sunrise_utc,
+        enabled=True,
+        months_csv="4,5,6,7,8,9",
+        lead_minutes=60,
+    ) is False

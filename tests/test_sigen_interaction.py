@@ -37,6 +37,21 @@ class FlakyAuthClient(DummyClient):
         raise RuntimeError(self.error_message)
 
 
+class MissingDataKeyClient(DummyClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def get_energy_flow(self):
+        self.calls += 1
+        raise KeyError("data")
+
+
+class MissingOtherKeyClient(DummyClient):
+    async def get_energy_flow(self):
+        raise KeyError("results")
+
+
 @pytest.mark.asyncio
 async def test_sigen_interaction_from_client_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     # Patch FULL_SIMULATION_MODE to False to test pass-through behavior
@@ -149,3 +164,20 @@ async def test_sigen_interaction_reauth_failure_propagates(
 
     assert first_client.calls == 1
     assert second_client.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_sigen_interaction_energy_flow_missing_data_returns_empty_payload() -> None:
+    interaction = SigenInteraction.from_client(MissingDataKeyClient())
+
+    result = await interaction.get_energy_flow()
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_sigen_interaction_energy_flow_non_data_keyerror_propagates() -> None:
+    interaction = SigenInteraction.from_client(MissingOtherKeyClient())
+
+    with pytest.raises(KeyError, match="results"):
+        await interaction.get_energy_flow()

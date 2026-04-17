@@ -53,7 +53,7 @@ MIN_EFFECTIVE_BATTERY_EXPORT_KW = 0.2
 DEFAULT_SIMULATED_SOC_PERCENT = 80.0
 # Full simulation mode: reads data and logs intended actions but never sends
 # inverter mode-change commands.
-FULL_SIMULATION_MODE = True
+FULL_SIMULATION_MODE = False
 # Maximum allowed duration for timed grid export override (minutes) — prevents accidental
 # over-discharge or excessive grid arbitrage cycles.
 MAX_TIMED_EXPORT_MINUTES = 240
@@ -63,6 +63,19 @@ MAX_TIMED_EXPORT_MINUTES = 240
 NIGHT_MODE_ENABLED = True
 # Whether scheduler should sleep through inactive night periods instead of polling every tick.
 NIGHT_SLEEP_MODE_ENABLED = True
+# Summer pre-sunrise discharge behavior.
+# When enabled, the scheduler can switch from night charging mode to self-powered
+# shortly before sunrise in selected months to create battery headroom for morning solar.
+ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE = True
+# Comma-separated local month numbers where pre-sunrise discharge is allowed.
+# Example: "4,5,6,7,8,9" for Apr-Sep.
+PRE_SUNRISE_DISCHARGE_MONTHS = "4,5,6,7,8,9"
+# Minutes before sunrise to begin pre-sunrise discharge in enabled months.
+PRE_SUNRISE_DISCHARGE_LEAD_MINUTES = 120
+# Minimum SOC required before pre-sunrise discharge is allowed to switch away
+# from night charging behavior. Below this threshold, the scheduler keeps the
+# configured night mode instead of discharging into the morning.
+PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT = 65.0
 # Local timezone used for schedule windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
 
@@ -173,6 +186,13 @@ ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 # Safety reserve kept in battery when evaluating bridge-to-cheap-rate sufficiency.
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
+# Pre-cheap-rate night export: discharge battery toward a SOC floor before the cheap-rate
+# window opens, so the battery has room to charge on cheap-rate electricity.
+ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
+# SOC floor below which no further pre-cheap-rate export is triggered.
+PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
+# Conservative assumed net battery discharge power used to size the export window.
+PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
 # High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
@@ -185,18 +205,14 @@ MORNING_HIGH_SOC_THRESHOLD_PERCENT = 92.0
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 # SOC threshold for live clipping-risk Amber→Green promotion.
 # Lowered to trigger protective export before the battery is almost full.
-LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 85.0
+LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 70.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
 # Lowered so underforecast high-irradiance ramps are caught earlier.
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
-# Enable AI Mode transition for evening periods approaching cheap-rate window.
-# When enabled, the Evening period will switch to AI Mode (with profit-max configured
-# in mySigen app) to allow automatic battery arbitrage: discharge at day/peak rates,
-# then recharge at cheap night rates.
-ENABLE_EVENING_AI_MODE_TRANSITION = True
-# Hour (local time) after which Evening period should use AI Mode for profit-max optimization.
-# E.g., if set to 17, Evening mode will switch to AI after 17:00 (5 PM).
-EVENING_AI_MODE_START_HOUR = 17
+# SOC floor for mid-period clipping export: if timed export started by clipping-risk
+# promotion drops SOC to this floor, cancel the export and restore prior mode.
+# Set to 5% below the promotion threshold to avoid yo-yo behavior.
+LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT = 65.0
 # Controlled evening export settings.
 # Enables bounded battery export in evening to create headroom, while preserving
 # enough energy to avoid avoidable grid import before cheap-rate charging.
@@ -255,10 +271,10 @@ SIGEN_MODE_LABEL_TO_VALUE = {
 FORECAST_TO_MODE = {
     # Green: Good solar forecast, maximize self-consumption
     "GREEN": SIGEN_MODES["SELF_POWERED"],
-    # Amber: Moderate solar, let AI optimize
-    "AMBER": SIGEN_MODES["AI"],
-    # Red: Poor solar, let AI handle low-generation periods
-    "RED": SIGEN_MODES["AI"],
+    # Amber: Moderate solar, stay in deterministic self-consumption mode
+    "AMBER": SIGEN_MODES["SELF_POWERED"],
+    # Red: Poor solar, stay in deterministic self-consumption mode
+    "RED": SIGEN_MODES["SELF_POWERED"],
 }
 
 # ==============================
@@ -266,10 +282,10 @@ FORECAST_TO_MODE = {
 # ==============================
 # Map schedule period (NIGHT/DAY/PEAK) to Sigen operational mode.
 PERIOD_TO_MODE = {
-    # Night: cheap-rate window behavior (set to AI since no TOU profiles are defined)
-    "NIGHT": SIGEN_MODES["AI"],
-    # Day: normal solar hours, let AI or self-powered logic decide
-    "DAY": SIGEN_MODES["AI"],
+    # Night: cheap-rate window behavior (charge-oriented when TOU charge windows are configured)
+    "NIGHT": SIGEN_MODES["TOU"],
+    # Day: deterministic self-consumption behavior
+    "DAY": SIGEN_MODES["SELF_POWERED"],
     # Peak: high-demand hours, maximize self-consumption
     "PEAK": SIGEN_MODES["SELF_POWERED"],
 }

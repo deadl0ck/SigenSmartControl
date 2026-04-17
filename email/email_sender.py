@@ -23,13 +23,20 @@ class EmailSender:
         self.sender_gmail = sender_gmail
         self.password = gmail_app_password
 
-    def send(self, receiver_email: str, subject: str, text: str):
+    def send(
+        self,
+        receiver_email: str,
+        subject: str,
+        text: str,
+        html: str | None = None,
+    ):
         """Send an email message.
 
         Args:
             receiver_email: Destination email address.
             subject: Message subject.
             text: Plain-text body.
+            html: Optional HTML body. When provided, sent as a multipart alternative.
 
         Raises:
             RuntimeError: If all SMTP connection strategies fail.
@@ -43,6 +50,8 @@ class EmailSender:
         msg["To"] = receiver_email
         msg["Subject"] = subject
         msg.set_content(text)
+        if html:
+            msg.add_alternative(html, subtype="html")
 
         errors: list[str] = []
 

@@ -194,3 +194,64 @@ def suppress_elapsed_periods_except_latest(
         state["start_set"] = True
         suppressed_periods.append(period)
     return suppressed_periods
+
+
+def parse_month_list(months_csv: str) -> set[int]:
+    """Parse comma-separated month numbers and return valid month values.
+
+    Args:
+        months_csv: Comma-separated month numbers (1-12), e.g. ``"4,5,6,7,8,9"``.
+
+    Returns:
+        Set of valid month integers. Invalid tokens are ignored.
+    """
+    valid_months: set[int] = set()
+    for token in (months_csv or "").split(","):
+        value = token.strip()
+        if not value:
+            continue
+        if not value.isdigit():
+            continue
+        month = int(value)
+        if 1 <= month <= 12:
+            valid_months.add(month)
+    return valid_months
+
+
+def is_pre_sunrise_discharge_window(
+    now_utc: datetime,
+    sunrise_utc: datetime,
+    *,
+    enabled: bool,
+    months_csv: str,
+    lead_minutes: int,
+) -> bool:
+    """Return whether pre-sunrise discharge should be active for current time.
+
+    Args:
+        now_utc: Current scheduler time in UTC.
+        sunrise_utc: Target sunrise time in UTC.
+        enabled: Feature flag controlling whether this behavior is active.
+        months_csv: Comma-separated local months where discharge is allowed.
+        lead_minutes: Minutes before sunrise to begin discharge.
+
+    Returns:
+        True when now is in the configured pre-sunrise lead window for an enabled
+        month, otherwise False.
+    """
+    if not enabled or lead_minutes <= 0:
+        return False
+
+    active_months = parse_month_list(months_csv)
+    if not active_months:
+        return False
+
+    local_now = now_utc.astimezone(LOCAL_TZ)
+    if local_now.month not in active_months:
+        return False
+
+    seconds_until_sunrise = (sunrise_utc - now_utc).total_seconds()
+    if seconds_until_sunrise <= 0:
+        return False
+
+    return seconds_until_sunrise <= lead_minutes * 60

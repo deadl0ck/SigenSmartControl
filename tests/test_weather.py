@@ -74,8 +74,8 @@ def test_mode_mapping():
     logger.info(f"[TEST] FORECAST_TO_MODE: {FORECAST_TO_MODE}")
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
     for status, expected_mode in [("GREEN", SIGEN_MODES["SELF_POWERED"]),
-                                  ("AMBER", SIGEN_MODES["AI"]),
-                                  ("RED", SIGEN_MODES["AI"])]:
+                                  ("AMBER", SIGEN_MODES["SELF_POWERED"]),
+                                  ("RED", SIGEN_MODES["SELF_POWERED"])]:
         mode = FORECAST_TO_MODE[status]
         logger.info(f"[TEST] Forecast {status} maps to mode {mode} ({mode_names.get(mode, 'UNKNOWN')}), expected {expected_mode} ({mode_names.get(expected_mode, 'UNKNOWN')})")
         assert mode == expected_mode

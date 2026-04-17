@@ -15,7 +15,8 @@
 11. [Forecast Accuracy Report](#forecast-accuracy-report)
 12. [Web Simulator](#web-simulator)
 13. [Tests](#tests)
-14. [Notes](#notes)
+14. [Recent Updates](#recent-updates)
+15. [Notes](#notes)
 
 ## Overview
 
@@ -143,8 +144,9 @@ MORNING_HIGH_SOC_THRESHOLD_PERCENT = 95.0
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 90.0
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.0
-ENABLE_EVENING_AI_MODE_TRANSITION = True
-EVENING_AI_MODE_START_HOUR = 17
+ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE = True
+PRE_SUNRISE_DISCHARGE_MONTHS = "4,5,6,7,8,9"
+PRE_SUNRISE_DISCHARGE_LEAD_MINUTES = 90
 ```
 
 Meaning:
@@ -182,8 +184,9 @@ Meaning:
 - `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Only applies to the intra-tick live solar check.
 - `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
 - `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
-- `ENABLE_EVENING_AI_MODE_TRANSITION`: when enabled, Evening period-start decisions can switch to AI mode so mySigen profit-max handles export/recharge optimization
-- `EVENING_AI_MODE_START_HOUR`: local hour after which Evening can transition to AI mode
+- `ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`: enables optional pre-sunrise discharge window in selected months
+- `PRE_SUNRISE_DISCHARGE_MONTHS`: local months where pre-sunrise discharge can run (for example Apr-Sep)
+- `PRE_SUNRISE_DISCHARGE_LEAD_MINUTES`: minutes before sunrise where night mode can switch to self-powered to create headroom
 
 ### Tariff schedule windows
 
@@ -194,7 +197,7 @@ The tariff time windows in `config/settings.py` define when each tariff period i
 - `19:00-23:00`: Day period (evening)
 - `23:00-08:00`: Night / cheap-rate window
 
-The scheduler uses these windows to determine whether to use self-powered, TOU, or AI modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions purely on forecast quality and tariff period, not on cost arithmetic.
+The scheduler uses these windows to determine whether to use self-powered or TOU modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions from forecast quality, SOC/headroom, and tariff period.
 
 ### Forecast providers (ESB primary, Forecast.Solar backup, Quartz fallback)
 
@@ -263,9 +266,9 @@ The easiest way to read this is:
 Current defaults in this project:
 
 - Green -> `SELF_POWERED`
-- Amber -> `AI`
-- Red -> `AI`
-- Night tariff -> `AI`
+- Amber -> `SELF_POWERED`
+- Red -> `SELF_POWERED`
+- Night tariff -> `TOU`
 - Peak tariff -> `SELF_POWERED`
 
 Mode descriptions:
@@ -292,8 +295,8 @@ If period is Evening and battery can safely cover expected household demand unti
 If export is not needed and tariff is Peak, use `SELF_POWERED`.
 4. Default mapping last:
 If neither of the above applies, use `FORECAST_TO_MODE` (Green/Amber/Red).
-5. Evening AI transition at period-start (optional final override):
-If `ENABLE_EVENING_AI_MODE_TRANSITION` is enabled and local time is after `EVENING_AI_MODE_START_HOUR`, set `AI` for Evening so mySigen profit-max can run arbitrage.
+5. Controlled evening export at period-start (optional final override):
+If evening SOC is high enough and protected-load criteria are met, start a bounded timed `GRID_EXPORT` window; otherwise keep the standard mode.
 
 ### Plain “if/then” version
 
@@ -303,19 +306,19 @@ For daytime periods, read it like this:
 2. Else if period is Evening and battery can cover expected load until cheap-rate starts -> `SELF_POWERED`.
 3. Else if tariff is Peak -> `SELF_POWERED`.
 4. Else -> use forecast mapping (Green/Amber/Red).
-5. At Evening period-start, if Evening AI transition is enabled and local time is past the configured threshold -> force `AI`.
+5. At Evening period-start, if controlled export thresholds are met -> run bounded timed `GRID_EXPORT`, then restore.
 
 For night:
 
 1. Apply `PERIOD_TO_MODE["NIGHT"]` throughout the active night window.
-2. Keep night behavior simple and deterministic (AI-only in the default config).
+2. In configured summer months, optionally switch to `SELF_POWERED` for a short pre-sunrise lead window to create morning headroom.
 
 ### Quick examples
 
 - Green + headroom < 10.2 kWh -> `GRID_EXPORT` (insufficient space for incoming solar).
 - Green + headroom >= 10.2 kWh -> Follow forecast mode (battery can absorb the solar).
 - Amber + Peak tariff -> `SELF_POWERED` (peak override wins).
-- Red + normal Day tariff -> `AI` (default forecast mapping).
+- Red + normal Day tariff -> `SELF_POWERED` (default forecast mapping).
 
 ## How It Works
 
@@ -471,71 +474,26 @@ The scheduler now has an explicit night window.
 - Before the first daytime period starts, the system treats that as a pre-dawn night window.
 - After sunset, the system treats that as the evening/night window for the upcoming day.
 
-During the active night window it can do two separate things:
+During the active night window it can do three separate things:
 
 1. Apply the configured night mode (`PERIOD_TO_MODE["NIGHT"]`).
-2. Optionally sleep between checks to reduce polling until the morning pre-period window opens.
+2. In configured summer months, switch to self-powered shortly before sunrise to allow controlled pre-sunrise discharge.
+3. Optionally sleep between checks to reduce polling until the morning pre-period window opens.
 
 For example, with cheap rates from 11pm to 8am:
 
 - after sunset and before the first daytime period, the scheduler holds the configured night mode
 - if night sleep mode is enabled, it can sleep and wake near the morning pre-period window
 
-### AI Mode profit-max and arbitrage (battery sell-discharge-recharge)
+### Controlled evening export and cheap-rate recharge
 
-When using **Sigen AI Mode** with **profit-max** enabled in the mySigen app, the system can optimize battery charging by performing energy arbitrage: selling excess battery at higher rates and then recharging from the grid at cheap-rate times.
+The default strategy is now scheduler-driven and deterministic (no forced AI transition):
 
-#### How it works
-
-The arbitrage opportunity exists when:
-
-- **Sell rate** (18.5 c/kWh during day/peak) is higher than **night charge rate** (13.462 c/kWh)
-- Battery is at high SOC as evening approaches
-- Cheap-rate window (23:00-08:00) is approaching
-
-AI mode with profit-max will:
-
-1. **Discharge excess battery before cheap rates** (typically around 17:00-23:00) into `GRID_EXPORT` mode at day/peak rates (18.5-32.6 c/kWh)
-2. **Recharge from grid during cheap window** (23:00-08:00) at night rates (13.462 c/kWh)
-3. *Net gain*: ~5 c/kWh per cycle ((18.5 - 13.462) × kWh discharged → recharged)
-
-#### Configuration requirements
-
-For AI Mode profit-max to work correctly, you must:
-
-1. **Set tariffs in mySigen app**: Configure day, peak, night, and sell rates in the device settings
-2. **Enable profit-max mode**: In mySigen app settings, activate "Profit Max" or "Export Optimization" mode
-3. **Set sell rate in config/settings.py**: Document the sell rate for reference and simulation
-4. **Verify discharge cut-off SOC**: Ensure the discharge cut-off in mySigen app is low enough (typically 10-20%) to allow significant discharge before cheap rates start
-
-#### Why this scheduler uses TOU → AI transition at night
-
-This scheduler can be tuned to:
-
-- Run the day in forecast-based modes (Green/Amber/Red)
-- Switch to **AI Mode** as evening approaches
-- Let AI mode handle the sell-discharge-recharge optimization automatically
-
-This approach:
-
-- Avoids hard-coded discharge logic in the Python scheduler
-- Leverages Sigen's native profit-max optimization
-- Simplifies debugging: all tariff/export behavior is centralized on the device
-- Remains flexible: profit-max parameters can be tuned in mySigen without code changes
-
-#### Why AI is preferred for Evening in this project
-
-Evening can still have usable solar, but it is usually less predictable and lower than daytime production. Near cheap-rate start, the larger economic lever is often battery state rather than late-day solar capture.
-
-With your tariff setup (`sell = 18.5 c/kWh`, `night = 13.462 c/kWh`), the arbitrage spread is positive. Because of that, the default preference is to let AI profit-max decide whether to discharge/export before cheap rates and then refill overnight.
-
-In practical terms:
-
-- if evening solar is still worthwhile, AI can still choose self-use/export behavior dynamically
-- if SOC is high before cheap-rate, AI can create battery headroom by discharging/exporting
-- during cheap-rate hours, AI can recharge at lower unit cost
-
-That is why the scheduler supports an Evening AI transition instead of hard-coding one fixed Evening policy for all days.
+1. Run daytime in self-powered unless export protection rules trigger.
+2. During evening, keep self-powered where battery can bridge expected load.
+3. If SOC is high after peak and protected-load criteria are met, start a bounded timed `GRID_EXPORT` window.
+4. During cheap-rate night window, apply `PERIOD_TO_MODE["NIGHT"]` (default `TOU`) so configured cheap-rate charging can refill battery.
+5. In configured summer months, switch to self-powered shortly before sunrise to create space for morning PV capture.
 
 ### Full simulation mode (dry run)
 
@@ -884,6 +842,19 @@ Coverage run:
 ```sh
 python -m pytest -q --cov=. --cov-report=term-missing
 ```
+
+## Recent Updates
+
+- Added compact HTML email notifications for mode changes with clearer subject lines,
+	readable period labels, and SOC in both subject/body.
+- Added startup notification email summarizing current mode, SOC, and transitions
+	since 10:30 PM the previous night.
+- Added timeline filtering so notification summaries exclude simulated/test events.
+- Prevented pytest runs from polluting the live `data/mode_change_events.jsonl`
+	archive. Test-only event archiving can be explicitly re-enabled with
+	`SIGEN_ALLOW_MODE_CHANGE_ARCHIVE_IN_TESTS=true` when needed.
+- Removed deprecated evening AI transition helper code that was no longer used
+	by the scheduler runtime.
 
 ## Notes
 

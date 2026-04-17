@@ -61,7 +61,7 @@ async def test_control_loop():
     mode_names = {v: k for k, v in SIGEN_MODES.items()}
     for period, (solar_value, status) in period_forecast.items():
         status_key = status.upper()
-        mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["AI"])
+        mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["SELF_POWERED"])
         logger.info(f"[TEST] Period: {period}, Solar Value: {solar_value}, Status: {status}")
         logger.info(f"[TEST] Selected mode for {period}: {mode} ({mode_names.get(mode, 'UNKNOWN')})")
         resp = await sigen.set_operational_mode(mode)
@@ -72,8 +72,8 @@ async def test_control_loop():
     logger.info(f"[TEST] set_modes called: {sigen.set_modes}")
     assert sigen.set_modes == [
         SIGEN_MODES["SELF_POWERED"],
-        SIGEN_MODES["AI"],
-        SIGEN_MODES["AI"],
+        SIGEN_MODES["SELF_POWERED"],
+        SIGEN_MODES["SELF_POWERED"],
     ]
     logger.info("[RESULT] test_control_loop: PASSED - Control loop selected correct modes for each period and called set_operational_mode as expected.")
     logger.info(f"[TEST] Control loop assertions passed.")

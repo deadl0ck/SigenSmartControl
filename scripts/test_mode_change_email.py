@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default="Manual test of mode-change email notification path.",
         help="Reason text to include in the test notification.",
     )
+    parser.add_argument(
+        "--soc",
+        type=float,
+        default=78.0,
+        help="Battery SOC percentage to include in the test notification.",
+    )
     return parser.parse_args()
 
 
@@ -57,13 +63,14 @@ def validate_email_env() -> tuple[bool, list[str]]:
     return len(missing) == 0, missing
 
 
-async def run_test(mode: int, period: str, reason: str) -> bool:
+async def run_test(mode: int, period: str, reason: str, soc: float) -> bool:
     """Run a simulated mode-change call that should trigger an email.
 
     Args:
         mode: Mode value to pass to apply_mode_change.
         period: Context/period label for notification content.
         reason: Decision reason text for notification content.
+        soc: Battery SOC percentage for notification content.
 
     Returns:
         True when simulated apply_mode_change completed successfully.
@@ -80,6 +87,7 @@ async def run_test(mode: int, period: str, reason: str) -> bool:
             period=period,
             reason=reason,
             mode_names=mode_names,
+            battery_soc=soc,
         )
     finally:
         main.FULL_SIMULATION_MODE = previous_full_sim
@@ -94,7 +102,7 @@ def main_cli() -> None:
         print("Please set them in .env and retry.")
         raise SystemExit(1)
 
-    ok = asyncio.run(run_test(args.mode, args.period, args.reason))
+    ok = asyncio.run(run_test(args.mode, args.period, args.reason, args.soc))
     if ok:
         print("Test mode-change command recorded and notification send attempted.")
         print("Check logs and your inbox for the notification email.")

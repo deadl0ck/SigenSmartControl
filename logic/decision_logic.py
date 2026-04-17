@@ -8,7 +8,7 @@ Implements a hierarchical decision tree:
 1. Headroom-based export rule (battery space below physics-derived target)
 2. Night period detection
 3. Evening battery bridge rule (prevent premature charging)
-4. Forecast-to-mode mapping with tariff overrides
+4. Forecast-to-mode mapping with deterministic fallback and tariff overrides
 5. Peak tariff self-powered override
 """
 
@@ -93,7 +93,7 @@ def decide_operational_mode(
     2. Daytime high-SOC protection for Amber/Green morning and afternoon periods
     3. Use tariff mode if night period
     4. Evening bridge: use self-powered if battery can cover load until cheap rate
-    5. Map forecast status to default mode (Green→self-powered, Amber→AI, Red→TOU)
+    5. Map forecast status to default mode (deterministic, no AI fallback)
     6. Peak tariff override: prioritize self-powered during expensive hours
     
     Args:
@@ -180,7 +180,7 @@ def decide_operational_mode(
             )
             return mode, reason
 
-    mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["AI"])
+    mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["SELF_POWERED"])
     reason = f"Default mapping for {status}."
 
     # During expensive peak tariff windows, prioritize self-powered operation
