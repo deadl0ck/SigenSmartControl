@@ -13,7 +13,6 @@ from typing import Any
 from config.settings import (
     SIGEN_MODE_LABEL_TO_VALUE,
 )
-from logic.schedule_utils import LOCAL_TZ
 
 logger = logging.getLogger("sigen_control")
 ACTION_DIVIDER = "=" * 100

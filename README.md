@@ -849,10 +849,19 @@ python -m pytest -q --cov=. --cov-report=term-missing
 	readable period labels, and SOC in both subject/body.
 - Added startup notification email summarizing current mode, SOC, and transitions
 	since 10:30 PM the previous night.
+- Added current-day solar production to startup and mode-change emails when the
+	inverter telemetry exposes `pvDayNrg`.
 - Added timeline filtering so notification summaries exclude simulated/test events.
 - Prevented pytest runs from polluting the live `data/mode_change_events.jsonl`
 	archive. Test-only event archiving can be explicitly re-enabled with
 	`SIGEN_ALLOW_MODE_CHANGE_ARCHIVE_IN_TESTS=true` when needed.
+- Hardened daytime scheduler transitions so only the latest already-elapsed
+	period can still run its period-start action after a delayed startup or
+	refresh.
+- Fixed mid-period clipping export selection so a finished period cannot remain
+	active after the next daytime period has started.
+- Persisted active timed export override state to `data/timed_export_state.json`
+	so an in-flight export/restore window survives process restarts.
 - Removed deprecated evening AI transition helper code that was no longer used
 	by the scheduler runtime.
 

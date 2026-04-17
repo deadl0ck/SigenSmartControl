@@ -210,6 +210,36 @@ def extract_live_solar_power_kw(energy_flow: dict[str, Any]) -> float | None:
     return _normalize_power_to_kw(solar_metric[1])
 
 
+def extract_today_solar_generation_kwh(energy_flow: dict[str, Any]) -> float | None:
+    """Extract today's cumulative solar generation from raw inverter telemetry.
+
+    Args:
+        energy_flow: Raw `get_energy_flow()` payload from the inverter API.
+
+    Returns:
+        Solar generation for the current day in kWh when available, otherwise None.
+    """
+    day_generation_metric = _extract_numeric_metric(
+        energy_flow,
+        (
+            "pvDayNrg",
+            "pvDayEnergy",
+            "dayPvEnergy",
+            "todayPvEnergy",
+            "todaySolarEnergy",
+            "solarDayNrg",
+        ),
+    )
+    if day_generation_metric is None:
+        return None
+
+    value = float(day_generation_metric[1])
+    # Some payloads report day energy in Wh; normalize large values to kWh.
+    if value > 1000:
+        value = value / 1000.0
+    return value
+
+
 def _json_safe(value: Any) -> Any:
     """Convert values into a JSON-safe structure.
 

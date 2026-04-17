@@ -190,9 +190,11 @@ def suppress_elapsed_periods_except_latest(
         state = day_state.get(period)
         if state is None:
             continue
+        already_suppressed = state.get("pre_set") and state.get("start_set")
         state["pre_set"] = True
         state["start_set"] = True
-        suppressed_periods.append(period)
+        if not already_suppressed:
+            suppressed_periods.append(period)
     return suppressed_periods
 
 

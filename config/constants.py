@@ -162,6 +162,12 @@ MODE_CHANGE_EVENTS_ARCHIVE_PATH: Final[str] = os.getenv(
     "data/mode_change_events.jsonl",
 ).strip()
 
+# Local state file for active timed export override persistence across restarts.
+TIMED_EXPORT_STATE_PATH: Final[str] = os.getenv(
+    "TIMED_EXPORT_STATE_PATH",
+    "data/timed_export_state.json",
+).strip()
+
 # Local artifact storing bounded daily forecast calibration derived from telemetry.
 FORECAST_CALIBRATION_PATH: Final[str] = os.getenv(
     "FORECAST_CALIBRATION_PATH",

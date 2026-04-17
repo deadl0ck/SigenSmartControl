@@ -94,15 +94,6 @@ class _BaseSolarForecast:
         return day[:3].capitalize()
 
     @staticmethod
-    def _status_from_value(value: int) -> str:
-        """Convert synthetic/forecast watts to Red/Amber/Green status."""
-        if value < 200:
-            return "Red"
-        if value <= 400:
-            return "Amber"
-        return "Green"
-
-    @staticmethod
     def _value_from_status(status: str) -> int:
         """Map status to synthetic watts for downstream headroom calculations."""
         normalized = status.strip().capitalize()

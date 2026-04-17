@@ -52,6 +52,104 @@ def test_suppress_elapsed_periods_except_latest_noop_when_single_or_none_elapsed
     assert all(not state["pre_set"] and not state["start_set"] for state in day_state.values())
 
 
+def test_suppress_elapsed_periods_except_latest_is_idempotent() -> None:
+    now = datetime(2026, 4, 2, 18, 0, tzinfo=timezone.utc)
+    period_windows = {
+        "Morn": now - timedelta(hours=9),
+        "Aftn": now - timedelta(hours=5),
+        "Eve": now - timedelta(hours=1),
+    }
+    day_state = {
+        "Morn": {"pre_set": False, "start_set": False},
+        "Aftn": {"pre_set": False, "start_set": False},
+        "Eve": {"pre_set": False, "start_set": False},
+    }
+
+    first = main.suppress_elapsed_periods_except_latest(now, period_windows, day_state)
+    second = main.suppress_elapsed_periods_except_latest(now, period_windows, day_state)
+
+    assert first == ["Morn", "Aftn"]
+    assert second == []
+    assert day_state["Morn"] == {"pre_set": True, "start_set": True}
+    assert day_state["Aftn"] == {"pre_set": True, "start_set": True}
+    assert day_state["Eve"] == {"pre_set": False, "start_set": False}
+
+
+def test_mid_period_window_end_excludes_morning_after_afternoon_starts() -> None:
+    now = datetime(2026, 4, 2, 15, 32, tzinfo=timezone.utc)
+    period_windows = {
+        "Morn": datetime(2026, 4, 2, 8, 0, tzinfo=timezone.utc),
+        "Aftn": datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc),
+        "Eve": datetime(2026, 4, 2, 16, 0, tzinfo=timezone.utc),
+    }
+    ordered = sorted(period_windows.items(), key=lambda item: item[1])
+
+    morn_index, (_, morn_start) = next(
+        (index, item) for index, item in enumerate(ordered) if item[0] == "Morn"
+    )
+    aftn_index, (_, aftn_start) = next(
+        (index, item) for index, item in enumerate(ordered) if item[0] == "Aftn"
+    )
+
+    morn_end = ordered[morn_index + 1][1]
+    aftn_end = ordered[aftn_index + 1][1]
+
+    assert not (now >= morn_start and now < morn_end)
+    assert now >= aftn_start and now < aftn_end
+
+
+def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_path = tmp_path / "timed_export_state.json"
+    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
+    override = {
+        "active": True,
+        "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
+        "restore_at": datetime(2026, 4, 17, 13, 0, tzinfo=timezone.utc),
+        "restore_mode": 0,
+        "restore_mode_label": "SELF_POWERED",
+        "trigger_period": "Morn",
+        "duration_minutes": 60,
+        "is_clipping_export": True,
+        "clipping_soc_floor": 65.0,
+        "export_soc_floor": None,
+    }
+
+    main._persist_timed_export_override(override)
+    loaded = main._load_timed_export_override()
+
+    assert state_path.exists()
+    assert loaded["active"] is True
+    assert loaded["restore_mode"] == 0
+    assert loaded["trigger_period"] == "Morn"
+    assert loaded["started_at"] == override["started_at"]
+    assert loaded["restore_at"] == override["restore_at"]
+
+
+def test_persist_timed_export_override_clears_inactive_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_path = tmp_path / "timed_export_state.json"
+    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
+
+    main._persist_timed_export_override(
+        {
+            "active": True,
+            "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
+            "restore_at": datetime(2026, 4, 17, 13, 0, tzinfo=timezone.utc),
+            "restore_mode": 0,
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Morn",
+            "duration_minutes": 60,
+            "is_clipping_export": False,
+            "clipping_soc_floor": None,
+            "export_soc_floor": None,
+        }
+    )
+    assert state_path.exists()
+
+    main._persist_timed_export_override(main._empty_timed_export_override())
+
+    assert not state_path.exists()
+
+
 @pytest.mark.asyncio
 async def test_create_scheduler_interaction_exits_after_retries_in_full_sim_on_auth_failure(
     monkeypatch: pytest.MonkeyPatch,
@@ -104,7 +202,7 @@ async def test_create_scheduler_interaction_success_logs_startup(monkeypatch: py
         called["startup_log"] = True
         assert sigen is interaction
         assert mode_names == {1: "AI"}
-    return None, None
+        return None, None, None
 
     monkeypatch.setattr(main.SigenInteraction, "create", fake_create)
     monkeypatch.setattr(main, "log_current_mode_on_startup", fake_log_current_mode_on_startup)
