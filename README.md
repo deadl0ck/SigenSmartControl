@@ -13,10 +13,9 @@
 9. [Mode Test Utility](#mode-test-utility)
 10. [Email Notifications](#email-notifications)
 11. [Forecast Accuracy Report](#forecast-accuracy-report)
-12. [Web Simulator](#web-simulator)
-13. [Tests](#tests)
-14. [Recent Updates](#recent-updates)
-15. [Notes](#notes)
+12. [Tests](#tests)
+13. [Recent Updates](#recent-updates)
+14. [Notes](#notes)
 
 ## Overview
 
@@ -27,8 +26,6 @@ This project provides a locally run control system for a Sigen inverter using:
 - Battery state of charge from the Sigen API
 - Configurable operational mode mappings
 - A self-contained scheduler that evaluates conditions throughout the day
-
-The system can also be exercised through an interactive web simulator under `web/`.
 
 ## Plain English Summary
 
@@ -54,7 +51,7 @@ see exactly what values were used and why each decision was made.
 │   ├── settings.py                   # Runtime configuration and mode mappings
 │   └── constants.py                  # Environment-backed location constants
 ├── logic/
-│   └── decision_logic.py             # Shared decision logic used by runtime and web simulator
+│   └── decision_logic.py             # Shared decision logic used by runtime
 ├── integrations/
 │   ├── sigen_auth.py                 # Authentication and singleton creation for Sigen API client
 │   ├── sigen_official.py             # Official OpenAPI client (account/key auth, endpoint overrides)
@@ -70,10 +67,6 @@ see exactly what values were used and why each decision was made.
 │   ├── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
 │   ├── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
 │   └── test_mode_change_email.py     # Sends a test mode-change email via scheduler simulation path
-├── web/
-│   ├── app.py                        # Flask web simulator backend
-│   ├── simulate_logic.py             # Web simulator wrapper around shared decision logic
-│   └── static/                       # Simulator UI
 └── tests/                            # Test suite
 ```
 
@@ -354,12 +347,11 @@ Operational recommendation:
 - Validate endpoint availability against your own account credentials before assuming
 	a documented endpoint can be used in production.
 
-Both of these use the same shared code path:
+Both runtime and scripts use the same shared code path:
 
 - `main.py` runtime scheduler
-- `web/simulate_logic.py` web simulator
 
-That ensures the simulator and the live runtime cannot drift apart.
+This keeps decision behavior consistent across scheduler execution and script-based tooling.
 
 ### Battery headroom calculation
 
@@ -379,12 +371,6 @@ $$
 $$
 
 ### Expected solar energy calculation
-
-For the web simulator, expected solar for a period is:
-
-$$
-	ext{period solar} = \min(\text{solar PV kW}, \text{inverter kW}) \times 3.0
-$$
 
 For the runtime scheduler, the period forecast value is read in watts and converted to kWh over an assumed 3-hour period:
 
@@ -798,29 +784,6 @@ Notes:
 - ESB period watts are synthetic status placeholders, so ESB watt MAE/MAPE should be interpreted cautiously; ESB status accuracy is the more meaningful metric.
 - After updating `FORECAST_SOLAR_POWER_MULTIPLIER`, only new scheduler/provider refreshes will reflect the change in future archive snapshots.
 
-## Web Simulator
-
-Start the web UI with:
-
-```sh
-python web/app.py
-```
-
-Then open:
-
-```text
-http://127.0.0.1:5000/
-```
-
-The simulator:
-
-- preloads inverter, battery, and solar config values
-- defaults SOC to `80%` while keeping it editable
-- lets you simulate Morning, Afternoon, and Evening forecasts
-- treats Night as tariff-driven (not a manual solar status)
-- shows both the selected mode and a human-readable explanation
-- uses the same shared decision logic as the live runtime
-
 ## Tests
 
 Run all tests with:
@@ -833,7 +796,7 @@ python -m pytest -q
 Focused checks used during development:
 
 ```sh
-python -m pytest -q web/test_app_simulate.py tests/test_main.py -rA
+python -m pytest -q tests/test_main.py -rA
 ```
 
 Coverage run:
@@ -867,7 +830,7 @@ python -m pytest -q --cov=. --cov-report=term-missing
 ## Notes
 
 - The runtime scheduler is self-contained and does not require cron.
-- The decision logic is centralized so runtime and simulator stay aligned.
+- The decision logic is centralized so runtime behavior stays consistent.
 - Sunrise/sunset times are used to derive dynamic daytime period boundaries.
 - The official client in `integrations/sigen_official.py` includes fallback auth
 	behavior because endpoint and payload acceptance can vary by environment.

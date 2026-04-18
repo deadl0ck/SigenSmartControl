@@ -2363,6 +2363,7 @@ async def run_scheduler() -> None:
             night_headroom_target_kwh = HEADROOM_TARGET_KWH
             night_mode = PERIOD_TO_MODE["NIGHT"]
             night_mode_reason = "Night window active. Applying configured night mode."
+            soc: float | None = None
 
             if (
                 night_context["window_name"] == "PRE-DAWN"

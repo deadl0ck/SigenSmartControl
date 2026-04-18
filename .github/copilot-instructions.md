@@ -204,3 +204,12 @@ Before committing any code:
 ## Questions or Deviations?
 
 If you need to deviate from these standards (e.g., for performance reasons or external constraints), document the exception clearly in a comment and open a discussion.
+
+## Log analysis policy:
+- Always analyze both live logs in data and historical snapshot logs in data/imported-local-2026-04-18.
+
+- Treat snapshot logs as background context only.
+
+- Treat live logs as the current source of truth.
+
+- If they conflict, prioritize live logs and explicitly call out the difference.
