@@ -108,7 +108,7 @@ def test_morning_high_soc_protection_does_not_trigger_below_threshold():
     mode, reason = decide_operational_mode(
         period="Morn",
         status="Amber",
-        soc=85.0,
+        soc=65.0,
         headroom_kwh=0.6,
         period_solar_kwh=1.5,
         schedule_period="DAY",

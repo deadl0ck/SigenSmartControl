@@ -575,18 +575,21 @@ def print_report(
     # Fit a period-level multiplier directly from observed data so the report's
     # calibrated column reflects how ESB compares to measured output in practice.
     fitted_multipliers = compute_period_fit_multipliers(telemetry_rows, forecast_rows)
+    esb_global_bucket_map, _ = _build_esb_bucket_maps(telemetry_rows, forecast_rows)
 
     print()
     print("=" * 176)
     print("  FORECAST ACCURACY REPORT")
     print("  ESB = county-level synthetic | Quartz = site-level | Calibrated = ESB × fitted period multiplier")
     print("  ESB/Quartz status use site-capacity thresholds; Actual Reading is SOC-aware (Array vs Inverter basis)")
+    print("  Actual kWh = measured generated energy for that period from telemetry (hourly-mean integration)")
     print("  Percentages show (Forecast / Actual) × 100: <100% means underestimated, >100% means overestimated")
     print("=" * 176)
     header = (
         f"  {'Date':<12}  {'Period':<6}  "
-        f"{'ESB Forecast':>12}  {'ForecastSolar':>14}  {'FS Status':>10}  {'Quartz kW':>12}  {'Quartz Status':>13}  {'Calibrated':>12}  "
-        f"{'Act kWh':>10}  {'Avg SOC %':>10}  {'Actual Basis':>12}  {'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
+        f"{'ESB Forecast':>12}  {'ForecastSolar':>14}  {'Quartz kW':>12}  {'Qz Calibrated':>16}  "
+        f"{'ESB Bucket Est':>15}  {'Solar Generated':>15}  {'Avg SOC %':>10}  "
+        f"{'Actual Reading':>14}  {'Clips':>5}  {'n':>5}"
     )
     print(header)
     print("-" * 176)
@@ -659,23 +662,41 @@ def print_report(
         cal = calibration.get(period, {})
         multiplier = fitted_multipliers.get(period, cal.get("power_multiplier", 1.0))
         buffered_kwh = round(esb_kwh * multiplier, 3) if esb_kwh is not None else None
+        esb_bucket_estimate_kwh: float | None = None
+        if isinstance(esb_status, str):
+            bucket_kw = esb_global_bucket_map.get(esb_status)
+            if bucket_kw is not None:
+                esb_bucket_estimate_kwh = round(bucket_kw * period_hours, 3)
+        calibrated_pct = None
+        if buffered_kwh is not None and actual_period_kwh > 0:
+            calibrated_pct = round((buffered_kwh / actual_period_kwh) * 100)
+        esb_bucket_pct = None
+        if esb_bucket_estimate_kwh is not None and actual_period_kwh > 0:
+            esb_bucket_pct = round((esb_bucket_estimate_kwh / actual_period_kwh) * 100)
 
         # Format columns with percentages
         esb_s = esb_status if esb_status is not None else "N/A"
 
-        fs_status = forecast_solar_status if forecast_solar_status is not None else "N/A"
         fs_s = (
             f"{forecast_solar_kwh:.3f} ({forecast_solar_pct}%)"
             if forecast_solar_kwh is not None and forecast_solar_pct is not None
             else "N/A"
         )
-        quartz_s_status = quartz_status if quartz_status is not None else "N/A"
         quartz_s = (
             f"{quartz_kwh:.3f} ({quartz_pct}%)"
             if quartz_kwh is not None and quartz_pct is not None
             else "N/A"
         )
-        buf_s = f"{buffered_kwh:.3f}" if buffered_kwh is not None else "N/A"
+        buf_s = (
+            f"{buffered_kwh:.3f} ({calibrated_pct}%)"
+            if buffered_kwh is not None and calibrated_pct is not None
+            else "N/A"
+        )
+        bucket_s = (
+            f"{esb_bucket_estimate_kwh:.3f} ({esb_bucket_pct}%)"
+            if esb_bucket_estimate_kwh is not None and esb_bucket_pct is not None
+            else "N/A"
+        )
 
         # Derive status from measured output using SOC-aware basis selection.
         derived_status, actual_basis = derive_actual_reading_status(
@@ -689,9 +710,9 @@ def print_report(
 
         print(
             f"  {date:<12}  {period:<6}  "
-            f"{esb_s:>12}  {fs_s:>14}  {fs_status:>10}  {quartz_s:>12}  {quartz_s_status:>13}  {buf_s:>12}  "
+            f"{esb_s:>12}  {fs_s:>14}  {quartz_s:>12}  {buf_s:>16}  {bucket_s:>15}  "
             f"{actual_period_kwh:>10.2f}  {f'{avg_soc:.1f}' if avg_soc is not None else 'N/A':>10}  "
-            f"{actual_basis:>12}  {derived_status:>13}  {clipping_count:>5}  {n:>5}"
+            f"{derived_status:>13}  {clipping_count:>5}  {n:>5}"
         )
 
         if esb_kwh is not None and buffered_kwh is not None:
@@ -727,7 +748,338 @@ def print_report(
                 print()
     else:
         print("  No data to summarise.")
+
+    print_provider_accuracy_leaderboard(
+        telemetry_rows=telemetry_rows,
+        forecast_rows=forecast_rows,
+        fitted_multipliers=fitted_multipliers,
+    )
+
+    print_esb_bucket_mapping_analysis(
+        telemetry_rows=telemetry_rows,
+        forecast_rows=forecast_rows,
+        fitted_multipliers=fitted_multipliers,
+    )
     print()
+
+
+def _get_period_hours(period: str) -> int:
+    """Return the configured number of hours in a forecast period.
+
+    Args:
+        period: Forecast period label (e.g. Morn/Aftn/Eve).
+
+    Returns:
+        Number of hours in the configured period window.
+    """
+    start_hour, end_hour = _PERIOD_WINDOWS[period]
+    return max(0, end_hour - start_hour)
+
+
+def _abs_pct_err(predicted: float, actual: float) -> float | None:
+    """Compute absolute percentage error for one prediction.
+
+    Args:
+        predicted: Predicted period energy in kWh.
+        actual: Actual period energy in kWh.
+
+    Returns:
+        Absolute percentage error, or None if actual is non-positive.
+    """
+    if actual <= 0:
+        return None
+    return abs((predicted / actual) - 1.0) * 100.0
+
+
+def _distribution_stats(values: list[float]) -> dict[str, float]:
+    """Compute robust summary statistics for an error distribution.
+
+    Args:
+        values: Error values in percent.
+
+    Returns:
+        Dict containing n, median, mean, p90, within25, and within50.
+    """
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    p90_idx = int(0.9 * (n - 1))
+    within25 = 100.0 * sum(v <= 25.0 for v in sorted_values) / n
+    within50 = 100.0 * sum(v <= 50.0 for v in sorted_values) / n
+    return {
+        "n": float(n),
+        "median": float(median(sorted_values)),
+        "mean": float(sum(sorted_values) / n),
+        "p90": float(sorted_values[p90_idx]),
+        "within25": within25,
+        "within50": within50,
+    }
+
+
+def _collect_provider_errors(
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
+    fitted_multipliers: dict[str, float],
+) -> dict[str, list[float]]:
+    """Collect absolute percentage errors for each forecast method.
+
+    Args:
+        telemetry_rows: Aggregated period telemetry keyed by (date, period).
+        forecast_rows: Forecast snapshots keyed by (date, period).
+        fitted_multipliers: Period multipliers used for calibrated ESB estimates.
+
+    Returns:
+        Dict mapping method names to error samples.
+    """
+    errors: dict[str, list[float]] = {
+        "esb_calibrated": [],
+        "forecast_solar": [],
+        "quartz": [],
+    }
+
+    for (date, period), telem in telemetry_rows.items():
+        actual_period_kwh = period_energy_kwh_from_hourly_means(telem.get("hourly_samples", []))
+        if actual_period_kwh <= 0:
+            continue
+
+        period_hours = _get_period_hours(period)
+        forecast = forecast_rows.get((date, period), {})
+
+        esb_w = forecast.get("esb_w")
+        if isinstance(esb_w, (int, float)) and esb_w > 0:
+            esb_kwh = (float(esb_w) / 1000.0) * period_hours
+            calibrated_kwh = esb_kwh * fitted_multipliers.get(period, 1.0)
+            err = _abs_pct_err(calibrated_kwh, actual_period_kwh)
+            if err is not None:
+                errors["esb_calibrated"].append(err)
+
+        fs_w = forecast.get("forecast_solar_w")
+        if isinstance(fs_w, (int, float)) and fs_w > 0:
+            fs_kwh = (float(fs_w) / 1000.0) * period_hours
+            err = _abs_pct_err(fs_kwh, actual_period_kwh)
+            if err is not None:
+                errors["forecast_solar"].append(err)
+
+        quartz_w = forecast.get("quartz_w")
+        if isinstance(quartz_w, (int, float)) and quartz_w > 0:
+            quartz_kwh = (float(quartz_w) / 1000.0) * period_hours
+            err = _abs_pct_err(quartz_kwh, actual_period_kwh)
+            if err is not None:
+                errors["quartz"].append(err)
+
+    return errors
+
+
+def print_provider_accuracy_leaderboard(
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
+    fitted_multipliers: dict[str, float],
+) -> None:
+    """Print aggregate provider ranking metrics from historical rows.
+
+    Args:
+        telemetry_rows: Aggregated period telemetry keyed by (date, period).
+        forecast_rows: Forecast snapshots keyed by (date, period).
+        fitted_multipliers: Period multipliers used for calibrated ESB estimates.
+    """
+    provider_errors = _collect_provider_errors(telemetry_rows, forecast_rows, fitted_multipliers)
+    provider_names = {
+        "esb_calibrated": "ESB (calibrated)",
+        "forecast_solar": "Forecast.Solar",
+        "quartz": "Quartz",
+    }
+
+    ranked: list[tuple[str, dict[str, float]]] = []
+    for key, samples in provider_errors.items():
+        if not samples:
+            continue
+        ranked.append((key, _distribution_stats(samples)))
+
+    ranked.sort(key=lambda item: item[1]["median"])
+
+    print()
+    print("=" * 176)
+    print("  PROVIDER LEADERBOARD (ABSOLUTE PERCENT ERROR)")
+    print("=" * 176)
+
+    if not ranked:
+        print("  No provider samples available.")
+        return
+
+    print(
+        f"  {'Rank':<5}  {'Provider':<20}  {'n':>5}  {'Median %':>10}  {'Mean %':>10}"
+        f"  {'P90 %':>9}  {'<=25%':>8}  {'<=50%':>8}"
+    )
+    print("-" * 176)
+
+    for idx, (key, stats) in enumerate(ranked, start=1):
+        print(
+            f"  {idx:<5}  {provider_names[key]:<20}  {int(stats['n']):>5}"
+            f"  {stats['median']:>10.1f}  {stats['mean']:>10.1f}"
+            f"  {stats['p90']:>9.1f}  {stats['within25']:>7.1f}%  {stats['within50']:>7.1f}%"
+        )
+
+
+def _build_esb_bucket_maps(
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
+) -> tuple[dict[str, float], dict[tuple[str, str], float]]:
+    """Build ESB status-to-kW maps from historical measured output.
+
+    Args:
+        telemetry_rows: Aggregated period telemetry keyed by (date, period).
+        forecast_rows: Forecast snapshots keyed by (date, period).
+
+    Returns:
+        Tuple of:
+            - global_map: status -> median measured kW
+            - period_status_map: (period, status) -> median measured kW
+    """
+    by_status: dict[str, list[float]] = defaultdict(list)
+    by_period_status: dict[tuple[str, str], list[float]] = defaultdict(list)
+
+    for key, telem in telemetry_rows.items():
+        period = key[1]
+        actuals = telem.get("actual_kw", [])
+        if not actuals:
+            continue
+        avg_actual_kw = sum(actuals) / len(actuals)
+        forecast = forecast_rows.get(key, {})
+        status = forecast.get("esb_status")
+        if not isinstance(status, str) or not status:
+            continue
+
+        by_status[status].append(avg_actual_kw)
+        by_period_status[(period, status)].append(avg_actual_kw)
+
+    global_map = {
+        status: round(median(values), 3)
+        for status, values in by_status.items()
+        if values
+    }
+    period_status_map = {
+        key: round(median(values), 3)
+        for key, values in by_period_status.items()
+        if values
+    }
+    return global_map, period_status_map
+
+
+def _collect_esb_bucket_map_errors(
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
+    global_map: dict[str, float],
+    period_status_map: dict[tuple[str, str], float],
+) -> tuple[list[float], list[float]]:
+    """Evaluate ESB bucket-map prediction errors.
+
+    Args:
+        telemetry_rows: Aggregated period telemetry keyed by (date, period).
+        forecast_rows: Forecast snapshots keyed by (date, period).
+        global_map: status -> kW map.
+        period_status_map: (period, status) -> kW map.
+
+    Returns:
+        Tuple of (global_map_errors, period_aware_errors).
+    """
+    global_errors: list[float] = []
+    period_aware_errors: list[float] = []
+
+    for (date, period), telem in telemetry_rows.items():
+        actual_period_kwh = period_energy_kwh_from_hourly_means(telem.get("hourly_samples", []))
+        if actual_period_kwh <= 0:
+            continue
+
+        forecast = forecast_rows.get((date, period), {})
+        status = forecast.get("esb_status")
+        if not isinstance(status, str) or not status:
+            continue
+
+        period_hours = _get_period_hours(period)
+
+        global_kw = global_map.get(status)
+        if global_kw is not None:
+            err = _abs_pct_err(global_kw * period_hours, actual_period_kwh)
+            if err is not None:
+                global_errors.append(err)
+
+        period_kw = period_status_map.get((period, status), global_map.get(status))
+        if period_kw is not None:
+            err = _abs_pct_err(period_kw * period_hours, actual_period_kwh)
+            if err is not None:
+                period_aware_errors.append(err)
+
+    return global_errors, period_aware_errors
+
+
+def print_esb_bucket_mapping_analysis(
+    telemetry_rows: dict[tuple[str, str], dict[str, Any]],
+    forecast_rows: dict[tuple[str, str], dict[str, float | str | None]],
+    fitted_multipliers: dict[str, float],
+) -> None:
+    """Print ESB bucket-handling guidance from observed archive data.
+
+    Args:
+        telemetry_rows: Aggregated period telemetry keyed by (date, period).
+        forecast_rows: Forecast snapshots keyed by (date, period).
+        fitted_multipliers: Period multipliers used for calibrated ESB estimates.
+    """
+    global_map, period_status_map = _build_esb_bucket_maps(telemetry_rows, forecast_rows)
+    global_errors, period_aware_errors = _collect_esb_bucket_map_errors(
+        telemetry_rows,
+        forecast_rows,
+        global_map,
+        period_status_map,
+    )
+    calibrated_errors = _collect_provider_errors(
+        telemetry_rows,
+        forecast_rows,
+        fitted_multipliers,
+    ).get("esb_calibrated", [])
+
+    print()
+    print("=" * 176)
+    print("  ESB BUCKET MAPPING ANALYSIS")
+    print("=" * 176)
+
+    if global_map:
+        sorted_statuses = sorted(global_map.keys())
+        status_text = ", ".join(f"{status}={global_map[status]:.3f}kW" for status in sorted_statuses)
+        print(f"  Data-driven global status->kW map: {status_text}")
+    else:
+        print("  Global status->kW map: insufficient data")
+
+    if period_status_map:
+        print("  Data-driven period+status->kW map:")
+        for period in ["Morn", "Aftn", "Eve"]:
+            entries = [
+                (status, kw)
+                for (p, status), kw in period_status_map.items()
+                if p == period
+            ]
+            if not entries:
+                continue
+            entries.sort(key=lambda item: item[0])
+            detail = ", ".join(f"{status}={kw:.3f}kW" for status, kw in entries)
+            print(f"    {period}: {detail}")
+
+    def _print_method_line(label: str, samples: list[float]) -> None:
+        if not samples:
+            print(f"  {label}: insufficient samples")
+            return
+        stats = _distribution_stats(samples)
+        print(
+            f"  {label}: n={int(stats['n'])} median={stats['median']:.1f}% "
+            f"p90={stats['p90']:.1f}% <=25%={stats['within25']:.1f}% <=50%={stats['within50']:.1f}%"
+        )
+
+    _print_method_line("ESB calibrated (period multiplier)", calibrated_errors)
+    _print_method_line("ESB global status->kW map", global_errors)
+    _print_method_line("ESB period+status->kW map", period_aware_errors)
+
+    print(
+        "  Guidance: keep ESB period calibration as the primary estimator. "
+        "Use status->kW maps as a fallback/guardrail, ideally period-aware rather than one global map."
+    )
 
 
 def main() -> None:

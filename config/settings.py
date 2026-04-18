@@ -196,7 +196,12 @@ PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
 # High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
-MORNING_HIGH_SOC_THRESHOLD_PERCENT = 92.0
+# SOC threshold for the mid-period high-SOC safety export check (combined with solar).
+# When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.
+MORNING_HIGH_SOC_THRESHOLD_PERCENT = 70.0
+# Solar generation threshold (kW) for mid-period high-SOC safety export.
+# Only triggers when live solar is this strong and SOC >= MORNING_HIGH_SOC_THRESHOLD_PERCENT.
+MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = 3.5
 # Live clipping-risk promotion: promote Amber to Green during a scheduler tick when
 # live solar generation and battery SOC both exceed configured thresholds, allowing
 # the headroom export rule to trigger early even on an underforecast day.
@@ -213,6 +218,9 @@ LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
 # promotion drops SOC to this floor, cancel the export and restore prior mode.
 # Set to 5% below the promotion threshold to avoid yo-yo behavior.
 LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT = 65.0
+# SOC floor for daytime headroom timed exports (pre-period / period-start) where
+# the scheduler proactively exports to create battery room for forecasted solar.
+DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 50.0
 # Controlled evening export settings.
 # Enables bounded battery export in evening to create headroom, while preserving
 # enough energy to avoid avoidable grid import before cheap-rate charging.
