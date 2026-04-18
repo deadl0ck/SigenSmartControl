@@ -320,6 +320,102 @@ The export and mode-selection logic is centralized in `logic/decision_logic.py`.
 
 All direct Sigen API calls are centralized in `integrations/sigen_interaction.py` via `SigenInteraction`.
 
+### Scheduler State Machine
+
+The runtime scheduler in `main.py` operates as a state machine running every 5 minutes:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SchedulerLoop
+    
+    SchedulerLoop --> DayBoundaryCheck: Every 5 min tick
+    
+    DayBoundaryCheck --> RefreshDailyData: New calendar day?
+    DayBoundaryCheck --> ForecastRefresh: Check intra-day refresh needed
+    
+    RefreshDailyData --> TimedExportCheck: Reset period action flags
+    ForecastRefresh --> TimedExportCheck
+    
+    TimedExportCheck --> TimedExportActive: Timed export in progress?
+    TimedExportCheck --> NightCheck: No active timed export
+    
+    TimedExportActive --> RestoreWindow: Restore time reached OR SOC floor hit?
+    RestoreWindow --> PreRestoreMode: Save current inverter mode
+    PreRestoreMode --> Restore: Switch back to pre-export mode
+    Restore --> SkipNormalDecisions: Resume normal decisions next tick
+    TimedExportActive --> SkipNormalDecisions: Still in export window
+    
+    SkipNormalDecisions --> SleepWithinTolerance
+    
+    NightCheck --> IsNight: Night mode enabled & in night window?
+    NightCheck --> DaytimeEvaluation: Not in night
+    
+    IsNight --> NightModeContext: PRE-DAWN or EVENING-NIGHT window?
+    NightModeContext --> SummerPreSunrise: PRE-DAWN window + summer discharge enabled?
+    NightModeContext --> PreCheapRateExport: EVENING-NIGHT window + hours until cheap rate?
+    
+    SummerPreSunrise --> CheckSOC_PreSunrise: Check current SOC
+    CheckSOC_PreSunrise --> SwitchToSelfPowered: SOC above minimum?
+    CheckSOC_PreSunrise --> UseNightMode: SOC too low
+    SwitchToSelfPowered --> ApplyMode_Night
+    UseNightMode --> ApplyMode_Night
+    
+    PreCheapRateExport --> PlanExport: Calculate export duration
+    PlanExport --> StartTimedExport: Conditions met?
+    PlanExport --> ApplyMode_Night: No export planned
+    StartTimedExport --> ApplyMode_Night
+    ApplyMode_Night --> SleepWithinTolerance
+    
+    DaytimeEvaluation --> OrderPeriods: Get today's periods in order
+    OrderPeriods --> EvaluatePeriod: For each period (Morn/Aftn/Eve)
+    
+    EvaluatePeriod --> PrePeriodWindow: Within MAX_PRE_PERIOD_WINDOW of period start?
+    
+    PrePeriodWindow --> CheckHeadroom: PRE-PERIOD stage check
+    CheckHeadroom --> CalcHeadroomDeficit: Current SOC vs headroom target
+    
+    CalcHeadroomDeficit --> DeficitExceeded: Deficit > 0?
+    DeficitExceeded --> TriggerPreExport: YES - start GRID_EXPORT for headroom
+    TriggerPreExport --> TimedExportSet: Pre-export window set
+    TimedExportSet --> SkipRestOfPeriods: Mark period as pre-set, continue
+    DeficitExceeded --> WaitForPeriodStart: NO - headroom OK
+    
+    WaitForPeriodStart --> PeriodStartWindow: At or after period start time?
+    
+    PeriodStartWindow --> CheckClipping: PERIOD-START stage check
+    CheckClipping --> EvaluateClipping: Live solar clipping risk detected?
+    
+    EvaluateClipping --> PromoteToGreen: Live solar near ceiling & SOC high?
+    EvaluateToGreen --> ApplyPeriodMode: Use promoted status
+    EvaluateClipping --> ApplyPeriodMode: Use forecast status
+    
+    ApplyPeriodMode --> DecideMode: Apply decision_logic to status & SOC
+    DecideMode --> ModeResult: [TOU|SELF_POWERED|GRID_EXPORT|AI]?
+    
+    ModeResult --> CheckClippingExport: GRID_EXPORT + clipping risk?
+    CheckClippingExport --> StartClippingTimed: YES - bounded timed export
+    CheckClippingExport --> MarkPeriodComplete: NO - regular mode
+    StartClippingTimed --> MarkPeriodComplete
+    
+    MarkPeriodComplete --> SkipRestOfPeriods: Mark period as start-set
+    
+    SkipRestOfPeriods --> ArchiveTelemetry: Collect inverter snapshot
+    ArchiveTelemetry --> SleepWithinTolerance: Sleep POLL_INTERVAL_SECONDS
+    SleepWithinTolerance --> [*]
+```
+
+**Key state flows:**
+
+- **Timed Export Override**: Once active (from pre-export or clipping), all normal scheduler decisions are skipped until the export window expires or SOC floor is reached (early exit)
+- **Day Boundary**: Triggers forecast and sunrise/sunset refresh; resets per-period action flags (pre-set, start-set)
+- **Night Branching**: If night mode is enabled, either handles summer pre-sunrise discharge (PRE-DAWN) or pre-cheap-rate export (EVENING-NIGHT)
+- **Daytime Evaluation**: For each period in order:
+  1. **PRE-PERIOD**: Checks headroom deficit; if buffer shortfall detected, triggers bounded GRID_EXPORT
+  2. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision
+- **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions
+- **Mode Application**: Switches inverter to decided mode via Sigen API and records telemetry
+- **Restore**: Timed export windows track pre-export mode and automatically restore when complete
+
 ### Official OpenAPI integration (`integrations/sigen_official.py`)
 
 The project includes an official API client implementation that can be used by the
