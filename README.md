@@ -89,8 +89,7 @@ source .venv/bin/activate
 2. Install dependencies.
 
 ```sh
-pip install -r requirements.txt
-pip install pytest pytest-asyncio pytest-cov
+pip install -r requirements-dev.txt
 ```
 
 3. Create a `.env` file in the project root.
