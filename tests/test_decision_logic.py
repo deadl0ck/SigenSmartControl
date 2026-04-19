@@ -25,7 +25,7 @@ def test_peak_tariff_overrides_default_forecast_mode_to_self_powered():
     mode, reason = decide_operational_mode(
         period="Aftn",
         status="Amber",
-        soc=60,
+        soc=45,
         headroom_kwh=8.0,
         period_solar_kwh=1.0,
         schedule_period="PEAK",
@@ -108,7 +108,7 @@ def test_morning_high_soc_protection_does_not_trigger_below_threshold():
     mode, reason = decide_operational_mode(
         period="Morn",
         status="Amber",
-        soc=65.0,
+        soc=45.0,
         headroom_kwh=0.6,
         period_solar_kwh=1.5,
         schedule_period="DAY",

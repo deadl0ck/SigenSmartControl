@@ -175,9 +175,8 @@ CHEAP_RATE_END_HOUR = 8
 # Surplus solar capacity that cannot be stored when the inverter is at its AC ceiling.
 # This is the energy that would be clipped if the battery were already full.
 SURPLUS_CAPACITY_KW = SOLAR_PV_KW - INVERTER_KW  # e.g. 8.9 - 5.5 = 3.4 kW
-# Target free battery headroom before a Green period, sized to absorb the full
-# surplus output across one 3-hour period.
-HEADROOM_TARGET_KWH = SURPLUS_CAPACITY_KW * 3.0  # e.g. 3.4 × 3 = 10.2 kWh
+# Target free battery headroom before a Green period: 50% of total battery capacity.
+HEADROOM_TARGET_KWH = BATTERY_KWH * 0.5  # e.g. 24 × 0.5 = 12.0 kWh
 # Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
 # if current battery energy is sufficient to cover expected household demand.
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
