@@ -14,8 +14,9 @@
 10. [Email Notifications](#email-notifications)
 11. [Forecast Accuracy Report](#forecast-accuracy-report)
 12. [Tests](#tests)
-13. [Recent Updates](#recent-updates)
-14. [Notes](#notes)
+13. [Session Handoff Recovery](#session-handoff-recovery)
+14. [Recent Updates](#recent-updates)
+15. [Notes](#notes)
 
 ## Overview
 
@@ -893,12 +894,51 @@ Focused checks used during development:
 
 ```sh
 python -m pytest -q tests/test_main.py -rA
+python -m pytest -q tests/test_main.py tests/test_scheduler_core_logic.py
 ```
+
+Characterization coverage now includes:
+
+- Night-window branching guardrails (`PRE-DAWN` and `EVENING-NIGHT`) in `tests/test_main.py`
+- Timed export persistence/restore path behavior in `tests/test_main.py`
+- Pre-period export timing behavior (`export_by` lead-time decisions) in `tests/test_main.py`
+- Focused scheduler math and state-machine checks in `tests/test_scheduler_core_logic.py`
 
 Coverage run:
 
 ```sh
 python -m pytest -q --cov=. --cov-report=term-missing
+```
+
+## Session Handoff Recovery
+
+To make session recovery robust after VS Code restarts or power loss, this repo supports an
+automatic handoff snapshot.
+
+- Manual handoff notes: `docs/session-handoff.md`
+- Auto-generated runtime snapshot: `docs/session-handoff-auto.md`
+
+Install and start automatic updates (every 5 minutes, persistent across missed intervals):
+
+```sh
+chmod +x scripts/update_handoff_snapshot.sh scripts/install_handoff_timer.sh
+./scripts/install_handoff_timer.sh
+```
+
+Useful checks:
+
+```sh
+systemctl --user status sigen-handoff-snapshot.timer
+systemctl --user list-timers --all | grep sigen-handoff
+cat docs/session-handoff-auto.md
+```
+
+Resume workflow on next session:
+
+```sh
+cat docs/session-handoff.md
+cat docs/session-handoff-auto.md
+git status
 ```
 
 ## Recent Updates
@@ -922,6 +962,10 @@ python -m pytest -q --cov=. --cov-report=term-missing
 	so an in-flight export/restore window survives process restarts.
 - Removed deprecated evening AI transition helper code that was no longer used
 	by the scheduler runtime.
+- Added characterization tests to freeze scheduler behavior before modular refactors,
+	covering night branching, timed export restore paths, and pre-period export timing.
+- Safely extracted night-window runtime logic into `handle_active_night_window()`
+	inside `run_scheduler()` with no behavior change.
 
 ## Notes
 

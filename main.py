@@ -2039,11 +2039,72 @@ async def run_scheduler() -> None:
             return status, None
 
         reason = (
-            "\033[93mLive clipping-risk override: promoting AMBER to GREEN because "
+            "Live clipping-risk override: promoting AMBER to GREEN because "
             f"SOC={soc:.1f}% and avg live solar={avg_live_solar_kw:.2f} kW is near "
-            f"or above configured trigger ({trigger_kw:.1f} kW).\033[0m"
+            f"or above configured trigger ({trigger_kw:.1f} kW)."
         )
         return "Green", reason
+
+    def evaluate_period_mode_decision(
+        *,
+        period: str,
+        status: str,
+        soc: float,
+        period_solar_kwh: float,
+        now_utc: datetime,
+        schedule_time_utc: datetime,
+        solar_avg_kw_3: float | None,
+    ) -> dict[str, Any]:
+        """Compute status override, headroom metrics, and mode decision for one period check.
+
+        Args:
+            period: Scheduler period label (for example, Morn/Aftn/Eve).
+            status: Forecast status before live clipping-risk promotion.
+            soc: Current battery state-of-charge percentage.
+            period_solar_kwh: Estimated period solar energy in kWh.
+            now_utc: Current scheduler tick timestamp in UTC.
+            schedule_time_utc: Timestamp used to derive tariff schedule period.
+            solar_avg_kw_3: Rolling average live solar generation in kW.
+
+        Returns:
+            Dict containing effective status, reason text, selected mode,
+            headroom metrics, and status-override reason.
+        """
+        decision_status, status_override_reason = promote_status_for_live_clipping_risk(
+            period,
+            status,
+            soc,
+            solar_avg_kw_3,
+        )
+        headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
+        headroom_target_kwh = HEADROOM_TARGET_KWH
+        headroom_deficit_kwh = max(0.0, headroom_target_kwh - headroom_kwh)
+        mode, reason = decide_operational_mode(
+            period=period,
+            status=decision_status,
+            soc=soc,
+            headroom_kwh=headroom_kwh,
+            period_solar_kwh=period_solar_kwh,
+            schedule_period=get_schedule_period_for_time(schedule_time_utc),
+            headroom_target_kwh=HEADROOM_TARGET_KWH,
+            battery_kwh=BATTERY_KWH,
+            hours_until_cheap_rate=get_hours_until_cheap_rate(now_utc),
+            estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+            bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+            enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+        )
+        if status_override_reason is not None:
+            reason = f"{status_override_reason} {reason}"
+
+        return {
+            "decision_status": decision_status,
+            "status_override_reason": status_override_reason,
+            "headroom_kwh": headroom_kwh,
+            "headroom_target_kwh": headroom_target_kwh,
+            "headroom_deficit_kwh": headroom_deficit_kwh,
+            "mode": mode,
+            "reason": reason,
+        }
 
     def log_check(
         period: str,
@@ -2182,6 +2243,194 @@ async def run_scheduler() -> None:
             }
 
         return None
+
+    async def handle_active_night_window(
+        *,
+        now_utc: datetime,
+        night_context: dict[str, Any],
+    ) -> bool:
+        """Handle active night-window behavior for a scheduler tick.
+
+        Applies PRE-DAWN and EVENING-NIGHT mode logic, optionally starts timed
+        export, and performs optional long sleep behavior when enabled.
+
+        Args:
+            now_utc: Current scheduler timestamp in UTC.
+            night_context: Active night-window metadata from get_active_night_context.
+
+        Returns:
+            True when the night window consumed the current tick and caller should
+            continue to next loop iteration.
+        """
+        nonlocal refresh_auth_on_wake
+
+        sleep_override_seconds_local: int | None = None
+        night_period_name = f"Night->{night_context['target_period']}"
+        night_period_solar_kwh = estimate_solar(
+            night_context["target_period"],
+            night_context["solar_value"],
+        )
+        night_headroom_target_kwh = HEADROOM_TARGET_KWH
+        night_mode = PERIOD_TO_MODE["NIGHT"]
+        night_mode_reason = "Night window active. Applying configured night mode."
+        soc: float | None = None
+
+        if (
+            night_context["window_name"] == "PRE-DAWN"
+            and is_pre_sunrise_discharge_window(
+                now_utc,
+                night_context["target_start"],
+                enabled=ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE,
+                months_csv=PRE_SUNRISE_DISCHARGE_MONTHS,
+                lead_minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES,
+            )
+        ):
+            soc = await fetch_soc(night_period_name)
+            if soc is not None and soc >= PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:
+                night_mode = SIGEN_MODES["SELF_POWERED"]
+                night_mode_reason = (
+                    "Summer pre-sunrise discharge window active. Switching to "
+                    "self-powered mode to create battery headroom before morning solar."
+                )
+            else:
+                night_mode_reason = (
+                    "Summer pre-sunrise discharge window active, but SOC is below "
+                    f"minimum threshold {PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:.1f}%. "
+                    "Keeping configured night mode instead of discharging."
+                )
+
+        if night_context["window_name"] == "EVENING-NIGHT":
+            hours_until_cheap_rate = get_hours_until_cheap_rate(now_utc)
+            if hours_until_cheap_rate > 0:
+                soc = await fetch_soc(night_period_name)
+                export_minutes, export_reason = plan_pre_cheap_rate_night_export(
+                    soc=soc,
+                    now_utc=now_utc,
+                )
+                if export_minutes is not None and export_reason is not None:
+                    started = await start_timed_grid_export(
+                        period=night_period_name,
+                        reason=export_reason,
+                        duration_minutes=export_minutes,
+                        now_utc=now_utc,
+                        battery_soc=soc,
+                        export_soc_floor=PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT,
+                    )
+                    if started:
+                        return True
+                night_mode = SIGEN_MODES["SELF_POWERED"]
+                if soc is not None and soc <= PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:
+                    night_mode_reason = (
+                        "Pre-cheap-rate export floor reached. Switching to self-powered "
+                        f"at SOC floor {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}%."
+                    )
+                else:
+                    night_mode_reason = (
+                        "Pre-cheap-rate window active. Holding self-powered mode until "
+                        "cheap-rate window opens."
+                    )
+
+        mode_set_key = (night_context["target_date"], night_mode)
+        if night_state["mode_set_key"] != mode_set_key:
+            log_check(
+                night_period_name,
+                "NIGHT-BASE",
+                now_utc=now_utc,
+                period_start_utc=night_context["target_start"],
+                solar_value=night_context["solar_value"],
+                status=night_context["status"],
+                period_solar_kwh=night_period_solar_kwh,
+                soc=None,
+                headroom_kwh=None,
+                headroom_target_kwh=night_headroom_target_kwh,
+                headroom_deficit_kwh=0.0,
+                export_by_utc=night_context["night_start"],
+                mode=night_mode,
+                reason=(
+                    f"Active {night_context['window_name']} window before "
+                    f"{night_context['target_period']}. {night_mode_reason}"
+                ),
+                outcome="night mode applied",
+            )
+            try:
+                ok = await _apply_mode_change_tracked(
+                    sigen=sigen,
+                    mode=night_mode,
+                    period=night_period_name,
+                    reason=night_mode_reason,
+                    mode_names=mode_names,
+                    battery_soc=soc,
+                )
+                if ok:
+                    night_state["mode_set_key"] = mode_set_key
+            except Exception as e:
+                logger.error(f"[{night_period_name}] Unexpected error applying base night mode: {e}")
+
+        if NIGHT_SLEEP_MODE_ENABLED:
+            pre_window_opens_at = night_context["target_start"] - MAX_PRE_PERIOD_WINDOW
+            wake_at = pre_window_opens_at
+
+            if night_context["window_name"] == "EVENING-NIGHT":
+                cheap_rate_start_local = now_utc.astimezone(LOCAL_TZ).replace(
+                    hour=CHEAP_RATE_START_HOUR,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+                if now_utc.astimezone(LOCAL_TZ) >= cheap_rate_start_local:
+                    cheap_rate_start_local = cheap_rate_start_local + timedelta(days=1)
+                cheap_rate_start_utc = cheap_rate_start_local.astimezone(timezone.utc)
+                wake_at = min(wake_at, cheap_rate_start_utc)
+
+            if (
+                night_context["window_name"] == "PRE-DAWN"
+                and ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE
+            ):
+                pre_sunrise_wake_at = night_context["target_start"] - timedelta(
+                    minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES
+                )
+                wake_at = min(wake_at, pre_sunrise_wake_at)
+
+            if now_utc < wake_at:
+                sleep_seconds = max(1, int((wake_at - now_utc).total_seconds()))
+                if sleep_seconds > POLL_INTERVAL_SECONDS:
+                    local_date = now_utc.astimezone(LOCAL_TZ).date()
+                    if (
+                        night_context["window_name"] == "EVENING-NIGHT"
+                        and night_state.get("sleep_snapshot_for_date") != local_date
+                    ):
+                        await archive_inverter_telemetry("night_sleep_start", now_utc)
+                        night_state["sleep_snapshot_for_date"] = local_date
+                        logger.info(
+                            "[SCHEDULER] Captured end-of-day telemetry snapshot before night sleep."
+                        )
+                    sleep_override_seconds_local = sleep_seconds
+                    refresh_auth_on_wake = True
+                    logger.info(
+                        "[SCHEDULER] Night sleep mode active. Sleeping for %s minutes "
+                        "until %s (%s).",
+                        sleep_seconds // 60,
+                        wake_at.isoformat(),
+                        "next critical night milestone",
+                    )
+
+        logger.info(
+            "[SCHEDULER] Night window active; skipping daytime period evaluation this tick."
+        )
+        logger.info(
+            "[SCHEDULER] Tick mode-change summary: attempted=%s successful=%s failed=%s",
+            tick_mode_change_attempts,
+            tick_mode_change_successes,
+            tick_mode_change_failures,
+        )
+        next_sleep_seconds = sleep_override_seconds_local or POLL_INTERVAL_SECONDS
+        logger.info(
+            f"[SCHEDULER] Tick at {now_utc.isoformat()} UTC complete. "
+            f"Next check in {next_sleep_seconds // 60} minutes."
+        )
+        await archive_inverter_telemetry("scheduler_tick", now_utc)
+        await asyncio.sleep(next_sleep_seconds)
+        return True
 
     logger.info(
         f"[SCHEDULER] Starting. Will poll every {POLL_INTERVAL_MINUTES} minutes. "
@@ -2355,154 +2604,12 @@ async def run_scheduler() -> None:
 
         night_context = get_active_night_context(now)
         if NIGHT_MODE_ENABLED and night_context is not None:
-            night_period_name = f"Night->{night_context['target_period']}"
-            night_period_solar_kwh = estimate_solar(
-                night_context["target_period"],
-                night_context["solar_value"],
+            night_tick_consumed = await handle_active_night_window(
+                now_utc=now,
+                night_context=night_context,
             )
-            night_headroom_target_kwh = HEADROOM_TARGET_KWH
-            night_mode = PERIOD_TO_MODE["NIGHT"]
-            night_mode_reason = "Night window active. Applying configured night mode."
-            soc: float | None = None
-
-            if (
-                night_context["window_name"] == "PRE-DAWN"
-                and is_pre_sunrise_discharge_window(
-                    now,
-                    night_context["target_start"],
-                    enabled=ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE,
-                    months_csv=PRE_SUNRISE_DISCHARGE_MONTHS,
-                    lead_minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES,
-                )
-            ):
-                soc = await fetch_soc(night_period_name)
-                if soc is not None and soc >= PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:
-                    night_mode = SIGEN_MODES["SELF_POWERED"]
-                    night_mode_reason = (
-                        "Summer pre-sunrise discharge window active. Switching to "
-                        "self-powered mode to create battery headroom before morning solar."
-                    )
-                else:
-                    night_mode_reason = (
-                        "Summer pre-sunrise discharge window active, but SOC is below "
-                        f"minimum threshold {PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT:.1f}%. "
-                        "Keeping configured night mode instead of discharging."
-                    )
-
-            if night_context["window_name"] == "EVENING-NIGHT":
-                hours_until_cheap_rate = get_hours_until_cheap_rate(now)
-                if hours_until_cheap_rate > 0:
-                    soc = await fetch_soc(night_period_name)
-                    export_minutes, export_reason = plan_pre_cheap_rate_night_export(
-                        soc=soc,
-                        now_utc=now,
-                    )
-                    if export_minutes is not None and export_reason is not None:
-                        started = await start_timed_grid_export(
-                            period=night_period_name,
-                            reason=export_reason,
-                            duration_minutes=export_minutes,
-                            now_utc=now,
-                            battery_soc=soc,
-                            export_soc_floor=PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT,
-                        )
-                        if started:
-                            continue
-                    night_mode = SIGEN_MODES["SELF_POWERED"]
-                    if soc is not None and soc <= PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:
-                        night_mode_reason = (
-                            "Pre-cheap-rate export floor reached. Switching to self-powered "
-                            f"at SOC floor {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}%."
-                        )
-                    else:
-                        night_mode_reason = (
-                            "Pre-cheap-rate window active. Holding self-powered mode until "
-                            "cheap-rate window opens."
-                        )
-
-            mode_set_key = (night_context["target_date"], night_mode)
-            if night_state["mode_set_key"] != mode_set_key:
-                log_check(
-                    night_period_name,
-                    "NIGHT-BASE",
-                    now_utc=now,
-                    period_start_utc=night_context["target_start"],
-                    solar_value=night_context["solar_value"],
-                    status=night_context["status"],
-                    period_solar_kwh=night_period_solar_kwh,
-                    soc=None,
-                    headroom_kwh=None,
-                    headroom_target_kwh=night_headroom_target_kwh,
-                    headroom_deficit_kwh=0.0,
-                    export_by_utc=night_context["night_start"],
-                    mode=night_mode,
-                    reason=(
-                        f"Active {night_context['window_name']} window before "
-                        f"{night_context['target_period']}. {night_mode_reason}"
-                    ),
-                    outcome="night mode applied",
-                )
-                try:
-                    ok = await _apply_mode_change_tracked(
-                        sigen=sigen,
-                        mode=night_mode,
-                        period=night_period_name,
-                        reason=night_mode_reason,
-                        mode_names=mode_names,
-                        battery_soc=soc,
-                    )
-                    if ok:
-                        night_state["mode_set_key"] = mode_set_key
-                except Exception as e:
-                    logger.error(f"[{night_period_name}] Unexpected error applying base night mode: {e}")
-
-            if NIGHT_SLEEP_MODE_ENABLED:
-                pre_window_opens_at = night_context["target_start"] - MAX_PRE_PERIOD_WINDOW
-                wake_at = pre_window_opens_at
-
-                if night_context["window_name"] == "EVENING-NIGHT":
-                    cheap_rate_start_local = now.astimezone(LOCAL_TZ).replace(
-                        hour=CHEAP_RATE_START_HOUR,
-                        minute=0,
-                        second=0,
-                        microsecond=0,
-                    )
-                    if now.astimezone(LOCAL_TZ) >= cheap_rate_start_local:
-                        cheap_rate_start_local = cheap_rate_start_local + timedelta(days=1)
-                    cheap_rate_start_utc = cheap_rate_start_local.astimezone(timezone.utc)
-                    wake_at = min(wake_at, cheap_rate_start_utc)
-
-                if (
-                    night_context["window_name"] == "PRE-DAWN"
-                    and ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE
-                ):
-                    pre_sunrise_wake_at = night_context["target_start"] - timedelta(
-                        minutes=PRE_SUNRISE_DISCHARGE_LEAD_MINUTES
-                    )
-                    wake_at = min(wake_at, pre_sunrise_wake_at)
-
-                if now < wake_at:
-                    sleep_seconds = max(1, int((wake_at - now).total_seconds()))
-                    if sleep_seconds > POLL_INTERVAL_SECONDS:
-                        local_date = now.astimezone(LOCAL_TZ).date()
-                        if (
-                            night_context["window_name"] == "EVENING-NIGHT"
-                            and night_state.get("sleep_snapshot_for_date") != local_date
-                        ):
-                            await archive_inverter_telemetry("night_sleep_start", now)
-                            night_state["sleep_snapshot_for_date"] = local_date
-                            logger.info(
-                                "[SCHEDULER] Captured end-of-day telemetry snapshot before night sleep."
-                            )
-                        sleep_override_seconds = sleep_seconds
-                        refresh_auth_on_wake = True
-                        logger.info(
-                            "[SCHEDULER] Night sleep mode active. Sleeping for %s minutes "
-                            "until %s (%s).",
-                            sleep_seconds // 60,
-                            wake_at.isoformat(),
-                            "next critical night milestone",
-                        )
+            if night_tick_consumed:
+                continue
 
         ordered_period_windows = sorted(today_period_windows.items(), key=lambda item: item[1])
         for period_index, (period, period_start) in enumerate(ordered_period_windows):
@@ -2529,29 +2636,22 @@ async def run_scheduler() -> None:
             ):
                 soc = await fetch_soc(period)
                 solar_avg_kw_3 = get_live_solar_average_kw()
-                decision_status, status_override_reason = promote_status_for_live_clipping_risk(
-                    period, status, soc, solar_avg_kw_3
+                decision_data = evaluate_period_mode_decision(
+                    period=period,
+                    status=status,
+                    soc=soc,
+                    period_solar_kwh=period_solar_kwh,
+                    now_utc=now,
+                    schedule_time_utc=now,
+                    solar_avg_kw_3=solar_avg_kw_3,
                 )
+                decision_status = str(decision_data["decision_status"])
                 if decision_status != status and soc is not None:
-                    headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = HEADROOM_TARGET_KWH
-                    headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
-                    mode, reason = decide_operational_mode(
-                        period=period,
-                        status=decision_status,
-                        soc=soc,
-                        headroom_kwh=headroom_kwh,
-                        period_solar_kwh=period_solar_kwh,
-                        schedule_period=get_schedule_period_for_time(now),
-                        headroom_target_kwh=HEADROOM_TARGET_KWH,
-                        battery_kwh=BATTERY_KWH,
-                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
-                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
-                    )
-                    if status_override_reason is not None:
-                        reason = f"{status_override_reason} {reason}"
+                    headroom_kwh = float(decision_data["headroom_kwh"])
+                    headroom_target_kwh = float(decision_data["headroom_target_kwh"])
+                    headroom_deficit = float(decision_data["headroom_deficit_kwh"])
+                    mode = int(decision_data["mode"])
+                    reason = str(decision_data["reason"])
                     if mode == SIGEN_MODES["GRID_EXPORT"] and headroom_deficit > 0:
                         # Estimate export duration: time to clear headroom deficit at effective rate,
                         # bounded by time remaining until period end or MAX_TIMED_EXPORT_MINUTES.
@@ -2660,16 +2760,22 @@ async def run_scheduler() -> None:
             if not s["pre_set"] and period_start - MAX_PRE_PERIOD_WINDOW <= now < period_start:
                 soc = await fetch_soc(period)
                 if soc is not None:
-                    headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = HEADROOM_TARGET_KWH
-                    headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
                     solar_avg_kw_3 = get_live_solar_average_kw()
-                    decision_status, status_override_reason = promote_status_for_live_clipping_risk(
-                        period,
-                        status,
-                        soc,
-                        solar_avg_kw_3,
+                    decision_data = evaluate_period_mode_decision(
+                        period=period,
+                        status=status,
+                        soc=soc,
+                        period_solar_kwh=period_solar_kwh,
+                        now_utc=now,
+                        schedule_time_utc=period_start,
+                        solar_avg_kw_3=solar_avg_kw_3,
                     )
+                    decision_status = str(decision_data["decision_status"])
+                    headroom_kwh = float(decision_data["headroom_kwh"])
+                    headroom_target_kwh = float(decision_data["headroom_target_kwh"])
+                    headroom_deficit = float(decision_data["headroom_deficit_kwh"])
+                    mode = int(decision_data["mode"])
+                    reason = str(decision_data["reason"])
                     effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
                     lead_time_hours_adjusted = 0.0
                     if headroom_deficit > 0:
@@ -2685,23 +2791,6 @@ async def run_scheduler() -> None:
                         export_by = period_start - lead_time
                     else:
                         export_by = period_start  # No export needed; arm at period start.
-
-                    mode, reason = decide_operational_mode(
-                        period=period,
-                        status=decision_status,
-                        soc=soc,
-                        headroom_kwh=headroom_kwh,
-                        period_solar_kwh=period_solar_kwh,
-                        schedule_period=get_schedule_period_for_time(period_start),
-                        headroom_target_kwh=HEADROOM_TARGET_KWH,
-                        battery_kwh=BATTERY_KWH,
-                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
-                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
-                    )
-                    if status_override_reason is not None:
-                        reason = f"{status_override_reason} {reason}"
 
                     if now >= export_by:
                         outcome = "pre-period export triggered"
@@ -2811,31 +2900,21 @@ async def run_scheduler() -> None:
                 soc = await fetch_soc(period)
                 if soc is not None:
                     solar_avg_kw_3 = get_live_solar_average_kw()
-                    decision_status, status_override_reason = promote_status_for_live_clipping_risk(
-                        period,
-                        status,
-                        soc,
-                        solar_avg_kw_3,
-                    )
-                    headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-                    headroom_target_kwh = HEADROOM_TARGET_KWH
-                    headroom_deficit = max(0.0, headroom_target_kwh - headroom_kwh)
-                    mode, reason = decide_operational_mode(
+                    decision_data = evaluate_period_mode_decision(
                         period=period,
-                        status=decision_status,
+                        status=status,
                         soc=soc,
-                        headroom_kwh=headroom_kwh,
                         period_solar_kwh=period_solar_kwh,
-                        schedule_period=get_schedule_period_for_time(period_start),
-                        headroom_target_kwh=HEADROOM_TARGET_KWH,
-                        battery_kwh=BATTERY_KWH,
-                        hours_until_cheap_rate=get_hours_until_cheap_rate(now),
-                        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-                        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-                        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+                        now_utc=now,
+                        schedule_time_utc=period_start,
+                        solar_avg_kw_3=solar_avg_kw_3,
                     )
-                    if status_override_reason is not None:
-                        reason = f"{status_override_reason} {reason}"
+                    decision_status = str(decision_data["decision_status"])
+                    headroom_kwh = float(decision_data["headroom_kwh"])
+                    headroom_target_kwh = float(decision_data["headroom_target_kwh"])
+                    headroom_deficit = float(decision_data["headroom_deficit_kwh"])
+                    mode = int(decision_data["mode"])
+                    reason = str(decision_data["reason"])
                     
                     evening_export_minutes, evening_export_reason = plan_evening_controlled_export(
                         period=period,
