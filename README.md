@@ -100,6 +100,30 @@ GMAIL_APP_PASSWORD=your_gmail_app_password
 
 4. Edit `config/settings.py` for your hardware and scheduler settings.
 
+## Running the Monitor
+
+Three shell scripts manage the scheduler process. All write logs to `monitor.log` in the project root.
+
+| Script | Purpose |
+|--------|---------|
+| `start_monitor.sh` | Start the scheduler in the background. Refuses to start a second instance if one is already running. Writes the PID to `.monitor.pid`. |
+| `stop_monitor.sh` | Stop the running scheduler gracefully. Uses `.monitor.pid` first, falls back to `pgrep`. |
+| `restart_monitor.sh` | Stop then start in one step. Use this after changing `config/settings.py` to pick up new thresholds. |
+
+```sh
+# Start
+./start_monitor.sh
+
+# Stop
+./stop_monitor.sh
+
+# Restart (e.g. after a config change)
+./restart_monitor.sh
+
+# Follow live logs
+tail -f monitor.log
+```
+
 ## Configuration
 
 The core runtime settings live in `config/settings.py`.
