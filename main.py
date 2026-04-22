@@ -2635,18 +2635,19 @@ async def run_scheduler() -> None:
                 and is_live_clipping_period_enabled(period)
             ):
                 soc = await fetch_soc(period)
-                solar_avg_kw_3 = get_live_solar_average_kw()
-                decision_data = evaluate_period_mode_decision(
-                    period=period,
-                    status=status,
-                    soc=soc,
-                    period_solar_kwh=period_solar_kwh,
-                    now_utc=now,
-                    schedule_time_utc=now,
-                    solar_avg_kw_3=solar_avg_kw_3,
-                )
-                decision_status = str(decision_data["decision_status"])
-                if decision_status != status and soc is not None:
+                if soc is not None:
+                    solar_avg_kw_3 = get_live_solar_average_kw()
+                    decision_data = evaluate_period_mode_decision(
+                        period=period,
+                        status=status,
+                        soc=soc,
+                        period_solar_kwh=period_solar_kwh,
+                        now_utc=now,
+                        schedule_time_utc=now,
+                        solar_avg_kw_3=solar_avg_kw_3,
+                    )
+                    decision_status = str(decision_data["decision_status"])
+                if soc is not None and decision_status != status:
                     headroom_kwh = float(decision_data["headroom_kwh"])
                     headroom_target_kwh = float(decision_data["headroom_target_kwh"])
                     headroom_deficit = float(decision_data["headroom_deficit_kwh"])
