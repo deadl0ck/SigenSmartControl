@@ -24,6 +24,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from integrations.sigen_auth import get_sigen_instance
+from utils.payload_tree import iter_tree_lines
 
 
 logging.basicConfig(
@@ -47,62 +48,6 @@ def strip_wrapping_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
-
-
-def _format_tree_leaf(value: Any) -> str:
-    """Format a scalar value for ASCII tree logging.
-
-    Args:
-        value: Scalar value to render.
-
-    Returns:
-        A string representation safe for logs.
-    """
-    return repr(value)
-
-
-def _iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
-    """Convert nested payloads into a readable ASCII tree.
-
-    Args:
-        payload: Dict, list, or scalar payload.
-        prefix: Current tree indentation prefix.
-
-    Returns:
-        A list of formatted log lines.
-    """
-    lines: list[str] = []
-
-    if isinstance(payload, dict):
-        items = list(payload.items())
-        for index, (key, value) in enumerate(items):
-            is_last = index == len(items) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
-
-            if isinstance(value, (dict, list)):
-                lines.append(f"{prefix}{branch}{key}:")
-                lines.extend(_iter_tree_lines(value, child_prefix))
-            else:
-                lines.append(f"{prefix}{branch}{key}: {_format_tree_leaf(value)}")
-        return lines
-
-    if isinstance(payload, list):
-        for index, value in enumerate(payload):
-            is_last = index == len(payload) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
-            label = f"[{index}]"
-
-            if isinstance(value, (dict, list)):
-                lines.append(f"{prefix}{branch}{label}:")
-                lines.extend(_iter_tree_lines(value, child_prefix))
-            else:
-                lines.append(f"{prefix}{branch}{label}: {_format_tree_leaf(value)}")
-        return lines
-
-    lines.append(f"{prefix}`- {_format_tree_leaf(payload)}")
-    return lines
 
 
 def normalize_payload(payload: Any) -> Any:
@@ -170,7 +115,7 @@ def log_payload(title: str, payload: Any, as_json: bool) -> None:
         logger.info("%s", json.dumps(normalized, indent=2, default=str))
         return
 
-    for line in _iter_tree_lines(normalized):
+    for line in iter_tree_lines(normalized):
         logger.info("  %s", line)
 
 
