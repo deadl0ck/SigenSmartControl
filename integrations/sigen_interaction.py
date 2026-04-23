@@ -6,27 +6,20 @@ recovery when token refresh fails (refresh -> full re-auth -> retry once).
 
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
-import os
-import sys
+import logging
 
 from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
 from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
-import logging
+from utils.terminal_formatting import ANSI_PURPLE, colorize_text
 
 logger = logging.getLogger(__name__)
 MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
 ACTION_DIVIDER = "*" * 96
-_PURPLE = "\033[95m"
-_RESET = "\033[0m"
 
 
 def _divider_line() -> str:
     """Return divider line, colorized purple when terminal output supports ANSI colors."""
-    force_color = os.getenv("FORCE_COLOR", "").strip().lower() in {"1", "true", "yes", "on"}
-    is_tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
-    if (is_tty or force_color) and not os.getenv("NO_COLOR"):
-        return f"{_PURPLE}{ACTION_DIVIDER}{_RESET}"
-    return ACTION_DIVIDER
+    return colorize_text(ACTION_DIVIDER, ANSI_PURPLE)
 
 
 class SigenApiProtocol(Protocol):

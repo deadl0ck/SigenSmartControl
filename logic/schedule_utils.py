@@ -7,6 +7,7 @@ hours until the cheap-rate window opens, and dividing solar days into scheduling
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from config.settings import (
@@ -22,6 +23,7 @@ from config.settings import (
 )
 
 LOCAL_TZ = ZoneInfo(LOCAL_TIMEZONE)
+_CANONICAL_DAYTIME_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve")
 
 
 def _parse_utc(iso_str: str) -> datetime:
@@ -63,6 +65,26 @@ def derive_period_windows(
         name: sunrise_utc + solar_day * (i / n)
         for i, name in enumerate(period_names)
     }
+
+
+def order_daytime_periods(period_forecast: dict[str, tuple[int, str]]) -> list[str]:
+    """Return daytime periods in deterministic scheduler order.
+
+    Args:
+        period_forecast: Mapping of period labels to forecast tuples.
+
+    Returns:
+        Ordered daytime period list. Known periods are returned as Morn, Aftn,
+        Eve when present. Any additional daytime labels are appended in
+        alphabetical order for deterministic behavior.
+    """
+    known = [period for period in _CANONICAL_DAYTIME_PERIOD_ORDER if period in period_forecast]
+    extras = sorted(
+        period
+        for period in period_forecast
+        if period.upper() != "NIGHT" and period not in _CANONICAL_DAYTIME_PERIOD_ORDER
+    )
+    return known + extras
 
 
 def get_first_period_info(
@@ -257,3 +279,70 @@ def is_pre_sunrise_discharge_window(
         return False
 
     return seconds_until_sunrise <= lead_minutes * 60
+
+
+def get_active_night_context(
+    now_utc: datetime,
+    today_period_windows: dict[str, datetime],
+    today_period_forecast: dict[str, tuple[int, str]],
+    tomorrow_period_windows: dict[str, datetime],
+    tomorrow_period_forecast: dict[str, tuple[int, str]],
+    today_sunset_utc: datetime | None,
+    max_pre_period_window: timedelta,
+) -> dict[str, Any] | None:
+    """Determine whether a night window is currently active and return scheduling context.
+    
+    Returns active night context during two windows:
+    - PRE-DAWN: Before the first daytime period of today
+    - EVENING-NIGHT: After today's sunset until tomorrow's first daytime period
+    
+    Args:
+        now_utc: Current time in UTC.
+        today_period_windows: Mapping of today's period names to their start times (UTC).
+        today_period_forecast: Mapping of today's periods to (solar_watts, status) tuples.
+        tomorrow_period_windows: Mapping of tomorrow's period names to their start times (UTC).
+        tomorrow_period_forecast: Mapping of tomorrow's periods to (solar_watts, status) tuples.
+        today_sunset_utc: Today's sunset time in UTC, or None if not available.
+        max_pre_period_window: Maximum time before period start to open pre-period window.
+        
+    Returns:
+        Dict with keys {window_name, night_start, target_period, target_start, solar_value,
+        status, target_date} if in a night window, or None if in daytime.
+    """
+    today_first_period = get_first_period_info(today_period_windows, today_period_forecast)
+    tomorrow_first_period = get_first_period_info(tomorrow_period_windows, tomorrow_period_forecast)
+
+    if today_first_period is not None and now_utc < today_first_period[1]:
+        period, period_start, solar_value, status = today_first_period
+        pre_period_open_at = period_start - max_pre_period_window
+        if now_utc >= pre_period_open_at:
+            # Pre-period export window is open: yield to the period loop so the
+            # pre-period export check can run (e.g. Green forecast → create headroom).
+            return None
+        return {
+            "window_name": "PRE-DAWN",
+            "night_start": None,
+            "target_period": period,
+            "target_start": period_start,
+            "solar_value": solar_value,
+            "status": status,
+            "target_date": period_start.date(),
+        }
+
+    if (
+        today_sunset_utc is not None
+        and tomorrow_first_period is not None
+        and now_utc >= today_sunset_utc
+    ):
+        period, period_start, solar_value, status = tomorrow_first_period
+        return {
+            "window_name": "EVENING-NIGHT",
+            "night_start": today_sunset_utc,
+            "target_period": period,
+            "target_start": period_start,
+            "solar_value": solar_value,
+            "status": status,
+            "target_date": period_start.date(),
+        }
+
+    return None

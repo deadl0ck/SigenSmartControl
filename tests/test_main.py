@@ -14,6 +14,7 @@ import pytest
 import main as main_module
 from config.settings import (
     BATTERY_KWH,
+    CHEAP_RATE_START_HOUR,
     FORECAST_TO_MODE,
     PERIOD_TO_MODE,
     PRE_SUNRISE_DISCHARGE_LEAD_MINUTES,
@@ -123,7 +124,7 @@ def test_night_pre_dawn_low_soc_keeps_night_mode_characterization() -> None:
 
 def test_evening_night_hours_until_cheap_rate_positive_characterization() -> None:
     """EVENING-NIGHT branch should see positive cheap-rate countdown before start hour."""
-    cheap_rate_start_hour = main_module.CHEAP_RATE_START_HOUR
+    cheap_rate_start_hour = CHEAP_RATE_START_HOUR
     local_now = datetime(2026, 4, 19, max(0, cheap_rate_start_hour - 2), 0, tzinfo=LOCAL_TZ)
     now_utc = local_now.astimezone(timezone.utc)
 
