@@ -5,7 +5,7 @@ import pytest
 Tests mode setting, simulation mode, and API wrapper behavior.
 """
 
-from integrations.sigen_interaction import SigenInteraction
+from integrations.sigen_interaction import SigenInteraction, SigenPayloadError
 
 
 class DummyClient:
@@ -167,12 +167,14 @@ async def test_sigen_interaction_reauth_failure_propagates(
 
 
 @pytest.mark.asyncio
-async def test_sigen_interaction_energy_flow_missing_data_returns_empty_payload() -> None:
-    interaction = SigenInteraction.from_client(MissingDataKeyClient())
+async def test_sigen_interaction_energy_flow_missing_data_raises_payload_error() -> None:
+    client = MissingDataKeyClient()
+    interaction = SigenInteraction.from_client(client)
 
-    result = await interaction.get_energy_flow()
+    with pytest.raises(SigenPayloadError, match="missing expected 'data' key after retry"):
+        await interaction.get_energy_flow()
 
-    assert result == {}
+    assert client.calls == 2
 
 
 @pytest.mark.asyncio
