@@ -76,7 +76,7 @@ def log_decision_checkpoint(
     mode_label = mode_names.get(mode, mode) if mode is not None else "N/A"
     export_by_label = export_by_utc.isoformat() if export_by_utc is not None else "N/A"
     base_period = period.split(" ", 1)[0].split("->")[-1]
-    period_labels = {"Morn": "MORNING", "Aftn": "AFTERNOON", "Eve": "EVENING", "NIGHT": "NIGHT"}
+    period_labels = {"Morn": "MORNING", "Aftn": "AFTERNOON", "Eve": "EVENING", "Night": "NIGHT"}
     period_display = period_labels.get(base_period, base_period.upper())
     period_start_local = period_start_utc.astimezone(LOCAL_TZ).strftime("%H:%M")
     logger.info(f"[{period}] {stage} CHECK FOR {period_display} (Starts at {period_start_local}):")

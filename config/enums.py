@@ -15,7 +15,7 @@ class Period(str, Enum):
     MORN = "Morn"
     AFTN = "Aftn"
     EVE = "Eve"
-    NIGHT = "NIGHT"
+    NIGHT = "Night"
 
 
 class ForecastStatus(str, Enum):

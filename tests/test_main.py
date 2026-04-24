@@ -96,7 +96,7 @@ def test_night_pre_dawn_high_soc_prefers_self_powered_characterization() -> None
     chosen_mode = (
         SIGEN_MODES["SELF_POWERED"]
         if in_window and soc >= PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT
-        else PERIOD_TO_MODE["NIGHT"]
+        else PERIOD_TO_MODE["Night"]
     )
 
     assert in_window is True
@@ -119,11 +119,11 @@ def test_night_pre_dawn_low_soc_keeps_night_mode_characterization() -> None:
     chosen_mode = (
         SIGEN_MODES["SELF_POWERED"]
         if in_window and soc >= PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT
-        else PERIOD_TO_MODE["NIGHT"]
+        else PERIOD_TO_MODE["Night"]
     )
 
     assert in_window is True
-    assert chosen_mode == PERIOD_TO_MODE["NIGHT"]
+    assert chosen_mode == PERIOD_TO_MODE["Night"]
 
 
 def test_evening_night_hours_until_cheap_rate_positive_characterization() -> None:

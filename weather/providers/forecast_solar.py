@@ -127,7 +127,7 @@ class ForecastSolarForecast(BaseSolarForecast):
             return "Aftn"
         if 16 <= hour_local < 20:
             return "Eve"
-        return "NIGHT"
+        return "Night"
 
     @staticmethod
     def _local_timezone() -> ZoneInfo:
@@ -195,7 +195,7 @@ class ForecastSolarForecast(BaseSolarForecast):
         if not normalized_rows:
             raise ValueError("Forecast.Solar forecast produced no usable period rows")
 
-        period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "NIGHT": 3}
+        period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "Night": 3}
         normalized_rows.sort(key=lambda row: (row[0], period_order.get(row[1], 99)))
         self.table_data = normalized_rows
         self._log_table()

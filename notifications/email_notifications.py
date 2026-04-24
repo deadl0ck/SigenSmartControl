@@ -139,7 +139,7 @@ def _build_today_forecast_email_sections(
     for period, (watts, status) in today_period_forecast.items():
         if period in {"Morn", "Aftn", "Eve"}:
             continue
-        if period.upper() == "NIGHT":
+        if period == "Night":
             continue
         period_label = _format_email_period_label(period)
         status_text = str(status).capitalize()

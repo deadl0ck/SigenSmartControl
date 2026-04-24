@@ -238,7 +238,7 @@ def test_order_daytime_periods_enforces_morn_aftn_eve_order() -> None:
         "Eve": (3000, "Green"),
         "Morn": (1200, "Amber"),
         "Aftn": (2200, "Green"),
-        "NIGHT": (0, "Red"),
+        "Night": (0, "Red"),
     }
 
     assert main.order_daytime_periods(period_forecast) == ["Morn", "Aftn", "Eve"]
@@ -249,7 +249,7 @@ def test_order_daytime_periods_appends_unknown_daytime_periods() -> None:
         "Shoulder": (700, "Amber"),
         "Eve": (2100, "Green"),
         "Morn": (800, "Amber"),
-        "NIGHT": (0, "Red"),
+        "Night": (0, "Red"),
     }
 
     assert main.order_daytime_periods(period_forecast) == ["Morn", "Eve", "Shoulder"]

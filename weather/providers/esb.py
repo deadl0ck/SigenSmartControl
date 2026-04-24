@@ -25,7 +25,7 @@ class EsbSolarForecast(BaseSolarForecast):
         "Morning": "Morn",
         "Afternoon": "Aftn",
         "Evening": "Eve",
-        "Night": "NIGHT",
+        "Night": "Night",
     }
 
     def __init__(self, logger: logging.Logger) -> None:

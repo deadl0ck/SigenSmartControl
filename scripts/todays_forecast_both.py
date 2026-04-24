@@ -19,7 +19,7 @@ sys.path.insert(0, str(_ROOT))
 
 from weather.forecast import QuartzSolarForecast, SolarForecast
 
-_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve", "NIGHT")
+_PERIOD_ORDER: tuple[str, ...] = ("Morn", "Aftn", "Eve", "Night")
 
 
 def _fmt_forecast_cell(value_status: tuple[int, str] | None) -> str:
