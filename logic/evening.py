@@ -42,7 +42,7 @@ from logic.schedule_utils import (
     is_cheap_rate_window,
 )
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 PERIOD = "Eve"
 

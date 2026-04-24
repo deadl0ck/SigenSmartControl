@@ -14,7 +14,7 @@ from config.settings import (
     SIGEN_MODE_LABEL_TO_VALUE,
 )
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 ACTION_DIVIDER = "=" * 100
 
 

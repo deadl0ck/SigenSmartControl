@@ -262,7 +262,7 @@ async def notify_mode_change_email(
         logger: Logger instance used for status/error output.
     """
     if logger is None:
-        logger = logging.getLogger("sigen_control")
+        logger = logging.getLogger(__name__)
 
     sender = _get_email_sender_instance()
     if sender is None:

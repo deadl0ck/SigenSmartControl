@@ -12,7 +12,7 @@ from typing import Any
 from logic.mode_control import extract_mode_value
 
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 
 def log_mode_status(context: str, current_mode_raw: Any, mode_names: dict[int, str]) -> None:
