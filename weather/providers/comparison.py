@@ -35,7 +35,7 @@ class ForecastComparisonProvider:
     the primary provider's outputs to scheduler/control consumers.
     """
 
-    _period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "NIGHT": 3}
+    _period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "Night": 3}
 
     def __init__(
         self,

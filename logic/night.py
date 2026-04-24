@@ -16,6 +16,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from logic.scheduler_state import NightState
 
+from config.enums import Period
 from config.settings import (
     BATTERY_KWH,
     CHEAP_RATE_START_HOUR,
@@ -130,7 +131,7 @@ async def handle_night_window(
     """
     night_period_name = f"Night->{night_context['target_period']}"
     night_headroom_target_kwh = HEADROOM_TARGET_KWH
-    night_mode = PERIOD_TO_MODE["NIGHT"]
+    night_mode = PERIOD_TO_MODE[Period.NIGHT]
     night_mode_reason = "Night window active. Applying configured night mode."
     soc: float | None = None
     refresh_auth_on_wake = False

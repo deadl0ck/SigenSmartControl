@@ -141,11 +141,11 @@ def derive_period_for_hour(hour_text: str) -> str:
         hour_text: Local hour text in ``HH:MM`` format.
 
     Returns:
-        One of ``NIGHT``, ``Morn``, ``Aftn``, or ``Eve``.
+        One of ``Night``, ``Morn``, ``Aftn``, or ``Eve``.
     """
     when_utc = build_reference_utc(hour_text)
     if is_cheap_rate_window(when_utc):
-        return "NIGHT"
+        return "Night"
 
     hour = parse_hour_text(hour_text)
     if FORECAST_ANALYSIS_MORNING_START_HOUR <= hour < FORECAST_ANALYSIS_MORNING_END_HOUR:
@@ -155,7 +155,7 @@ def derive_period_for_hour(hour_text: str) -> str:
     if FORECAST_ANALYSIS_EVENING_START_HOUR <= hour < FORECAST_ANALYSIS_EVENING_END_HOUR:
         return "Eve"
     if hour < FORECAST_ANALYSIS_MORNING_START_HOUR:
-        return "NIGHT"
+        return "Night"
     return "Eve"
 
 
@@ -170,7 +170,7 @@ def forecast_for_hour(hour_text: str, daytime_forecast_by_period: dict[str, str]
         Forecast label for the hour. Cheap-rate hours always return ``RED``.
     """
     period = derive_period_for_hour(hour_text)
-    if period == "NIGHT":
+    if period == "Night":
         return "RED"
     return normalize_forecast_label(daytime_forecast_by_period[period])
 
@@ -397,7 +397,7 @@ def evaluate_scenario_row(
     period = derive_period_for_hour(hour_text)
     schedule_period = get_schedule_period_for_time(when_utc)
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-    period_solar_kwh = 0.0 if period == "NIGHT" else min(SOLAR_PV_KW, INVERTER_KW) * 3.0
+    period_solar_kwh = 0.0 if period == "Night" else min(SOLAR_PV_KW, INVERTER_KW) * 3.0
     target_mode_value, reason = decide_operational_mode(
         DecisionContext(
             period=period,

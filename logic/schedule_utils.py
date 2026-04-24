@@ -85,7 +85,7 @@ def order_daytime_periods(period_forecast: dict[str, tuple[int, str]]) -> list[s
     extras = sorted(
         period
         for period in period_forecast
-        if period.upper() != "NIGHT" and period not in _CANONICAL_DAYTIME_PERIOD_ORDER
+        if period != "Night" and period not in _CANONICAL_DAYTIME_PERIOD_ORDER
     )
     return known + extras
 
@@ -157,19 +157,19 @@ def get_hours_until_cheap_rate(now_utc: datetime) -> float:
 
 
 def get_schedule_period_for_time(when_utc: datetime) -> str:
-    """Determine which schedule period (NIGHT, PEAK, or DAY) applies at a given time.
+    """Determine which schedule period (Night, PEAK, or DAY) applies at a given time.
 
     Args:
         when_utc: Time to check, in UTC.
 
     Returns:
-        String representing the schedule period: 'NIGHT' (cheap-rate window),
+        String representing the schedule period: 'Night' (cheap-rate window),
         'PEAK' (peak hours), or 'DAY' (standard daytime).
     """
     local_hour = when_utc.astimezone(LOCAL_TZ).hour
 
     if is_cheap_rate_window(when_utc):
-        return "NIGHT"
+        return "Night"
 
     if PEAK_START_HOUR <= local_hour < PEAK_END_HOUR:
         return "PEAK"

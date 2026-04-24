@@ -101,7 +101,7 @@ class BaseSolarForecast:
         )
         self.logger.info(DIVIDER)
         for day, period, value, status in self.table_data:
-            if day == today_day and period != "NIGHT":
+            if day == today_day and period != "Night":
                 self.logger.info(f"| {day:^9} | {period:^8} | {value:^11} | {status:^6} |")
                 values.append("G" if status == "Green" else "A" if status == "Amber" else "R")
         self.logger.info(DIVIDER)
@@ -122,7 +122,7 @@ class BaseSolarForecast:
         for day, period, value, status in self.table_data:
             if day != day_label:
                 continue
-            if not include_night and period == "NIGHT":
+            if not include_night and period == "Night":
                 continue
             period_forecast[period] = (value, status)
         return period_forecast
