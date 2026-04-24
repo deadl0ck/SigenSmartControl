@@ -108,8 +108,8 @@ class TestTimedExportStateMachine:
 
     def test_timed_export_state_structure(self):
         """Timed export override dict has correct structure when active."""
-        from main import _empty_timed_export_override
-        
+        from logic.timed_export import _empty_timed_export_override
+
         state = _empty_timed_export_override()
         
         # Verify structure

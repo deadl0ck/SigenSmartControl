@@ -8,9 +8,14 @@ from typing import Any
 
 import pytest
 
+import logging
+
 import main
 import logic.mode_change as mode_change_module
+import logic.timed_export as timed_export_module
 from logic.schedule_utils import is_pre_sunrise_discharge_window
+
+_test_logger = logging.getLogger("test")
 
 
 def test_suppress_elapsed_periods_except_latest_marks_only_stale_periods() -> None:
@@ -99,9 +104,8 @@ def test_mid_period_window_end_excludes_morning_after_afternoon_starts() -> None
     assert now >= aftn_start and now < aftn_end
 
 
-def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persist_and_load_timed_export_override(tmp_path) -> None:
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
     override = {
         "active": True,
         "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
@@ -115,8 +119,8 @@ def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.Mo
         "export_soc_floor": None,
     }
 
-    main._persist_timed_export_override(override)
-    loaded = main._load_timed_export_override()
+    timed_export_module.persist_timed_export_override(override, logger=_test_logger, path=state_path)
+    loaded = timed_export_module.load_timed_export_override(logger=_test_logger, path=state_path)
 
     assert state_path.exists()
     assert loaded["active"] is True
@@ -126,11 +130,10 @@ def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.Mo
     assert loaded["restore_at"] == override["restore_at"]
 
 
-def test_persist_timed_export_override_clears_inactive_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persist_timed_export_override_clears_inactive_file(tmp_path) -> None:
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
 
-    main._persist_timed_export_override(
+    timed_export_module.persist_timed_export_override(
         {
             "active": True,
             "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
@@ -142,11 +145,17 @@ def test_persist_timed_export_override_clears_inactive_file(tmp_path, monkeypatc
             "is_clipping_export": False,
             "clipping_soc_floor": None,
             "export_soc_floor": None,
-        }
+        },
+        logger=_test_logger,
+        path=state_path,
     )
     assert state_path.exists()
 
-    main._persist_timed_export_override(main._empty_timed_export_override())
+    timed_export_module.persist_timed_export_override(
+        timed_export_module._empty_timed_export_override(),
+        logger=_test_logger,
+        path=state_path,
+    )
 
     assert not state_path.exists()
 

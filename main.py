@@ -38,7 +38,6 @@ from logic.scheduler_coordinator import SchedulerCoordinator
 from logic.mode_change import apply_mode_change as _apply_mode_change_core
 from logic.mode_control import ACTION_DIVIDER
 from logic.mode_logging import log_mode_status
-import logic.timed_export as timed_export_module
 from logic.timed_export import (
     load_timed_export_override,
     persist_timed_export_override,
@@ -73,34 +72,6 @@ logger = logging.getLogger("sigen_control")
 
 
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
-
-
-# --- Backward-compatibility wrappers for tests ---
-
-
-def _empty_timed_export_override() -> dict[str, Any]:
-    """Backward-compatible wrapper for timed-export default state."""
-    return timed_export_module._empty_timed_export_override()
-
-
-def _persist_timed_export_override(state: dict[str, Any]) -> None:
-    """Backward-compatible wrapper for timed-export persistence."""
-    original_path = timed_export_module.TIMED_EXPORT_STATE_PATH
-    timed_export_module.TIMED_EXPORT_STATE_PATH = TIMED_EXPORT_STATE_PATH
-    try:
-        timed_export_module.persist_timed_export_override(state, logger=logger)
-    finally:
-        timed_export_module.TIMED_EXPORT_STATE_PATH = original_path
-
-
-def _load_timed_export_override() -> dict[str, Any]:
-    """Backward-compatible wrapper for timed-export load."""
-    original_path = timed_export_module.TIMED_EXPORT_STATE_PATH
-    timed_export_module.TIMED_EXPORT_STATE_PATH = TIMED_EXPORT_STATE_PATH
-    try:
-        return timed_export_module.load_timed_export_override(logger=logger)
-    finally:
-        timed_export_module.TIMED_EXPORT_STATE_PATH = original_path
 
 
 async def _notify_startup_email(

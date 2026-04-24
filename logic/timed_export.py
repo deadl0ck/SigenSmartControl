@@ -46,14 +46,16 @@ def persist_timed_export_override(
     state: dict[str, Any],
     *,
     logger: logging.Logger,
+    path: Path | None = None,
 ) -> None:
     """Persist active timed export override state to disk or clear it.
 
     Args:
         state: Timed export override state dict.
         logger: Scheduler logger used for warning output.
+        path: Override path for the state file. Defaults to TIMED_EXPORT_STATE_PATH.
     """
-    state_path = Path(TIMED_EXPORT_STATE_PATH)
+    state_path = path if path is not None else Path(TIMED_EXPORT_STATE_PATH)
     if not state.get("active"):
         try:
             state_path.unlink(missing_ok=True)
@@ -77,16 +79,21 @@ def persist_timed_export_override(
         logger.warning("[TIMED EXPORT] Failed to persist override state: %s", exc)
 
 
-def load_timed_export_override(*, logger: logging.Logger) -> dict[str, Any]:
+def load_timed_export_override(
+    *,
+    logger: logging.Logger,
+    path: Path | None = None,
+) -> dict[str, Any]:
     """Load persisted timed export override state from disk when available.
 
     Args:
         logger: Scheduler logger used for warning output.
+        path: Override path for the state file. Defaults to TIMED_EXPORT_STATE_PATH.
 
     Returns:
         Restored timed export state, or an inactive default state when unavailable.
     """
-    state_path = Path(TIMED_EXPORT_STATE_PATH)
+    state_path = path if path is not None else Path(TIMED_EXPORT_STATE_PATH)
     if not state_path.exists():
         return _empty_timed_export_override()
 
