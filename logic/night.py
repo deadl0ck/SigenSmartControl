@@ -11,7 +11,10 @@ import logging
 import math
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from logic.scheduler_state import NightState
 
 from config.settings import (
     BATTERY_KWH,
@@ -94,7 +97,7 @@ async def handle_night_window(
     *,
     now_utc: datetime,
     night_context: dict[str, Any],
-    night_state: dict[str, Any],
+    night_state: "NightState",
     period_solar_kwh: float,
     fetch_soc: Callable[[str], Awaitable[float | None]],
     start_timed_grid_export: Callable[..., Awaitable[bool]],

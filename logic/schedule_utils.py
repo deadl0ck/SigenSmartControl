@@ -7,8 +7,11 @@ hours until the cheap-rate window opens, and dividing solar days into scheduling
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from logic.scheduler_state import DayStateEntry
 
 from config.settings import (
     CHEAP_RATE_START_HOUR,
@@ -183,7 +186,7 @@ def get_schedule_period_for_time(when_utc: datetime) -> str:
 def suppress_elapsed_periods_except_latest(
     now_utc: datetime,
     period_windows: dict[str, datetime],
-    day_state: dict[str, dict[str, bool]],
+    day_state: "dict[str, DayStateEntry]",
 ) -> list[str]:
     """Mark all elapsed periods as 'done' except the latest, allowing recovery if missed.
 

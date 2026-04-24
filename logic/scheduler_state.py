@@ -7,10 +7,38 @@ auth state, and mode-change tracking.
 
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, TypedDict
 
 from config.settings import LIVE_SOLAR_AVERAGE_SAMPLE_COUNT
+
+
+class DayStateEntry(TypedDict):
+    """Per-period action flags tracking which scheduler events have fired today.
+
+    Attributes:
+        pre_set: True once the pre-period headroom/export check has been applied.
+        start_set: True once the period-start mode decision has been applied.
+        clipping_export_set: True once a live clipping-risk export has been started.
+    """
+
+    pre_set: bool
+    start_set: bool
+    clipping_export_set: bool
+
+
+class NightState(TypedDict):
+    """Mutable night-window state threaded through the scheduler and night handler.
+
+    Attributes:
+        mode_set_key: (target_date, mode_int) tuple for the last night mode applied,
+            or None if no night mode has been set yet this cycle.
+        sleep_snapshot_for_date: Local date for which the end-of-day telemetry
+            snapshot has been captured, or None if not yet captured.
+    """
+
+    mode_set_key: tuple[date, int] | None
+    sleep_snapshot_for_date: date | None
 
 
 @dataclass
@@ -46,18 +74,18 @@ class SchedulerState:
     """
 
     today_period_windows: dict[str, datetime] = field(default_factory=dict)
-    ordered_period_windows: list = field(default_factory=list)
+    ordered_period_windows: list[tuple[str, datetime]] = field(default_factory=list)
     tomorrow_period_windows: dict[str, datetime] = field(default_factory=dict)
     today_period_forecast: dict[str, tuple[int, str]] = field(default_factory=dict)
     tomorrow_period_forecast: dict[str, tuple[int, str]] = field(default_factory=dict)
     today_sunrise_utc: datetime | None = None
     today_sunset_utc: datetime | None = None
     tomorrow_sunrise_utc: datetime | None = None
-    day_state: dict[str, dict[str, bool]] = field(default_factory=dict)
-    night_state: dict[str, Any] = field(default_factory=lambda: {
-        "mode_set_key": None,
-        "sleep_snapshot_for_date": None,
-    })
+    day_state: dict[str, DayStateEntry] = field(default_factory=dict)
+    night_state: NightState = field(default_factory=lambda: NightState(
+        mode_set_key=None,
+        sleep_snapshot_for_date=None,
+    ))
     current_date: datetime | None = None
     auth_refreshed_for_date: datetime | None = None
     refresh_auth_on_wake: bool = False
