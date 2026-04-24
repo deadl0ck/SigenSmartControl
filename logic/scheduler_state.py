@@ -57,7 +57,7 @@ class SchedulerState:
         tomorrow_sunrise_utc: Sunrise time for tomorrow in UTC, or None if not yet calculated.
         day_state: Tracks which actions (pre_set, start_set) have been taken for each period today.
         night_state: Tracks night mode state including mode_set_key and sleep_snapshot_for_date.
-        current_date: Current local date (date part only), or None if not yet set.
+        current_date: Current local date (date part only).
         auth_refreshed_for_date: Last date on which Sigen auth was refreshed, or None.
         refresh_auth_on_wake: Flag indicating auth refresh should be performed on next wake.
         live_solar_kw_samples: Rolling deque of live solar generation samples in kW,
@@ -73,6 +73,7 @@ class SchedulerState:
         sleep_override_seconds: Override sleep duration in seconds, or None for normal polling.
     """
 
+    current_date: date
     today_period_windows: dict[str, datetime] = field(default_factory=dict)
     ordered_period_windows: list[tuple[str, datetime]] = field(default_factory=list)
     tomorrow_period_windows: dict[str, datetime] = field(default_factory=dict)
@@ -86,7 +87,6 @@ class SchedulerState:
         mode_set_key=None,
         sleep_snapshot_for_date=None,
     ))
-    current_date: datetime | None = None
     auth_refreshed_for_date: datetime | None = None
     refresh_auth_on_wake: bool = False
     live_solar_kw_samples: deque[float] = field(

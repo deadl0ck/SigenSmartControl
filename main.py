@@ -300,7 +300,9 @@ async def run_scheduler() -> None:
     mode_names = SIGEN_MODE_NAMES
 
     sigen = await create_scheduler_interaction(mode_names)
+    now = datetime.now(timezone.utc)
     state = SchedulerState(
+        current_date=now.date(),
         forecast_calibration=build_and_save_forecast_calibration(),
         timed_export_override=load_timed_export_override(logger=logger),
     )
