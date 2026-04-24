@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 import main
+import logic.mode_change as mode_change_module
 from logic.schedule_utils import is_pre_sunrise_discharge_window
 
 
@@ -301,7 +302,7 @@ async def test_apply_mode_change_does_not_archive_during_pytest(
     def fake_append_mode_change_event(**kwargs: Any) -> None:
         called["append"] = True
 
-    monkeypatch.setattr(main, "append_mode_change_event", fake_append_mode_change_event)
+    monkeypatch.setattr(mode_change_module, "append_mode_change_event", fake_append_mode_change_event)
 
     ok = await main.apply_mode_change(
         sigen=sigen,
@@ -321,14 +322,14 @@ async def test_apply_mode_change_simulation_triggers_email_notification(
 ) -> None:
     called: dict[str, Any] = {"email": False}
 
-    async def fake_notify(**kwargs):
+    async def fake_notify(logger: Any, **kwargs: Any) -> None:
         called["email"] = True
         assert kwargs["success"] is True
         assert kwargs["period"] == "Night->Morn"
         assert kwargs["requested_mode"] == 1
 
-    monkeypatch.setattr(main, "FULL_SIMULATION_MODE", True)
-    monkeypatch.setattr(main, "_notify_mode_change_email", fake_notify)
+    monkeypatch.setattr(mode_change_module, "FULL_SIMULATION_MODE", True)
+    monkeypatch.setattr(mode_change_module, "_notify_mode_change_email", fake_notify)
 
     ok = await main.apply_mode_change(
         sigen=None,
