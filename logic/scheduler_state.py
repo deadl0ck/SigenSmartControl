@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from config.settings import LIVE_SOLAR_AVERAGE_SAMPLE_COUNT
+
 
 @dataclass
 class SchedulerState:
@@ -30,7 +32,8 @@ class SchedulerState:
         current_date: Current local date (date part only), or None if not yet set.
         auth_refreshed_for_date: Last date on which Sigen auth was refreshed, or None.
         refresh_auth_on_wake: Flag indicating auth refresh should be performed on next wake.
-        live_solar_kw_samples: Deque of live solar generation samples in kW (fixed max length).
+        live_solar_kw_samples: Rolling deque of live solar generation samples in kW,
+            bounded to LIVE_SOLAR_AVERAGE_SAMPLE_COUNT (3) entries.
         forecast_calibration: Learned multipliers per period, keyed by period name.
         last_forecast_refresh_utc: Timestamp of last successful forecast refresh, or None.
         last_forecast_solar_archive_utc: Timestamp of last successful forecast.solar archive, or None.
@@ -58,7 +61,9 @@ class SchedulerState:
     current_date: datetime | None = None
     auth_refreshed_for_date: datetime | None = None
     refresh_auth_on_wake: bool = False
-    live_solar_kw_samples: deque[float] = field(default_factory=lambda: deque(maxlen=None))
+    live_solar_kw_samples: deque[float] = field(
+        default_factory=lambda: deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)
+    )
     forecast_calibration: dict[str, Any] = field(default_factory=dict)
     last_forecast_refresh_utc: datetime | None = None
     last_forecast_solar_archive_utc: datetime | None = None

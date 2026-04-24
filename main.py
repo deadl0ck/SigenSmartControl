@@ -7,7 +7,6 @@ grid arbitrage, and cost-minimization based on real-time conditions.
 """
 
 import asyncio
-from collections import deque
 import logging
 import os
 from datetime import datetime, timezone
@@ -28,7 +27,6 @@ from config.settings import (
     SOLAR_PV_KW,
     INVERTER_KW,
     BATTERY_KWH,
-    LIVE_SOLAR_AVERAGE_SAMPLE_COUNT,
     DEFAULT_SIMULATED_SOC_PERCENT,
 )
 from integrations.sigen_interaction import SigenInteraction, SigenPayloadError
@@ -305,7 +303,6 @@ async def run_scheduler() -> None:
     state = SchedulerState(
         forecast_calibration=build_and_save_forecast_calibration(),
         timed_export_override=load_timed_export_override(logger=logger),
-        live_solar_kw_samples=deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT),
     )
 
     async def _apply_mode_change_tracked(
