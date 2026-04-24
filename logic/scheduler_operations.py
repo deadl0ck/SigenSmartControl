@@ -92,6 +92,7 @@ async def refresh_daily_data(
     daytime_periods = order_daytime_periods(state.today_period_forecast)
     tomorrow_daytime_periods = order_daytime_periods(state.tomorrow_period_forecast)
     state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
+    state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda item: item[1])
     state.tomorrow_period_windows = derive_period_windows(
         tomorrow_sunrise,
         tomorrow_sunset,

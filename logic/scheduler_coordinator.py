@@ -81,6 +81,33 @@ class SchedulerCoordinator:
         self._start_timed_export: Callable | None = None
         self._maybe_restore_export: Callable | None = None
 
+    # --- Suppression helpers ---
+
+    def _log_suppressed_periods(
+        self, suppressed_periods: list[str], now: datetime, level: str = "info"
+    ) -> None:
+        """Log a suppression notice for stale elapsed daytime periods.
+
+        Finds all elapsed periods from the ordered state, then emits one log line
+        describing which were suppressed and which remains actionable.
+
+        Args:
+            suppressed_periods: Period names that were suppressed.
+            now: Current tick time in UTC.
+            level: Log level to use — ``"info"`` or ``"warning"``.
+        """
+        elapsed_periods = [
+            p for p, p_start in self.state.ordered_period_windows if now >= p_start
+        ]
+        log_fn = getattr(self.logger, level)
+        log_fn(
+            "[SCHEDULER] Suppressing stale elapsed daytime periods%s: %s. "
+            "Only the latest elapsed period remains actionable: %s.",
+            " on startup/day refresh" if level == "info" else " on live tick",
+            ", ".join(suppressed_periods),
+            elapsed_periods[-1],
+        )
+
     # --- Per-tick context wrappers ---
 
     async def _fetch_soc(self, period: str) -> float | None:
@@ -131,17 +158,7 @@ class SchedulerCoordinator:
                     now, self.state.today_period_windows, self.state.day_state,
                 )
                 if suppressed_periods:
-                    elapsed_periods = [
-                        p for p, p_start in sorted(
-                            self.state.today_period_windows.items(), key=lambda item: item[1]
-                        )
-                        if now >= p_start
-                    ]
-                    self.logger.info(
-                        "[SCHEDULER] Suppressing stale elapsed daytime periods on startup/day refresh: "
-                        f"{', '.join(suppressed_periods)}. "
-                        f"Keeping only the latest elapsed period actionable: {elapsed_periods[-1]}."
-                    )
+                    self._log_suppressed_periods(suppressed_periods, now, level="info")
             except Exception as e:
                 self.logger.error(f"[SCHEDULER] Failed to refresh daily data: {e}. Retrying next tick.")
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
@@ -166,18 +183,7 @@ class SchedulerCoordinator:
             now, self.state.today_period_windows, self.state.day_state,
         )
         if suppressed_periods:
-            elapsed_periods = [
-                p for p, p_start in sorted(
-                    self.state.today_period_windows.items(), key=lambda item: item[1]
-                )
-                if now >= p_start
-            ]
-            self.logger.warning(
-                "[SCHEDULER] Suppressing stale elapsed daytime periods on live tick: %s. "
-                "Only the latest elapsed period remains actionable: %s.",
-                ", ".join(suppressed_periods),
-                elapsed_periods[-1],
-            )
+            self._log_suppressed_periods(suppressed_periods, now, level="warning")
         return False
 
     def _handle_archive(self, now: datetime) -> None:
@@ -287,12 +293,11 @@ class SchedulerCoordinator:
             self.logger.info("[SCHEDULER] Night window active; skipping daytime period evaluation this tick.")
 
         if not night_tick_consumed:
-            ordered_period_windows = sorted(self.state.today_period_windows.items(), key=lambda item: item[1])
-            for period_index, (period, period_start) in enumerate(ordered_period_windows):
+            for period_index, (period, period_start) in enumerate(self.state.ordered_period_windows):
                 solar_value, status = self.state.today_period_forecast[period]
                 period_end_utc = (
-                    ordered_period_windows[period_index + 1][1]
-                    if period_index + 1 < len(ordered_period_windows)
+                    self.state.ordered_period_windows[period_index + 1][1]
+                    if period_index + 1 < len(self.state.ordered_period_windows)
                     else self.state.today_sunset_utc
                 )
                 shared_kwargs = dict(
