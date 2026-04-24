@@ -17,6 +17,10 @@ MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
 ACTION_DIVIDER = "*" * 96
 
 
+class SigenPayloadError(Exception):
+    """Raised when the Sigen API returns a structurally unexpected payload."""
+
+
 def _divider_line() -> str:
     """Return divider line, colorized purple when terminal output supports ANSI colors."""
     return colorize_text(ACTION_DIVIDER, ANSI_PURPLE)
@@ -77,10 +81,15 @@ class SigenInteraction:
 
     @staticmethod
     def _is_missing_data_key_error(exc: Exception) -> bool:
-        """Return True when upstream response parsing failed on missing 'data' key."""
+        """Return True when upstream response parsing failed on missing 'data' key.
+
+        The Sigen API wraps all responses in a top-level ``data`` envelope.  A
+        ``KeyError`` whose first argument is exactly ``"data"`` means that
+        envelope was absent — a known intermittent upstream quirk.
+        """
         if not isinstance(exc, KeyError):
             return False
-        return any("data" in str(part).lower() for part in exc.args)
+        return exc.args[0] == "data" if exc.args else False
 
     async def _call_with_reauth_once(
         self,
@@ -224,11 +233,14 @@ class SigenInteraction:
                     raise
                 logger.error(
                     "[ENERGY FLOW] Retry also failed due to missing expected key (%s). "
-                    "Returning empty payload for this tick.",
+                    "Raising SigenPayloadError.",
                     retry_exc,
                     exc_info=True,
                 )
-                return {}
+                raise SigenPayloadError(
+                    f"get_energy_flow: missing expected 'data' key after retry "
+                    f"(exc_args={retry_exc.args!r})"
+                ) from retry_exc
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
         """Get the list of supported operational modes.

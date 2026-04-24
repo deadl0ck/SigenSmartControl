@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from config.settings import SIGEN_MODES
+from integrations.sigen_interaction import SigenPayloadError
 from logic.mode_control import ACTION_DIVIDER, mode_matches_target
 from logic.mode_logging import log_mode_status
 from telemetry.telemetry_archive import (
@@ -147,6 +148,12 @@ async def apply_mode_change(
                 if isinstance(soc_value, (int, float)):
                     battery_soc = float(soc_value)
             solar_generated_today_kwh = extract_today_solar_generation_kwh(energy_flow_for_email)
+    except SigenPayloadError as exc:
+        logger.warning(
+            "Inverter payload error reading energy flow before mode-change email for %s: %s",
+            period,
+            exc,
+        )
     except Exception as exc:
         logger.debug(
             "Could not read energy flow before mode-change email for %s: %s",
@@ -275,6 +282,8 @@ async def sample_live_solar_power(
                 len(live_solar_kw_samples),
                 live_solar_average_sample_count,
             )
+    except SigenPayloadError as exc:
+        logger.warning("[SCHEDULER] Inverter payload error sampling live solar power — skipping: %s", exc)
     except Exception as exc:
         logger.warning("[SCHEDULER] Failed to sample live solar power: %s", exc)
 
