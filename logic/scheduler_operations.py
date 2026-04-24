@@ -64,9 +64,6 @@ async def refresh_daily_data(
     logger.info(f"[SCHEDULER] Today's forecast: {state.today_period_forecast}")
     logger.info(f"[SCHEDULER] Tomorrow's forecast: {state.tomorrow_period_forecast}")
 
-    if state.current_date is None:
-        raise RuntimeError("Current scheduler date was not initialized before refresh.")
-
     tomorrow_date = state.current_date + timedelta(days=1)
 
     sunrise_str, sunset_str = get_sunrise_sunset(
