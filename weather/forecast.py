@@ -103,24 +103,24 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
     """Create the active forecast provider based on constants configuration."""
     if FORECAST_PROVIDER == "esb_api":
         primary = SolarForecast(logger)
-        forecast_solar_provider: ForecastSolarForecast | None = None
-        quartz_provider: QuartzSolarForecast | None = None
 
-        try:
-            forecast_solar_provider = ForecastSolarForecast(logger)
-        except Exception as exc:
-            logger.warning(
-                "[FORECAST-COMPARE] Forecast.Solar backup provider unavailable. Reason: %s",
-                exc,
-            )
+        provider_classes = [
+            (ForecastSolarForecast, "forecast.solar"),
+            (QuartzSolarForecast, "quartz"),
+        ]
+        providers: list[ForecastSolarForecast | QuartzSolarForecast] = []
+        for cls, name in provider_classes:
+            try:
+                providers.append(cls(logger))
+            except Exception as exc:
+                logger.warning("[FORECAST-COMPARE] %s unavailable: %s", name, exc)
 
-        try:
-            quartz_provider = QuartzSolarForecast(logger)
-        except Exception as exc:
-            logger.warning(
-                "[FORECAST-COMPARE] Quartz backup provider unavailable. Reason: %s",
-                exc,
-            )
+        forecast_solar_provider = next(
+            (p for p in providers if isinstance(p, ForecastSolarForecast)), None
+        )
+        quartz_provider = next(
+            (p for p in providers if isinstance(p, QuartzSolarForecast)), None
+        )
 
         if forecast_solar_provider is not None:
             return ComparingSolarForecastProvider(
