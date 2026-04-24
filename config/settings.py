@@ -27,6 +27,7 @@ LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 # ==============================
 # Scheduler cadence.
 # How often the self-contained scheduler wakes up to re-check forecast windows.
+# 5 minutes balances API rate limits against decision latency; finer cadence adds no value given inverter mode-change overhead.
 POLL_INTERVAL_MINUTES = 5
 # How often to refresh forecast data during the day (0 disables intra-day refresh).
 FORECAST_REFRESH_INTERVAL_MINUTES = 30
@@ -44,10 +45,13 @@ FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES = 60
 # Live solar and pre-period export calculations.
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 # Increased to start proactive headroom checks earlier on fast-ramp solar mornings.
+# 180 min (3 h) covers the full morning ramp: at 3.4 kW surplus × 3 h = ~10 kWh, matching HEADROOM_TARGET_KWH.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 180
 # Number of live-solar samples used in rolling average calculations.
+# 3 samples at 5-min intervals = 15-min average; smooths cloud transients without lagging behind genuine ramps.
 LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
 # Lower bound for effective battery export capacity in pre-period calculations.
+# 0.2 kW is the minimum measurable net export after inverter standby losses; values below this are indistinguishable from idle.
 MIN_EFFECTIVE_BATTERY_EXPORT_KW = 0.2
 
 # Simulation and safety controls.
@@ -73,10 +77,12 @@ ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE = True
 # Example: "4,5,6,7,8,9" for Apr-Sep.
 PRE_SUNRISE_DISCHARGE_MONTHS = "4,5,6,7,8,9"
 # Minutes before sunrise to begin pre-sunrise discharge in enabled months.
+# 120 min (2 h) gives enough time at ~2 kW discharge to clear ~4 kWh, creating meaningful headroom before solar ramps up.
 PRE_SUNRISE_DISCHARGE_LEAD_MINUTES = 120
 # Minimum SOC required before pre-sunrise discharge is allowed to switch away
 # from night charging behavior. Below this threshold, the scheduler keeps the
 # configured night mode instead of discharging into the morning.
+# 65% (~15.6 kWh) ensures enough overnight reserve remains after 2 h discharge to cover typical morning household load if solar underperforms.
 PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT = 65.0
 # Local timezone used for schedule windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
@@ -109,7 +115,9 @@ SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
 # Red: output_fraction < QUARTZ_RED_CAPACITY_FRACTION
 # Amber: QUARTZ_RED_CAPACITY_FRACTION <= output_fraction < QUARTZ_GREEN_CAPACITY_FRACTION
 # Green: output_fraction >= QUARTZ_GREEN_CAPACITY_FRACTION
+# 20% of 8.9 kW ≈ 1.8 kW: below this the inverter cannot meaningfully charge the battery; treat as Red.
 QUARTZ_RED_CAPACITY_FRACTION = 0.20
+# 40% of 8.9 kW ≈ 3.6 kW: above this, surplus exceeds ESTIMATED_HOME_LOAD_KW and meaningful storage is likely; treat as Green.
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
 
 # Telemetry clipping heuristics.
@@ -199,6 +207,7 @@ PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 # SOC threshold for the mid-period high-SOC safety export check (combined with solar).
 # When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.
+# 50% (12 kWh) matches HEADROOM_TARGET_KWH: above this the battery cannot absorb a full-day Green surplus without clipping.
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 50.0
 # Solar generation threshold (kW) for mid-period high-SOC safety export.
 # Only triggers when live solar is this strong and SOC >= MORNING_HIGH_SOC_THRESHOLD_PERCENT.
@@ -214,6 +223,7 @@ LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
 # Lowered so underforecast high-irradiance ramps are caught earlier.
+# 3.2 kW ≈ 36% of array capacity; at this level surplus already exceeds typical home load, so battery fill risk is real if headroom is low.
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
 # SOC floor for mid-period clipping export: if timed export started by clipping-risk
 # promotion drops SOC to this floor, cancel the export and restore prior mode.
