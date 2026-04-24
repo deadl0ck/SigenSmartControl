@@ -256,6 +256,8 @@ SIGEN_MODES = {
     "CUSTOM": 9,  # Custom Operation Mode
 }
 
+SIGEN_MODE_NAMES: dict[int, str] = {v: k for k, v in SIGEN_MODES.items()}
+
 # Mapping of API label responses to numeric mode values.
 # This is used when get_operational_mode returns a text label rather than an integer.
 # Keys are matched case-insensitively after basic normalization.
