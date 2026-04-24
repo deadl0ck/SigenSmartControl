@@ -128,7 +128,12 @@ def _extract_forecast_value_w(forecast_for_day: Any, period: str) -> int | None:
 
 
 def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
-    """Read telemetry JSONL records inside the rolling analysis window."""
+    """Read telemetry JSONL records inside the rolling analysis window.
+
+    Streams the JSONL file line-by-line and uses a fast string pre-filter to
+    skip lines whose ``captured_at`` date precedes the cutoff without calling
+    ``json.loads()``.
+    """
     path = Path(INVERTER_TELEMETRY_ARCHIVE_PATH)
     if not path.exists():
         return []
@@ -136,19 +141,35 @@ def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
     cutoff_date = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date() - timedelta(
         days=CALIBRATION_WINDOW_DAYS
     )
-    snapshots: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            snapshot = json.loads(line)
-            captured_at = datetime.fromisoformat(snapshot["captured_at"])
-        except Exception:
-            continue
+    cutoff_str = cutoff_date.strftime("%Y-%m-%d")
+    _DATE_LEN = 10  # "YYYY-MM-DD"
+    _KEY = '"captured_at"'
 
-        if captured_at.date() < cutoff_date:
-            continue
-        snapshots.append(snapshot)
+    snapshots: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Fast pre-filter: extract the captured_at date without full JSON parse.
+            key_idx = line.find(_KEY)
+            if key_idx == -1:
+                continue
+            val_start = line.find('"', key_idx + len(_KEY) + 1)
+            if val_start == -1:
+                continue
+            date_str = line[val_start + 1: val_start + 1 + _DATE_LEN]
+            if date_str < cutoff_str:
+                continue
+
+            try:
+                snapshot = json.loads(line)
+                datetime.fromisoformat(snapshot["captured_at"])
+            except Exception:
+                continue
+
+            snapshots.append(snapshot)
 
     return snapshots
 
