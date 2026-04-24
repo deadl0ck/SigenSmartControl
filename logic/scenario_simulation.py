@@ -16,7 +16,6 @@ from typing import Any
 from config.settings import (
     BATTERY_KWH,
     BRIDGE_BATTERY_RESERVE_KWH,
-    ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     ESTIMATED_HOME_LOAD_KW,
     FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
     FORECAST_ANALYSIS_AFTERNOON_START_HOUR,
@@ -29,7 +28,7 @@ from config.settings import (
     SIGEN_MODES,
     SOLAR_PV_KW,
 )
-from logic.decision_logic import calc_headroom_kwh, decide_operational_mode
+from logic.decision_logic import DecisionContext, calc_headroom_kwh, decide_operational_mode
 from logic.schedule_utils import get_hours_until_cheap_rate, get_schedule_period_for_time, is_cheap_rate_window
 
 
@@ -400,18 +399,18 @@ def evaluate_scenario_row(
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
     period_solar_kwh = 0.0 if period == "NIGHT" else min(SOLAR_PV_KW, INVERTER_KW) * 3.0
     target_mode_value, reason = decide_operational_mode(
-        period=period,
-        status=normalized_forecast,
-        soc=soc,
-        headroom_kwh=headroom_kwh,
-        period_solar_kwh=period_solar_kwh,
-        schedule_period=schedule_period,
-        headroom_target_kwh=HEADROOM_TARGET_KWH,
-        battery_kwh=BATTERY_KWH,
-        hours_until_cheap_rate=get_hours_until_cheap_rate(when_utc),
-        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+        DecisionContext(
+            period=period,
+            status=normalized_forecast,
+            soc=soc,
+            headroom_kwh=headroom_kwh,
+            headroom_target_kwh=HEADROOM_TARGET_KWH,
+            live_solar_kw=None,
+            hours_until_cheap_rate=get_hours_until_cheap_rate(when_utc),
+            estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+            bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+            tariff=schedule_period,
+        )
     )
     target_mode_name = mode_name_from_value(target_mode_value)
     current_mode_name = mode_name_from_value(current_mode_value)

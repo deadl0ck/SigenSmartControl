@@ -17,7 +17,6 @@ from config.settings import (
     BATTERY_KWH,
     BRIDGE_BATTERY_RESERVE_KWH,
     DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
-    ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     ESTIMATED_HOME_LOAD_KW,
     HEADROOM_TARGET_KWH,
     LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
@@ -29,6 +28,7 @@ from config.settings import (
     SIGEN_MODES,
 )
 from logic.decision_logic import (
+    DecisionContext,
     calc_headroom_kwh,
     decide_operational_mode,
     is_live_clipping_period_enabled,
@@ -118,18 +118,18 @@ def _evaluate_period_mode_decision(
     headroom_target_kwh = HEADROOM_TARGET_KWH
     headroom_deficit_kwh = max(0.0, headroom_target_kwh - headroom_kwh)
     mode, reason = decide_operational_mode(
-        period=period,
-        status=decision_status,
-        soc=soc,
-        headroom_kwh=headroom_kwh,
-        period_solar_kwh=period_solar_kwh,
-        schedule_period=get_schedule_period_for_time(schedule_time_utc),
-        headroom_target_kwh=HEADROOM_TARGET_KWH,
-        battery_kwh=BATTERY_KWH,
-        hours_until_cheap_rate=get_hours_until_cheap_rate(now_utc),
-        estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
-        bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
-        enable_pre_cheap_rate_battery_bridge=ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
+        DecisionContext(
+            period=period,
+            status=decision_status,
+            soc=soc,
+            headroom_kwh=headroom_kwh,
+            headroom_target_kwh=HEADROOM_TARGET_KWH,
+            live_solar_kw=solar_avg_kw_3,
+            hours_until_cheap_rate=get_hours_until_cheap_rate(now_utc),
+            estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
+            bridge_battery_reserve_kwh=BRIDGE_BATTERY_RESERVE_KWH,
+            tariff=get_schedule_period_for_time(schedule_time_utc),
+        )
     )
     if status_override_reason is not None:
         reason = f"{status_override_reason} {reason}"
