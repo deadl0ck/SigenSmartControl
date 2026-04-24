@@ -33,6 +33,7 @@ from logic.decision_logic import (
     decide_operational_mode,
     is_live_clipping_period_enabled,
 )
+from logic.decision_logging import log_decision_checkpoint
 from logic.schedule_utils import (
     LOCAL_TZ,
     get_hours_until_cheap_rate,
@@ -145,90 +146,6 @@ def _evaluate_period_mode_decision(
     }
 
 
-def _log_check(
-    period: str,
-    stage: str,
-    *,
-    mode_names: dict[int, str],
-    now_utc: datetime,
-    period_start_utc: datetime,
-    solar_value: int,
-    status: str,
-    period_solar_kwh: float,
-    soc: float | None,
-    headroom_kwh: float | None,
-    headroom_target_kwh: float,
-    headroom_deficit_kwh: float,
-    export_by_utc: datetime | None,
-    solar_avg_kw_3: float | None = None,
-    effective_battery_export_kw: float | None = None,
-    lead_time_hours_adjusted: float | None = None,
-    mode: int | None = None,
-    reason: str = "",
-    outcome: str = "",
-) -> None:
-    """Log a comprehensive decision checkpoint with all relevant state and parameters.
-
-    Args:
-        period: Human-readable period/context label.
-        stage: Scheduling stage (PRE-PERIOD, PERIOD-START, etc.).
-        mode_names: Mapping of mode integer to label for display.
-        now_utc: Current time in UTC.
-        period_start_utc: Period start time in UTC.
-        solar_value: Forecasted power in watts.
-        status: Forecast status string.
-        period_solar_kwh: Estimated available solar energy in kWh.
-        soc: Current battery SOC percentage, or None if unavailable.
-        headroom_kwh: Current available battery headroom in kWh.
-        headroom_target_kwh: Target headroom needed before period in kWh.
-        headroom_deficit_kwh: Shortfall against target in kWh.
-        export_by_utc: Deadline for pre-period export window.
-        solar_avg_kw_3: Rolling average solar kW over latest three samples.
-        effective_battery_export_kw: Estimated battery export kW after solar occupancy.
-        lead_time_hours_adjusted: Lead-time computed from adjusted export denominator.
-        mode: Target operational mode integer, or None.
-        reason: Explanation of decision logic.
-        outcome: Description of action taken.
-    """
-    mode_label = mode_names.get(mode, mode) if mode is not None else "N/A"
-    export_by_label = export_by_utc.isoformat() if export_by_utc is not None else "N/A"
-    base_period = period.split(" ", 1)[0].split("->")[-1]
-    period_labels = {"Morn": "MORNING", "Aftn": "AFTERNOON", "Eve": "EVENING", "NIGHT": "NIGHT"}
-    period_display = period_labels.get(base_period, base_period.upper())
-    period_start_local = period_start_utc.astimezone(LOCAL_TZ).strftime("%H:%M")
-    logger.info(f"[{period}] {stage} CHECK FOR {period_display} (Starts at {period_start_local}):")
-    logger.info(f"[{period}]     -> now={now_utc.isoformat()}")
-    logger.info(f"[{period}]     -> period_start={period_start_utc.isoformat()}")
-    logger.info(f"[{period}]     -> forecast_w={solar_value}")
-    logger.info(f"[{period}]     -> status={status}")
-    logger.info(f"[{period}]     -> expected_solar_kwh={period_solar_kwh:.2f}")
-    logger.info(f"[{period}]     -> soc={soc if soc is not None else 'N/A'}")
-    logger.info(
-        f"[{period}]     -> headroom_kwh={f'{headroom_kwh:.2f}' if headroom_kwh is not None else 'N/A'}"
-    )
-    logger.info(f"[{period}]     -> headroom_target_kwh={headroom_target_kwh:.2f}")
-    logger.info(f"[{period}]     -> headroom_deficit_kwh={headroom_deficit_kwh:.2f}")
-    logger.info(
-        f"[{period}]     -> solar_avg_kw_3={f'{solar_avg_kw_3:.2f}' if solar_avg_kw_3 is not None else 'N/A'}"
-    )
-    logger.info(
-        "[{}]     -> effective_battery_export_kw={}".format(
-            period,
-            f"{effective_battery_export_kw:.2f}" if effective_battery_export_kw is not None else "N/A",
-        )
-    )
-    logger.info(
-        "[{}]     -> lead_time_hours_adjusted={}".format(
-            period,
-            f"{lead_time_hours_adjusted:.2f}" if lead_time_hours_adjusted is not None else "N/A",
-        )
-    )
-    logger.info(f"[{period}]     -> export_by={export_by_label}")
-    logger.info(f"[{period}]     -> decision_mode={mode_label}")
-    logger.info(f"[{period}]     -> outcome={outcome}")
-    logger.info(f"[{period}]     -> reason={reason}")
-
-
 async def handle_morning_period(
     *,
     now_utc: datetime,
@@ -311,7 +228,7 @@ async def handle_morning_period(
                 duration_minutes = math.ceil(
                     (headroom_deficit / effective_battery_export_kw) * 60
                 )
-                _log_check(
+                log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-CLIPPING",
                     mode_names=mode_names, now_utc=now_utc,
                     period_start_utc=period_start, solar_value=solar_value,
@@ -367,7 +284,7 @@ async def handle_morning_period(
                     f"headroom {headroom_kwh_safety:.2f} kWh < target "
                     f"{headroom_target_kwh_safety:.2f} kWh"
                 )
-                _log_check(
+                log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-HIGH-SOC-SAFETY",
                     mode_names=mode_names, now_utc=now_utc,
                     period_start_utc=period_start, solar_value=solar_value,
@@ -424,7 +341,7 @@ async def handle_morning_period(
                     duration_minutes = max(
                         1, math.ceil((period_start - now_utc).total_seconds() / 60)
                     )
-                    _log_check(
+                    log_decision_checkpoint(
                         PERIOD, "PRE-PERIOD",
                         mode_names=mode_names, now_utc=now_utc,
                         period_start_utc=period_start, solar_value=solar_value,
@@ -452,7 +369,7 @@ async def handle_morning_period(
                         return True
                     pre_check_complete = True
                 else:
-                    _log_check(
+                    log_decision_checkpoint(
                         PERIOD, "PRE-PERIOD",
                         mode_names=mode_names, now_utc=now_utc,
                         period_start_utc=period_start, solar_value=solar_value,
@@ -480,7 +397,7 @@ async def handle_morning_period(
                 if pre_check_complete:
                     s["pre_set"] = True
             else:
-                _log_check(
+                log_decision_checkpoint(
                     PERIOD, "PRE-PERIOD",
                     mode_names=mode_names, now_utc=now_utc,
                     period_start_utc=period_start, solar_value=solar_value,
@@ -525,7 +442,7 @@ async def handle_morning_period(
                     (status or "").upper() == "AMBER"
                     and (decision_status or "").upper() == "GREEN"
                 )
-                _log_check(
+                log_decision_checkpoint(
                     PERIOD, "PERIOD-START",
                     mode_names=mode_names, now_utc=now_utc,
                     period_start_utc=period_start, solar_value=solar_value,
@@ -555,7 +472,7 @@ async def handle_morning_period(
                 )
                 return True
 
-            _log_check(
+            log_decision_checkpoint(
                 PERIOD, "PERIOD-START",
                 mode_names=mode_names, now_utc=now_utc,
                 period_start_utc=period_start, solar_value=solar_value,
