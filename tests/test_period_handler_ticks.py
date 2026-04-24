@@ -18,6 +18,7 @@ from config.settings import (
     SIGEN_MODE_NAMES,
 )
 from logic.morning import handle_morning_period
+from logic.period_handler_shared import PeriodHandlerContext
 from logic.scheduler_state import DayStateEntry
 
 
@@ -138,6 +139,12 @@ def _strip_private(kwargs: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in kwargs.items() if not k.startswith("_")}
 
 
+def _make_ctx(kwargs: dict[str, Any]) -> PeriodHandlerContext:
+    """Build a PeriodHandlerContext from the helper-kwargs dict."""
+    public = _strip_private(kwargs)
+    return PeriodHandlerContext(**public)
+
+
 # ---------------------------------------------------------------------------
 # Initial-state tests (no async needed)
 # ---------------------------------------------------------------------------
@@ -190,7 +197,7 @@ class TestPrePeriodBranch:
             solar_avg_kw=0.5,
             status="Green",
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         # Export window has not opened yet so pre_set must still be False
         assert period_state["pre_set"] is False
@@ -215,7 +222,7 @@ class TestPrePeriodBranch:
             status="Green",
             start_timed_export_return=True,
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         kwargs["_start_timed_grid_export"].assert_called_once()
         assert period_state["pre_set"] is True
@@ -242,11 +249,11 @@ class TestPrePeriodBranch:
         )
 
         # First tick — pre-period branch fires
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
         assert period_state["pre_set"] is True
 
         # Second tick at same time — pre_set=True should block re-entry
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert kwargs["_start_timed_grid_export"].call_count == 1
 
@@ -278,7 +285,7 @@ class TestPeriodStartBranch:
             status="Green",
             apply_mode_change_return=True,
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["start_set"] is True
         kwargs["_apply_mode_change"].assert_called_once()
@@ -301,12 +308,12 @@ class TestPeriodStartBranch:
         )
 
         # First tick — period-start branch fires
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
         assert period_state["start_set"] is True
         assert kwargs["_apply_mode_change"].call_count == 1
 
         # Second tick — start_set=True prevents re-entry of period-start block
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
         assert kwargs["_apply_mode_change"].call_count == 1
 
     @pytest.mark.asyncio
@@ -328,7 +335,7 @@ class TestPeriodStartBranch:
             status="Green",
             start_timed_export_return=True,
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         kwargs["_start_timed_grid_export"].assert_called_once()
         assert period_state["start_set"] is True
@@ -372,7 +379,7 @@ class TestMidPeriodClippingExport:
             status="Amber",
             start_timed_export_return=True,
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["clipping_export_set"] is True
 
@@ -396,7 +403,7 @@ class TestMidPeriodClippingExport:
             solar_avg_kw=4.0,
             status="Amber",
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["clipping_export_set"] is False
 
@@ -419,7 +426,7 @@ class TestMidPeriodClippingExport:
             solar_avg_kw=1.0,         # below 3.2 kW trigger
             status="Amber",
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["clipping_export_set"] is False
 
@@ -442,6 +449,6 @@ class TestMidPeriodClippingExport:
             solar_avg_kw=4.0,
             status="Amber",
         )
-        await handle_morning_period(**_strip_private(kwargs))
+        await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["clipping_export_set"] is False
