@@ -40,7 +40,7 @@ from logic.schedule_utils import (
     is_pre_sunrise_discharge_window,
 )
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 

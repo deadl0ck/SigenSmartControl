@@ -17,7 +17,7 @@ from html import escape
 from logic.schedule_utils import LOCAL_TZ
 
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 _EMAIL_SENDER_ADDRESS = os.getenv("EMAIL_SENDER", "").strip()
 _EMAIL_RECEIVER_ADDRESS = os.getenv("EMAIL_RECEIVER", "").strip()

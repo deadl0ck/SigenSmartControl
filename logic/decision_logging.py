@@ -14,7 +14,7 @@ from datetime import datetime
 
 from logic.schedule_utils import LOCAL_TZ
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 
 def log_decision_checkpoint(

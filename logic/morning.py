@@ -29,7 +29,7 @@ from logic.decision_logging import log_decision_checkpoint
 from logic.period_handler_shared import PeriodHandlerContext, _evaluate_period_mode_decision
 from logic.schedule_utils import is_cheap_rate_window
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 PERIOD = "Morn"
 

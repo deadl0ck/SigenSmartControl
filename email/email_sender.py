@@ -11,7 +11,7 @@ import ssl
 from email.message import EmailMessage
 
 
-logger = logging.getLogger("sigen_control")
+logger = logging.getLogger(__name__)
 
 
 class EmailSender:
