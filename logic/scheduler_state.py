@@ -17,6 +17,8 @@ class SchedulerState:
 
     Attributes:
         today_period_windows: Mapping of period names to their start/end times for today.
+        ordered_period_windows: today_period_windows sorted ascending by start time; updated
+            whenever today_period_windows is refreshed.
         tomorrow_period_windows: Mapping of period names to their start/end times for tomorrow.
         today_period_forecast: Mapping of period names to (confidence, category) tuples for today.
         tomorrow_period_forecast: Mapping of period names to (confidence, category) tuples for tomorrow.
@@ -41,6 +43,7 @@ class SchedulerState:
     """
 
     today_period_windows: dict[str, datetime] = field(default_factory=dict)
+    ordered_period_windows: list = field(default_factory=list)
     tomorrow_period_windows: dict[str, datetime] = field(default_factory=dict)
     today_period_forecast: dict[str, tuple[int, str]] = field(default_factory=dict)
     tomorrow_period_forecast: dict[str, tuple[int, str]] = field(default_factory=dict)
