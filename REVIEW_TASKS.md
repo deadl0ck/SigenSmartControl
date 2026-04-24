@@ -7,399 +7,283 @@ Check off tasks with `[x]` as you complete them.
 
 ---
 
-## Task 1 — Split `run_main_loop()` into focused handler methods
+## Task 1 — Fix unbounded deque in SchedulerState
 
-**Why:** `run_main_loop()` in `scheduler_coordinator.py` is ~310 lines and handles auth refresh,
-forecast refresh, archive management, timed-export state, period dispatch, and sleep. It should be
-broken into private methods so each responsibility is individually readable and testable.
-
-**Files to read:**
-- `logic/scheduler_coordinator.py` (387 lines)
-
-**What to do:**
-Extract the following private methods from `run_main_loop()`:
-- `_handle_auth_refresh(self, now)` — lines around the auth token refresh block
-- `_handle_forecast_refresh(self, now)` — lines around the daily forecast/sunrise refresh
-- `_handle_archive(self, now)` — lines around forecast-solar archive with rate-limit logic
-- `_check_timed_export_active(self, now) -> bool` — lines checking timed-export override state,
-  returns True if a timed export is active (so the caller can skip normal dispatch)
-- `_process_period_windows(self, now)` — the per-period pre-period / period-start dispatch loop
-
-`run_main_loop()` should become ~50 lines that calls these methods in sequence.
-
-**Acceptance criteria:**
-- Each extracted method is ≤80 lines
-- `run_main_loop()` is ≤60 lines
-- `python -m pytest -q` passes
-- No behaviour change — only structural refactor
-
-- [ ] Done
-
----
-
-## Task 2 — Remove wrapper functions from `scheduler_operations.py` and fix circular import
-
-**Why:** Three wrapper functions at the bottom of `scheduler_operations.py` (lines 328–486) are
-thin pass-throughs that exist only to inject `state` and `logger`. They also contain a late import
-`from main import apply_mode_change` to work around a circular dependency. Both problems should be
-fixed together.
+**Why:** `SchedulerState.live_solar_kw_samples` is declared with `deque(maxlen=None)` (unlimited),
+but `main.py` immediately reinitialises it with `maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT` (3).
+The dataclass default is dead code and will cause silent memory growth in any code path that
+skips the main.py reinitialisation — including tests.
 
 **Files to read:**
-- `logic/scheduler_operations.py` (486 lines)
-- `main.py` (511 lines)
-- `logic/scheduler_coordinator.py` (387 lines)
+- `logic/scheduler_state.py` (line ~61)
+- `main.py` (search for `live_solar_kw_samples`)
+- `config/settings.py` (for `LIVE_SOLAR_AVERAGE_SAMPLE_COUNT`)
 
 **What to do:**
-
-Step A — Fix the circular import:
-`apply_mode_change` in `main.py` should move to a new module `logic/mode_change.py`. Both
-`main.py` and `scheduler_operations.py` can then import from there without circularity.
-
-Step B — Remove the three wrappers:
-`create_apply_mode_change_tracked()`, `start_timed_grid_export_wrapper()`,
-`maybe_restore_timed_grid_export_wrapper()` should be deleted. Any call sites in
-`scheduler_coordinator.py` should call the underlying functions directly, passing `state` and
-`logger` explicitly.
-
-Step C — Check `scheduler_operations.py` length. With the wrappers removed it should be well
-under 400 lines.
+1. In `scheduler_state.py`, import `LIVE_SOLAR_AVERAGE_SAMPLE_COUNT` from `config.settings`.
+2. Change the default factory from `deque(maxlen=None)` to
+   `deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)`.
+3. Remove the redundant reinitialisation line in `main.py`.
+4. Update the docstring to document the fixed capacity.
 
 **Acceptance criteria:**
-- No late imports anywhere in the codebase
-- `scheduler_operations.py` has no wrapper functions
+- `SchedulerState()` produces a bounded deque without any extra initialisation in `main.py`
 - `python -m pytest -q` passes
 
 - [ ] Done
 
 ---
 
-## Task 3 — Create `DecisionContext` dataclass for `decide_operational_mode()`
+## Task 2 — Consolidate shared `_log_check()` across period handler files
 
-**Why:** `decide_operational_mode()` takes 8 optional parameters. Callers need deep knowledge of
-the internal rules to call it correctly. Grouping inputs into a dataclass makes the interface
-self-documenting and makes tests easier to write.
+**Why:** `_log_check()` is defined identically in `morning.py`, `afternoon.py`, `evening.py`, and
+`night.py` — roughly 250 lines of duplicated logging code. Improving the format or adding a field
+requires changes in four places.
 
 **Files to read:**
-- `logic/decision_logic.py` (197 lines)
-- Any test file that calls `decide_operational_mode` (check `tests/`)
+- `logic/morning.py` (find `_log_check`)
+- `logic/afternoon.py` (same)
+- `logic/evening.py` (same)
+- `logic/night.py` (same)
 
 **What to do:**
-1. Define `DecisionContext` as a `@dataclass` near the top of `decision_logic.py`:
+1. Create `logic/decision_logging.py` with a single `log_decision_checkpoint()` function whose
+   body is taken verbatim from one of the four copies (they are identical).
+2. Delete the four `_log_check()` definitions and replace every call site with
+   `log_decision_checkpoint(...)`.
+3. Adjust the parameter name from `_log_check`-style to match the new function signature.
+
+**Acceptance criteria:**
+- `_log_check` does not appear anywhere in the codebase
+- `logic/decision_logging.py` is the single source of the logging logic
+- Log output unchanged
+- `python -m pytest -q` passes
+
+- [ ] Done
+
+---
+
+## Task 3 — Extract shared period-handler logic to eliminate duplication across morning/afternoon/evening
+
+**Why:** `logic/morning.py` (588 lines), `logic/afternoon.py` (588 lines), and
+`logic/evening.py` (689 lines) are structurally near-identical. They each duplicate:
+- `_promote_status_for_live_clipping_risk()`
+- `_evaluate_period_mode_decision()`
+- The same pre-period / period-start control flow
+
+A bug fix or feature addition must be replicated across all three files. Evening has small
+additional logic (pre-cheap-rate bridge) but the core flow is the same.
+
+**Files to read:**
+- `logic/morning.py`
+- `logic/afternoon.py`
+- `logic/evening.py`
+- `logic/scheduler_coordinator.py` (where handlers are called)
+
+**What to do:**
+1. Create `logic/period_handler_shared.py` containing:
+   - `promote_status_for_live_clipping_risk()` — taken from morning.py
+   - `evaluate_period_mode_decision()` — taken from morning.py
+   - A generic `handle_daytime_period()` async function that encapsulates the shared
+     pre-period / period-start control flow, taking `period: str` as a parameter.
+2. Refactor `morning.py` and `afternoon.py` to thin wrapper modules (~20 lines each) that
+   call `handle_daytime_period("Morn")` / `handle_daytime_period("Aftn")`.
+3. Refactor `evening.py` similarly, keeping its additional evening-specific bridge logic as
+   a post-hook or extra branch inside `handle_daytime_period()` guarded by `period == "Eve"`.
+4. Update imports in `scheduler_coordinator.py` if needed.
+
+**Acceptance criteria:**
+- `morning.py` and `afternoon.py` are each ≤ 40 lines
+- `evening.py` is ≤ 100 lines (evening-specific logic only)
+- `period_handler_shared.py` is ≤ 400 lines
+- No duplicated helper functions remain across the three period files
+- `python -m pytest -q` passes
+
+- [ ] Done
+
+---
+
+## Task 4 — Tighten type hints on `SchedulerState` fields
+
+**Why:** Several `SchedulerState` fields use imprecise types:
+- `ordered_period_windows: list` — should be `list[tuple[str, datetime]]`
+- `day_state: dict[str, dict[str, bool]]` — inner dict shape (`pre_set`, `start_set`,
+  `clipping_export_set`) is undocumented
+- `night_state: dict[str, Any]` — accepts any dict; callers access known keys without safety
+
+Static analysis and IDE autocomplete cannot help developers catch misuse.
+
+**Files to read:**
+- `logic/scheduler_state.py`
+- `logic/scheduler_coordinator.py` (to see how day_state and night_state are accessed)
+
+**What to do:**
+1. Define `TypedDict` classes near the top of `scheduler_state.py`:
    ```python
-   @dataclass
-   class DecisionContext:
-       period: str
-       status: str | None
-       soc: float | None
-       headroom_kwh: float | None
-       headroom_target_kwh: float
-       live_solar_kw: float | None
-       hours_until_cheap_rate: float | None
-       estimated_home_load_kw: float | None
-       bridge_battery_reserve_kwh: float | None
-       tariff: str | None
+   class DayStateEntry(TypedDict):
+       pre_set: bool
+       start_set: bool
+       clipping_export_set: bool
+
+   class NightState(TypedDict, total=False):
+       mode_set_key: tuple[date, int] | None
+       sleep_snapshot_for_date: date | None
    ```
-2. Change `decide_operational_mode()` to accept a single `ctx: DecisionContext` argument.
-3. Update all call sites to construct and pass a `DecisionContext`.
-4. Update tests accordingly.
+2. Change field types:
+   - `ordered_period_windows: list` → `list[tuple[str, datetime]]`
+   - `day_state: dict[str, dict[str, bool]]` → `dict[str, DayStateEntry]`
+   - `night_state: dict[str, Any]` → `NightState`
+3. Fix any mypy errors at call sites.
 
 **Acceptance criteria:**
-- `decide_operational_mode()` has exactly one parameter (`ctx: DecisionContext`)
-- All call sites updated
+- All `SchedulerState` fields have specific non-`Any` types
+- No bare `dict[str, Any]` for structured state
 - `python -m pytest -q` passes
 
 - [ ] Done
 
 ---
 
-## Task 4 — Fix silent failure in `sigen_interaction.py`
+## Task 5 — Make `current_date` a required field on `SchedulerState`
 
-**Why:** `get_energy_flow()` returns `{}` on `KeyError` after a retry. Callers cannot distinguish
-"empty payload" from "fetch failed", which masks real upstream problems silently.
+**Why:** `SchedulerState.current_date` is declared `datetime | None = None`, but
+`scheduler_operations.refresh_daily_data()` immediately checks `if state.current_date is None:
+raise RuntimeError()`. The None check is a runtime guard against incorrect usage, not a genuine
+optional state. Making it a required positional field removes an impossible error path and
+documents the precondition at the call site.
 
 **Files to read:**
-- `integrations/sigen_interaction.py` (242 lines)
-- Any callers of `get_energy_flow` (grep for it in `logic/` and `main.py`)
+- `logic/scheduler_state.py`
+- `logic/scheduler_operations.py` (search for `current_date`)
+- `main.py` (where `SchedulerState` is instantiated)
 
 **What to do:**
-1. Define a custom exception in `sigen_interaction.py`:
+1. In `scheduler_state.py`, remove `= None` from `current_date` making it a required field.
+   Move it before any fields that have defaults (dataclass rules require this).
+2. In `main.py`, pass `current_date=now.date()` when constructing `SchedulerState`.
+3. Remove the `if state.current_date is None: raise RuntimeError()` guard in
+   `refresh_daily_data()` — it is now unreachable.
+4. Update the docstring on `SchedulerState` to document the field.
+
+**Acceptance criteria:**
+- `SchedulerState()` without `current_date` raises a `TypeError` (missing required arg)
+- `RuntimeError` guard in `refresh_daily_data()` deleted
+- `python -m pytest -q` passes
+
+- [ ] Done
+
+---
+
+## Task 6 — Add explicit Protocol types for `apply_mode_change` callbacks
+
+**Why:** `logic/inverter_control.py` defines `ModeChangeNotifier = Callable[..., Awaitable[None]]`.
+The ellipsis hides which keyword arguments are actually passed (success, period, reason,
+requested_mode, etc.). Callers and test mocks must read the implementation to learn the contract.
+A wrong keyword in a mock silently passes at definition time.
+
+**Files to read:**
+- `logic/inverter_control.py` (lines ~25–50 and the apply_mode_change call sites inside)
+- `logic/mode_change.py`
+- `main.py` (where the callback is wired up)
+
+**What to do:**
+1. In `logic/inverter_control.py`, define an explicit `Protocol`:
    ```python
-   class SigenPayloadError(Exception):
-       """Raised when the Sigen API returns a structurally unexpected payload."""
+   class ModeChangeNotifier(Protocol):
+       async def __call__(
+           self,
+           *,
+           success: bool,
+           period: str,
+           reason: str,
+           requested_mode: int,
+           requested_mode_label: str,
+           current_mode_raw: Any,
+           mode_names: dict[int, str],
+           event_time_utc: datetime,
+           battery_soc: float | None,
+           solar_generated_today_kwh: float | None,
+           today_period_forecast: dict[str, tuple[int, str]] | None,
+           response: Any | None = None,
+           error: str | None = None,
+       ) -> None: ...
    ```
-2. In `get_energy_flow()`, replace `return {}` with `raise SigenPayloadError(...)` on the retry
-   failure path.
-3. Update callers to catch `SigenPayloadError` explicitly and handle it (log + skip tick, rather
-   than silently receiving `{}`).
-4. Also: the `_is_missing_data_key_error` check uses `"data" in str(part).lower()` — replace with
-   a proper key membership check against the known schema.
+2. Replace the `Callable[..., Awaitable[None]]` alias with the Protocol.
+3. Add `-> bool` return type annotation to `apply_mode_change`.
+4. Fix any call sites that don't match the Protocol signature.
 
 **Acceptance criteria:**
-- `get_energy_flow()` never returns `{}`
-- `SigenPayloadError` is imported and caught at call sites
+- `ModeChangeNotifier` is a `Protocol` with explicit keyword arguments
+- `apply_mode_change` has a `-> bool` return type
 - `python -m pytest -q` passes
 
 - [ ] Done
 
 ---
 
-## Task 5 — Add `Enum` classes for period names and forecast statuses
+## Task 7 — Document the timed export state machine
 
-**Why:** `"MORN"`, `"AFTN"`, `"EVE"`, `"GREEN"`, `"AMBER"`, `"RED"` appear as bare strings
-across multiple files. Typos fail silently at runtime.
+**Why:** `logic/timed_export.py` implements a multi-state override machine (inactive → active →
+restored → inactive) that is central to the scheduler's export decisions. The state transitions,
+return value semantics of `maybe_restore_timed_grid_export()` ("inactive" / "active" /
+"restored"), and the precedence of the two SOC-floor checks are not documented anywhere. A
+developer maintaining this file must reverse-engineer the state machine from the code.
 
 **Files to read:**
-- `config/settings.py` (312 lines)
-- `logic/decision_logic.py` (197 lines)
-- `logic/scheduler_coordinator.py` (387 lines)
+- `logic/timed_export.py` (entire file)
+- `main.py` (usage of `maybe_restore_timed_grid_export`)
 
 **What to do:**
-1. Add to `config/settings.py` (or a new `config/enums.py`):
-   ```python
-   from enum import Enum
-
-   class Period(str, Enum):
-       MORN = "Morn"
-       AFTN = "Aftn"
-       EVE = "Eve"
-       NIGHT = "NIGHT"
-
-   class ForecastStatus(str, Enum):
-       RED = "RED"
-       AMBER = "AMBER"
-       GREEN = "GREEN"
-   ```
-   Using `str, Enum` means existing string comparisons and dict keys still work during transition.
-2. Replace bare string literals in `decision_logic.py` and `scheduler_coordinator.py` with enum
-   members.
-3. Update `FORECAST_TO_MODE` and other dicts in `settings.py` to use enum keys.
+1. Add a module-level docstring to `timed_export.py` that documents:
+   - The three states and transitions
+   - What triggers each transition (time elapsed, SOC floor reached)
+   - Precedence of `export_soc_floor` vs `clipping_soc_floor`
+2. Expand the docstring of `maybe_restore_timed_grid_export()` to document each return value:
+   - `"inactive"` — no override, proceed normally
+   - `"active"` — override in force, caller should skip normal decisions
+   - `"restored"` — override just ended, caller should skip this tick then resume
+3. Add an inline comment above the SOC-floor checks clarifying precedence.
 
 **Acceptance criteria:**
-- No bare `"MORN"` / `"AFTN"` / `"EVE"` / `"GREEN"` / `"AMBER"` / `"RED"` string literals
-  in decision_logic.py or scheduler_coordinator.py
+- Module-level docstring describes all states and transitions
+- Return value semantics are documented on `maybe_restore_timed_grid_export()`
+- A new developer can understand the state machine from documentation alone
+- No values or logic changed
 - `python -m pytest -q` passes
 
 - [ ] Done
 
 ---
 
-## Task 6 — Stream JSONL in `forecast_calibration.py` instead of loading all at once
+## Task 8 — Add tests for period handler state mutations across multiple ticks
 
-**Why:** `_read_recent_telemetry()` calls `path.read_text().splitlines()`, loading the entire
-archive file into memory before filtering. The archive grows unboundedly; this will become slow.
-
-**Files to read:**
-- `telemetry/forecast_calibration.py` (279 lines)
-
-**What to do:**
-Replace this pattern:
-```python
-for line in path.read_text(encoding="utf-8").splitlines():
-```
-with streaming:
-```python
-with path.open(encoding="utf-8") as f:
-    for line in f:
-```
-The rest of the logic (JSON parse, date filter, append) stays the same.
-
-Also: move the `cutoff_date` check to skip JSON parsing for lines whose prefix timestamp is too
-old. The JSONL lines start with `"captured_at"` as the first key — you can check the first ~30
-characters of the line before calling `json.loads()` to skip obviously old records cheaply.
-
-**Acceptance criteria:**
-- `path.read_text()` is gone from this file
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 7 — Deduplicate candidate tuples and mode-name inversion
-
-**Why:** Two copies of the same data exist independently and will silently diverge if one is
-updated.
+**Why:** `handle_morning_period()`, `handle_afternoon_period()`, `handle_evening_period()` contain
+complex async control flow that mutates `state.day_state[period]` flags
+(`pre_set`, `start_set`, `clipping_export_set`) and `state.timed_export_override`. None of this
+mutation logic is covered by tests. A subtle ordering bug (e.g., `start_set` set before
+`pre_set`) would only surface at runtime over days.
 
 **Files to read:**
-- `telemetry/telemetry_archive.py` (358 lines)
-- `integrations/sigen_interaction.py` (242 lines)
-- `config/settings.py` (312 lines)
-- `main.py` — search for `mode_names` (~line 423)
+- `logic/morning.py` (or `period_handler_shared.py` after Task 3)
+- `logic/scheduler_state.py`
+- `tests/conftest.py` (existing fixture patterns)
+- `tests/test_scheduler_core_logic.py` (existing integration test style)
 
 **What to do:**
+Create `tests/test_period_handler_ticks.py` with at minimum:
+- Test that `pre_set` is False initially, True after the pre-period branch runs
+- Test that `start_set` is False initially, True after the period-start branch runs
+- Test that `clipping_export_set` is True only when SOC and solar thresholds are met
+- Test that state is NOT mutated when conditions block the action (e.g., low SOC)
+- Test that `start_timed_grid_export` is called at most once per period (guarded by `pre_set`)
+- Test that `apply_mode_change` is called at most once per period-start (guarded by `start_set`)
 
-Part A — Solar metric candidate tuples:
-In `telemetry_archive.py`, the candidate tuple `("pvPower", "solarPower", "ppv", "pv", "solar")`
-appears at ~line 115 and ~line 204. Extract as module-level constants:
-```python
-_SOLAR_POWER_CANDIDATES = ("pvPower", "solarPower", "ppv", "pv", "solar")
-_SOLAR_GENERATION_CANDIDATES = ("pvDayNrg", "pvDayEnergy", ...)  # full list from line 222
-_BATTERY_SOC_CANDIDATES = (...)  # equivalent for SOC metric
-```
-Replace both occurrences with the constants.
-
-Part B — Mode name inversion:
-`{v: k for k, v in SIGEN_MODES.items()}` is computed in both `main.py` (~line 423) and
-`sigen_interaction.py` (~line 16). Add `SIGEN_MODE_NAMES = {v: k for k, v in SIGEN_MODES.items()}`
-to `config/settings.py` and import it in both places.
+Use mocked async callables for `fetch_soc`, `get_live_solar_average_kw`,
+`start_timed_grid_export`, and `apply_mode_change`.
 
 **Acceptance criteria:**
-- No repeated inline candidate tuples in `telemetry_archive.py`
-- `SIGEN_MODE_NAMES` defined once in `config/settings.py`
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 8 — Document magic numbers in `settings.py` with physical/economic basis
-
-**Why:** Tuning parameters have no comments explaining why they are set to their current values.
-When thresholds need adjusting, there's no baseline reasoning to work from.
-
-**Files to read:**
-- `config/settings.py` (312 lines)
-- `CLAUDE.md` (for the existing documented rationale of `HEADROOM_TARGET_KWH`)
-
-**What to do:**
-Add a one-line comment above each of the following constants explaining the physical or economic
-reasoning. Do not change the values — only add comments.
-
-Constants that need documenting:
-- `POLL_INTERVAL_MINUTES` — why 5 minutes?
-- `MAX_PRE_PERIOD_WINDOW_MINUTES` — why 180?
-- `LIVE_SOLAR_AVERAGE_SAMPLE_COUNT` — why 3 samples?
-- `MIN_EFFECTIVE_BATTERY_EXPORT_KW` — what does 0.2 kW represent physically?
-- `PRE_SUNRISE_DISCHARGE_LEAD_MINUTES` — why 120 minutes before sunrise?
-- `PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT` — why 65%?
-- `QUARTZ_RED_CAPACITY_FRACTION` / `QUARTZ_GREEN_CAPACITY_FRACTION` — basis for 20%/40% thresholds
-- `MORNING_HIGH_SOC_THRESHOLD_PERCENT` — why 50%?
-- `LIVE_SOLAR_CLIPPING_THRESHOLD_KW` — basis for the clipping risk threshold
-
-If you are not sure of the exact reasoning, use a comment that records what is known and flags the
-uncertainty, e.g.:
-```python
-# 3 samples at 5-min intervals = 15-min average; smooths cloud transients
-LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
-```
-
-**Acceptance criteria:**
-- Every listed constant has a comment
-- No values changed
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 9 — Optimise `_candidate_score()` in `telemetry_archive.py`
-
-**Why:** String normalization (`replace("_", "")`) is recomputed inside the inner loop for every
-candidate. For a hot path called on every telemetry tick, this is unnecessary work.
-
-**Files to read:**
-- `telemetry/telemetry_archive.py` (358 lines) — focus on `_candidate_score()` and callers
-
-**What to do:**
-In `_candidate_score()`, move `leaf.replace("_", "")` and `joined.replace("_", "")` outside the
-`for candidate in candidates` loop. Add `return score` early inside the loop when `score == 100`
-(max score — no need to check remaining candidates).
-
-Also in `_collect_numeric_fields()`: the path tuple is extended via `path + (str(key),)` on every
-recursion, creating intermediate tuple objects. Refactor to pass a mutable list and convert to
-tuple only at the leaf. Add a `max_depth: int = 10` guard parameter and raise or return early if
-depth is exceeded.
-
-**Acceptance criteria:**
-- Pre-computed strings outside inner loop
-- Early exit when score reaches 100
-- `max_depth` guard on `_collect_numeric_fields()`
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 10 — Simplify duplicate suppression logic in `scheduler_coordinator.py`
-
-**Why:** Near-identical code blocks appear at ~lines 156–172 and ~197–214. They sort
-`today_period_windows`, find elapsed periods, and log suppression — differing only in log level.
-
-**Files to read:**
-- `logic/scheduler_coordinator.py` (387 lines)
-
-**What to do:**
-1. Extract into a single helper method:
-   ```python
-   def _log_suppressed_periods(
-       self, suppressed_periods: list[str], now: datetime, level: str = "info"
-   ) -> None:
-   ```
-2. Replace both duplicate blocks with calls to this method.
-3. Also: the `sorted(self.state.today_period_windows.items(), key=lambda item: item[1])` call
-   appears 3+ times per loop. Store `ordered_period_windows` as a list on `SchedulerState`,
-   populated once when `today_period_windows` is set, and reference it directly.
-
-**Acceptance criteria:**
-- Zero duplicate suppression blocks
-- Sort computed once and stored in state
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 11 — Deduplicate forecast provider construction in `weather/forecast.py`
-
-**Why:** `create_solar_forecast_provider()` has identical `try/except` blocks for each provider
-constructor. Adding a new provider requires copy-pasting the same pattern.
-
-**Files to read:**
-- `weather/forecast.py` (175 lines)
-
-**What to do:**
-Replace the repeated exception-handling blocks with a loop:
-```python
-provider_classes = [
-    (ForecastSolarForecast, "forecast.solar"),
-    (QuartzSolarForecast, "quartz"),
-]
-providers = []
-for cls, name in provider_classes:
-    try:
-        providers.append(cls(logger))
-    except Exception as exc:
-        logger.warning("[FORECAST-COMPARE] %s unavailable: %s", name, exc)
-```
-Then wire up the returned list as before.
-
-**Acceptance criteria:**
-- No repeated `try/except` blocks for provider construction
-- Behaviour identical — unavailable providers are skipped with a warning
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 12 — Replace module-state mutation wrappers in `main.py`
-
-**Why:** `_persist_timed_export_override()` and `_load_timed_export_override()` in `main.py`
-temporarily reassign `timed_export_module.TIMED_EXPORT_STATE_PATH` to inject a different path.
-This is not thread-safe and is confusing to read.
-
-**Files to read:**
-- `main.py` (511 lines) — lines 87–109 and their call sites
-- `logic/timed_export.py` (if it exists) or wherever `persist_timed_export_override` is defined
-
-**What to do:**
-Check whether `persist_timed_export_override` and `load_timed_export_override` accept a `path`
-parameter. If they do, pass the path directly and delete the three wrappers. If they do not, add
-a `path` parameter to those functions and then delete the wrappers.
-
-**Acceptance criteria:**
-- No module-level variable mutation in `main.py`
-- Three wrapper functions deleted
+- `tests/test_period_handler_ticks.py` has ≥ 8 test cases
+- All named state flags are tested for correct set/unset behaviour
 - `python -m pytest -q` passes
 
 - [ ] Done
