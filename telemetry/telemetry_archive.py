@@ -24,6 +24,17 @@ from config.constants import INVERTER_TELEMETRY_ARCHIVE_PATH, MODE_CHANGE_EVENTS
 
 logger = logging.getLogger(__name__)
 
+_SOLAR_POWER_CANDIDATES: tuple[str, ...] = ("pvPower", "solarPower", "ppv", "pv", "solar")
+_SOLAR_GENERATION_CANDIDATES: tuple[str, ...] = (
+    "pvDayNrg",
+    "pvDayEnergy",
+    "dayPvEnergy",
+    "todayPvEnergy",
+    "todaySolarEnergy",
+    "solarDayNrg",
+)
+_BATTERY_SOC_CANDIDATES: tuple[str, ...] = ("batterySoc", "soc")
+
 
 def _collect_numeric_fields(value: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], float]]:
     """Collect numeric leaf values from nested telemetry structures."""
@@ -112,11 +123,8 @@ def derive_clipping_metrics(energy_flow: dict[str, Any]) -> dict[str, Any]:
     inverter AC ceiling exactly. Confidence is increased when corroborated by
     high SOC, low battery absorb power, and positive export telemetry.
     """
-    solar_metric = _extract_numeric_metric(
-        energy_flow,
-        ("pvPower", "solarPower", "ppv", "pv", "solar"),
-    )
-    battery_soc_metric = _extract_numeric_metric(energy_flow, ("batterySoc", "soc"))
+    solar_metric = _extract_numeric_metric(energy_flow, _SOLAR_POWER_CANDIDATES)
+    battery_soc_metric = _extract_numeric_metric(energy_flow, _BATTERY_SOC_CANDIDATES)
     battery_power_metric = _extract_numeric_metric(
         energy_flow,
         ("batteryPower", "batPower", "chargePower", "batteryChargePower"),
@@ -201,10 +209,7 @@ def extract_live_solar_power_kw(energy_flow: dict[str, Any]) -> float | None:
     Returns:
         Solar power in kW when available, otherwise None.
     """
-    solar_metric = _extract_numeric_metric(
-        energy_flow,
-        ("pvPower", "solarPower", "ppv", "pv", "solar"),
-    )
+    solar_metric = _extract_numeric_metric(energy_flow, _SOLAR_POWER_CANDIDATES)
     if solar_metric is None:
         return None
     return _normalize_power_to_kw(solar_metric[1])
@@ -219,17 +224,7 @@ def extract_today_solar_generation_kwh(energy_flow: dict[str, Any]) -> float | N
     Returns:
         Solar generation for the current day in kWh when available, otherwise None.
     """
-    day_generation_metric = _extract_numeric_metric(
-        energy_flow,
-        (
-            "pvDayNrg",
-            "pvDayEnergy",
-            "dayPvEnergy",
-            "todayPvEnergy",
-            "todaySolarEnergy",
-            "solarDayNrg",
-        ),
-    )
+    day_generation_metric = _extract_numeric_metric(energy_flow, _SOLAR_GENERATION_CANDIDATES)
     if day_generation_metric is None:
         return None
 

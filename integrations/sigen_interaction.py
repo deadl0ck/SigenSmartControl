@@ -9,11 +9,11 @@ from typing import Any, Protocol
 import logging
 
 from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
-from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
+from config.settings import FULL_SIMULATION_MODE, SIGEN_MODE_NAMES, SIGEN_MODES
 from utils.terminal_formatting import ANSI_PURPLE, colorize_text
 
 logger = logging.getLogger(__name__)
-MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
+MODE_NAMES = SIGEN_MODE_NAMES
 ACTION_DIVIDER = "*" * 96
 
 

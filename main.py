@@ -15,6 +15,7 @@ from typing import Any
 
 from config.settings import (
     LOG_LEVEL as CONFIG_LOG_LEVEL,
+    SIGEN_MODE_NAMES,
     SIGEN_MODES,
     FULL_SIMULATION_MODE,
     POLL_INTERVAL_MINUTES,
@@ -327,7 +328,7 @@ async def run_scheduler() -> None:
         )
         simulated_soc_percent = DEFAULT_SIMULATED_SOC_PERCENT
 
-    mode_names = {v: k for k, v in SIGEN_MODES.items()}
+    mode_names = SIGEN_MODE_NAMES
 
     sigen = await create_scheduler_interaction(mode_names)
     state = SchedulerState(
