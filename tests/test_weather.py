@@ -48,9 +48,9 @@ def dummy_forecast():
     today_day = today_day.capitalize()  # match SolarForecast __get_today()
     logger.info(f"[TEST] Using test data for day: {today_day}")
     test_data = [
-        (today_day, "Morn", 500, "Green"),
-        (today_day, "Aftn", 300, "Amber"),
-        (today_day, "Eve", 100, "Red"),
+        (today_day, "Morn", 5000, "Green"),
+        (today_day, "Aftn", 2500, "Amber"),
+        (today_day, "Eve", 1000, "Red"),
     ]
     logger.info(f"[TEST] Test table_data: {test_data}")
     class DummyForecast(SolarForecast):
@@ -62,10 +62,10 @@ def dummy_forecast():
 def test_period_forecast(dummy_forecast):
     pf = dummy_forecast.get_todays_period_forecast()
     logger.info(f"[TEST] Period forecast returned: {pf}")
-    assert pf["Morn"] == (500, "Green")
-    assert pf["Aftn"] == (300, "Amber")
-    assert pf["Eve"] == (100, "Red")
-    logger.info("[RESULT] test_period_forecast: PASSED - For test day: Morning=GREEN (500W), Afternoon=AMBER (300W), Evening=RED (100W). Forecast matches expected values.")
+    assert pf["Morn"] == (5000, "Green")
+    assert pf["Aftn"] == (2500, "Amber")
+    assert pf["Eve"] == (1000, "Red")
+    logger.info("[RESULT] test_period_forecast: PASSED - For test day: Morning=GREEN (5000W), Afternoon=AMBER (2500W), Evening=RED (1000W). Forecast matches expected values.")
     logger.info(f"[TEST] Period forecast assertions passed.")
 
 def test_mode_mapping():
@@ -121,8 +121,8 @@ def test_comparison_snapshot_is_written(tmp_path, monkeypatch):
             return False
 
     primary = StaticProvider(
-        {"Morn": (100, "Red"), "Aftn": (300, "Amber")},
-        {"Morn": (500, "Green")},
+        {"Morn": (1000, "Red"), "Aftn": (2500, "Amber")},
+        {"Morn": (5000, "Green")},
     )
     secondary = StaticProvider(
         {"Morn": (1200, "Amber"), "Aftn": (2600, "Green")},
@@ -174,7 +174,7 @@ def test_comparison_provider_uses_primary_status_with_secondary_watts():
 
     provider = ComparingSolarForecastProvider(
         DummyLogger(),
-        StaticProvider({"Aftn": (300, "Amber")}, {"Morn": (100, "Red")}),
+        StaticProvider({"Aftn": (2500, "Amber")}, {"Morn": (1000, "Red")}),
         StaticProvider({"Aftn": (2118, "Amber")}, {"Morn": (1139, "Red")}),
         primary_name="esb_api",
         secondary_name="quartz",

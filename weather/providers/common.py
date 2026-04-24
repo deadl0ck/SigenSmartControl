@@ -55,13 +55,22 @@ class BaseSolarForecast:
 
     @staticmethod
     def _value_from_status(status: str) -> int:
-        """Map status to synthetic watts for downstream headroom calculations."""
+        """Map status to synthetic watts for downstream headroom calculations.
+
+        Values chosen as representative midpoints of each band relative to the
+        8.9 kW array capacity (thresholds: Red < 20% = 1.78 kW, Green >= 40% = 3.56 kW):
+          Red   ~890W midpoint of 0–1780W band  → 1000W (rounded)
+          Amber ~2670W midpoint of 1780–3560W   → 2500W
+          Green typical good-day average ~55%   → 5000W
+        Starting close to observed actuals means the calibration multiplier
+        converges near 1.0 rather than compensating for a large systematic offset.
+        """
         normalized = status.strip().capitalize()
         if normalized == "Green":
-            return 500
+            return 5000
         if normalized == "Amber":
-            return 300
-        return 100
+            return 2500
+        return 1000
 
     def _log_table(self) -> None:
         """Print normalized table rows in an ASCII table."""
