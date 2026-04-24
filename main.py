@@ -387,19 +387,6 @@ async def run_scheduler() -> None:
             log_mode_status=log_mode_status,
         )
 
-    async def maybe_restore_timed_grid_export(now_utc: datetime) -> str:
-        """Delegate timed-export restore handling to the timed-export module."""
-        return await maybe_restore_timed_grid_export_helper(
-            timed_export_override=state.timed_export_override,
-            set_timed_export_override=_update_timed_export_override,
-            now_utc=now_utc,
-            fetch_soc=None,  # Will be provided by coordinator
-            sigen=sigen,
-            mode_names=mode_names,
-            apply_mode_change=_apply_mode_change_tracked,
-            logger=logger,
-        )
-
     forecast_refresh_interval_seconds = FORECAST_REFRESH_INTERVAL_MINUTES * 60
 
     logger.info(
@@ -424,6 +411,20 @@ async def run_scheduler() -> None:
         logger.info("[SCHEDULER] Forecast.Solar raw archiving disabled.")
 
     coordinator = SchedulerCoordinator(state, sigen, mode_names, logger)
+
+    async def maybe_restore_timed_grid_export(now_utc: datetime) -> str:
+        """Delegate timed-export restore handling to the timed-export module."""
+        return await maybe_restore_timed_grid_export_helper(
+            timed_export_override=state.timed_export_override,
+            set_timed_export_override=_update_timed_export_override,
+            now_utc=now_utc,
+            fetch_soc=coordinator._fetch_soc,
+            sigen=sigen,
+            mode_names=mode_names,
+            apply_mode_change=_apply_mode_change_tracked,
+            logger=logger,
+        )
+
     await coordinator.run_main_loop(
         simulated_soc_percent=simulated_soc_percent,
         _apply_mode_change_tracked=_apply_mode_change_tracked,
