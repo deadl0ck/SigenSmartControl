@@ -9,9 +9,7 @@ mid-period clipping/high-SOC safety exports for the Afternoon (Aftn) period.
 
 import logging
 import math
-from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import timedelta
 
 from config.settings import (
     BATTERY_KWH,
@@ -28,64 +26,43 @@ from logic.decision_logic import (
     is_live_clipping_period_enabled,
 )
 from logic.decision_logging import log_decision_checkpoint
-from logic.period_handler_shared import _evaluate_period_mode_decision
-from logic.schedule_utils import (
-    LOCAL_TZ,
-    is_cheap_rate_window,
-)
+from logic.period_handler_shared import PeriodHandlerContext, _evaluate_period_mode_decision
+from logic.schedule_utils import is_cheap_rate_window
 
 logger = logging.getLogger("sigen_control")
 
 PERIOD = "Aftn"
 
 
-async def handle_afternoon_period(
-    *,
-    now_utc: datetime,
-    period_start: datetime,
-    period_end_utc: datetime | None,
-    period_state: dict[str, Any],
-    timed_export_override: dict[str, Any],
-    solar_value: int,
-    status: str,
-    period_solar_kwh: float,
-    period_calibration: dict[str, Any],
-    fetch_soc: Callable[[str], Awaitable[float | None]],
-    get_live_solar_average_kw: Callable[[], float | None],
-    get_effective_battery_export_kw: Callable[[float | None], float],
-    start_timed_grid_export: Callable[..., Awaitable[bool]],
-    apply_mode_change: Callable[..., Awaitable[bool]],
-    sigen: Any,
-    mode_names: dict[int, str],
-) -> bool:
+async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
     """Run all Afternoon period checks for a single scheduler tick.
 
     Handles mid-period clipping export, high-SOC safety export, pre-period
     export, and period-start mode decisions for the Afternoon period.
 
     Args:
-        now_utc: Current scheduler tick time in UTC.
-        period_start: Scheduled start time for the Afternoon period in UTC.
-        period_end_utc: End time of this period (start of Evening) in UTC, or None.
-        period_state: Mutable state dict for this period (pre_set, start_set, clipping_export_set).
-        timed_export_override: Shared mutable timed export state dict.
-        solar_value: Forecasted solar power in watts.
-        status: Forecast status string (Green/Amber/Red).
-        period_solar_kwh: Estimated solar energy for the period in kWh.
-        period_calibration: Calibration multipliers for this period.
-        fetch_soc: Async callable returning current battery SOC or None.
-        get_live_solar_average_kw: Returns rolling live solar average in kW.
-        get_effective_battery_export_kw: Returns effective battery export kW.
-        start_timed_grid_export: Async callable to begin a bounded timed export.
-        apply_mode_change: Async callable to apply a mode change with tracking.
-        sigen: Sigen API interaction instance.
-        mode_names: Mapping of mode integer values to display labels.
+        ctx: Shared handler context carrying all period parameters.
 
     Returns:
         True if the outer period loop should continue to the next period,
         False to allow further period checks this tick.
     """
-    s = period_state
+    now_utc = ctx.now_utc
+    period_start = ctx.period_start
+    period_end_utc = ctx.period_end_utc
+    timed_export_override = ctx.timed_export_override
+    solar_value = ctx.solar_value
+    status = ctx.status
+    period_solar_kwh = ctx.period_solar_kwh
+    period_calibration = ctx.period_calibration
+    fetch_soc = ctx.fetch_soc
+    get_live_solar_average_kw = ctx.get_live_solar_average_kw
+    get_effective_battery_export_kw = ctx.get_effective_battery_export_kw
+    start_timed_grid_export = ctx.start_timed_grid_export
+    apply_mode_change = ctx.apply_mode_change
+    sigen = ctx.sigen
+    mode_names = ctx.mode_names
+    s = ctx.period_state
 
     # --- Mid-period live clipping export check ---
     if (

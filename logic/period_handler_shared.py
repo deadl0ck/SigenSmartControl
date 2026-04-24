@@ -1,7 +1,7 @@
 """
 logic/period_handler_shared.py
 -------------------------------
-Shared helper functions used across daytime period handlers.
+Shared helper functions and context dataclass used across daytime period handlers.
 
 All three daytime period handlers (morning, afternoon, evening) share identical
 implementations of live-clipping-risk promotion and mode-decision evaluation.
@@ -13,6 +13,8 @@ If a future need arises for period-specific logic inside these helpers, move the
 diverging copy back into the relevant handler file and leave the others here.
 """
 
+import dataclasses
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
@@ -34,6 +36,51 @@ from logic.schedule_utils import (
     get_hours_until_cheap_rate,
     get_schedule_period_for_time,
 )
+
+
+@dataclasses.dataclass
+class PeriodHandlerContext:
+    """All parameters shared by the three daytime period handler functions.
+
+    Passed as a single ``ctx`` argument to ``handle_morning_period``,
+    ``handle_afternoon_period``, and ``handle_evening_period`` instead of
+    individual keyword arguments.
+
+    Attributes:
+        now_utc: Current scheduler tick time in UTC.
+        period_start: Scheduled start time for the period in UTC.
+        period_end_utc: End time of this period in UTC, or None.
+        period_state: Mutable state dict for this period.
+        timed_export_override: Shared mutable timed export state dict.
+        solar_value: Forecasted solar power in watts.
+        status: Forecast status string (Green/Amber/Red).
+        period_solar_kwh: Estimated solar energy for the period in kWh.
+        period_calibration: Calibration multipliers for this period.
+        fetch_soc: Async callable returning current battery SOC or None.
+        get_live_solar_average_kw: Returns rolling live solar average in kW.
+        get_effective_battery_export_kw: Returns effective battery export kW.
+        start_timed_grid_export: Async callable to begin a bounded timed export.
+        apply_mode_change: Async callable to apply a mode change with tracking.
+        sigen: Sigen API interaction instance.
+        mode_names: Mapping of mode integer values to display labels.
+    """
+
+    now_utc: datetime
+    period_start: datetime
+    period_end_utc: datetime | None
+    period_state: dict[str, Any]
+    timed_export_override: dict[str, Any]
+    solar_value: int
+    status: str
+    period_solar_kwh: float
+    period_calibration: dict[str, Any]
+    fetch_soc: Callable[[str], Awaitable[float | None]]
+    get_live_solar_average_kw: Callable[[], float | None]
+    get_effective_battery_export_kw: Callable[[float | None], float]
+    start_timed_grid_export: Callable[..., Awaitable[bool]]
+    apply_mode_change: Callable[..., Awaitable[bool]]
+    sigen: Any
+    mode_names: dict[int, str]
 
 
 def _promote_status_for_live_clipping_risk(

@@ -14,6 +14,7 @@ from integrations.sigen_interaction import SigenInteraction
 from logic.morning import handle_morning_period
 from logic.afternoon import handle_afternoon_period
 from logic.evening import handle_evening_period
+from logic.period_handler_shared import PeriodHandlerContext
 from logic.night import handle_night_window
 from logic.scheduler_operations import (
     refresh_daily_data,
@@ -300,7 +301,7 @@ class SchedulerCoordinator:
                     if period_index + 1 < len(self.state.ordered_period_windows)
                     else self.state.today_sunset_utc
                 )
-                shared_kwargs = dict(
+                ctx = PeriodHandlerContext(
                     now_utc=now,
                     period_start=period_start,
                     period_end_utc=period_end_utc,
@@ -319,11 +320,11 @@ class SchedulerCoordinator:
                     mode_names=self.mode_names,
                 )
                 if period == Period.MORN:
-                    await handle_morning_period(**shared_kwargs)
+                    await handle_morning_period(ctx)
                 elif period == Period.AFTN:
-                    await handle_afternoon_period(**shared_kwargs)
+                    await handle_afternoon_period(ctx)
                 elif period == Period.EVE:
-                    await handle_evening_period(**shared_kwargs)
+                    await handle_evening_period(ctx)
 
     async def run_main_loop(
         self,
