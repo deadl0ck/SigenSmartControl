@@ -224,51 +224,51 @@ async def handle_evening_period(
         and (period_end_utc is None or now_utc < period_end_utc)
         and MORNING_HIGH_SOC_PROTECTION_ENABLED
     ):
-        solar_avg_kw_3_safety = get_live_solar_average_kw()
-        soc_safety = await fetch_soc(PERIOD)
+        mid_period_solar_kw = get_live_solar_average_kw()
+        mid_period_soc = await fetch_soc(PERIOD)
         if (
-            soc_safety is not None
-            and soc_safety >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
-            and solar_avg_kw_3_safety is not None
-            and solar_avg_kw_3_safety >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW
+            mid_period_soc is not None
+            and mid_period_soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
+            and mid_period_solar_kw is not None
+            and mid_period_solar_kw >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW
         ):
-            headroom_kwh_safety = calc_headroom_kwh(BATTERY_KWH, soc_safety)
-            headroom_target_kwh_safety = HEADROOM_TARGET_KWH
-            headroom_deficit_safety = max(0.0, headroom_target_kwh_safety - headroom_kwh_safety)
-            if headroom_deficit_safety > 0:
-                effective_battery_export_kw_safety = get_effective_battery_export_kw(
-                    solar_avg_kw_3_safety
+            mid_period_headroom_kwh = calc_headroom_kwh(BATTERY_KWH, mid_period_soc)
+            mid_period_headroom_target_kwh = HEADROOM_TARGET_KWH
+            mid_period_headroom_deficit = max(0.0, mid_period_headroom_target_kwh - mid_period_headroom_kwh)
+            if mid_period_headroom_deficit > 0:
+                mid_period_effective_battery_export_kw = get_effective_battery_export_kw(
+                    mid_period_solar_kw
                 )
-                duration_minutes_safety = math.ceil(
-                    (headroom_deficit_safety / effective_battery_export_kw_safety) * 60
+                mid_period_duration_minutes = math.ceil(
+                    (mid_period_headroom_deficit / mid_period_effective_battery_export_kw) * 60
                 )
-                reason_safety = (
-                    f"High-SOC safety export: SOC {soc_safety:.1f}% >= "
+                mid_period_reason = (
+                    f"High-SOC safety export: SOC {mid_period_soc:.1f}% >= "
                     f"{MORNING_HIGH_SOC_THRESHOLD_PERCENT:.0f}% threshold, "
-                    f"solar {solar_avg_kw_3_safety:.1f} kW >= "
+                    f"solar {mid_period_solar_kw:.1f} kW >= "
                     f"{MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW:.1f} kW trigger, "
-                    f"headroom {headroom_kwh_safety:.2f} kWh < target "
-                    f"{headroom_target_kwh_safety:.2f} kWh"
+                    f"headroom {mid_period_headroom_kwh:.2f} kWh < target "
+                    f"{mid_period_headroom_target_kwh:.2f} kWh"
                 )
                 log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-HIGH-SOC-SAFETY",
                     mode_names=mode_names, now_utc=now_utc,
                     period_start_utc=period_start, solar_value=solar_value,
                     status=status, period_solar_kwh=period_solar_kwh,
-                    soc=soc_safety, headroom_kwh=headroom_kwh_safety,
-                    headroom_target_kwh=headroom_target_kwh_safety,
-                    headroom_deficit_kwh=headroom_deficit_safety, export_by_utc=now_utc,
-                    solar_avg_kw_3=solar_avg_kw_3_safety,
-                    effective_battery_export_kw=effective_battery_export_kw_safety,
-                    mode=SIGEN_MODES["GRID_EXPORT"], reason=reason_safety,
+                    soc=mid_period_soc, headroom_kwh=mid_period_headroom_kwh,
+                    headroom_target_kwh=mid_period_headroom_target_kwh,
+                    headroom_deficit_kwh=mid_period_headroom_deficit, export_by_utc=now_utc,
+                    solar_avg_kw_3=mid_period_solar_kw,
+                    effective_battery_export_kw=mid_period_effective_battery_export_kw,
+                    mode=SIGEN_MODES["GRID_EXPORT"], reason=mid_period_reason,
                     outcome="mid-period high-SOC safety export triggered",
                 )
-                override_started_safety = await start_timed_grid_export(
-                    period=PERIOD, reason=reason_safety,
-                    duration_minutes=duration_minutes_safety,
-                    now_utc=now_utc, battery_soc=soc_safety, is_clipping_export=True,
+                mid_period_override_started = await start_timed_grid_export(
+                    period=PERIOD, reason=mid_period_reason,
+                    duration_minutes=mid_period_duration_minutes,
+                    now_utc=now_utc, battery_soc=mid_period_soc, is_clipping_export=True,
                 )
-                if override_started_safety:
+                if mid_period_override_started:
                     return True
 
     # --- Pre-period export check ---
