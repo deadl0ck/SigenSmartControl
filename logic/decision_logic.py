@@ -12,7 +12,12 @@ Implements a hierarchical decision tree:
 5. Peak tariff self-powered override
 """
 
+from dataclasses import dataclass
+
+from config.enums import ForecastStatus, Period
 from config.settings import (
+    BATTERY_KWH,
+    ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     FORECAST_TO_MODE,
     LIVE_CLIPPING_RISK_VALID_PERIODS,
     MORNING_HIGH_SOC_PROTECTION_ENABLED,
@@ -20,6 +25,35 @@ from config.settings import (
     PERIOD_TO_MODE,
     SIGEN_MODES,
 )
+
+
+@dataclass
+class DecisionContext:
+    """All inputs needed by decide_operational_mode() to select an inverter mode.
+
+    Attributes:
+        period: Current period name (e.g., 'Morn', 'Aftn', 'Eve', 'Night').
+        status: Solar forecast status ('GREEN', 'AMBER', 'RED'), or None.
+        soc: Current battery state-of-charge (0-100), or None if unavailable.
+        headroom_kwh: Available battery headroom for charging, or None if SOC unavailable.
+        headroom_target_kwh: Required free headroom in kWh before a Green period.
+        live_solar_kw: Current live solar generation in kW, or None if unavailable.
+        hours_until_cheap_rate: Hours until cheap-rate tariff starts, or None.
+        estimated_home_load_kw: Average household load in kW, or None.
+        bridge_battery_reserve_kwh: Minimum battery reserve to maintain in bridge calc, or None.
+        tariff: Current schedule period ('NIGHT', 'PEAK', 'DAY'), or None.
+    """
+
+    period: str
+    status: str | None
+    soc: float | None
+    headroom_kwh: float | None
+    headroom_target_kwh: float
+    live_solar_kw: float | None
+    hours_until_cheap_rate: float | None
+    estimated_home_load_kw: float | None
+    bridge_battery_reserve_kwh: float | None
+    tariff: str | None
 
 
 def _parse_period_codes(codes_str: str) -> set[str]:
@@ -71,23 +105,9 @@ def calc_headroom_kwh(battery_kwh: float, soc: float) -> float:
     return battery_kwh * (1 - soc / 100)
 
 
-def decide_operational_mode(
-    period: str,
-    status: str,
-    soc: float | None,
-    headroom_kwh: float | None,
-    period_solar_kwh: float,
-    *,
-    schedule_period: str | None = None,
-    headroom_target_kwh: float = 0.0,
-    battery_kwh: float | None = None,
-    hours_until_cheap_rate: float | None = None,
-    estimated_home_load_kw: float | None = None,
-    bridge_battery_reserve_kwh: float = 0.0,
-    enable_pre_cheap_rate_battery_bridge: bool = False,
-) -> tuple[int, str]:
+def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
     """Determine the optimal inverter operational mode for current conditions.
-    
+
     Implements a hierarchical decision tree:
     1. Export if headroom is below the physics-derived target before a Green period
     2. Daytime high-SOC protection for Amber/Green morning and afternoon periods
@@ -95,82 +115,70 @@ def decide_operational_mode(
     4. Evening bridge: use self-powered if battery can cover load until cheap rate
     5. Map forecast status to default mode (deterministic, no AI fallback)
     6. Peak tariff override: prioritize self-powered during expensive hours
-    
+
     Args:
-        period: Current period name (e.g., 'Morn', 'Aftn', 'Eve', 'Night').
-        status: Solar forecast status ('GREEN', 'AMBER', 'RED').
-        soc: Current battery state-of-charge (0-100), or None if unavailable.
-        headroom_kwh: Available battery headroom for charging, or None if SOC unavailable.
-        period_solar_kwh: Estimated solar energy available in this period (used in reason text).
-        schedule_period: Current schedule period ('NIGHT', 'PEAK', 'DAY'), or None.
-        headroom_target_kwh: Required free headroom in kWh before a Green period. Derived
-            from hardware surplus capacity: (SOLAR_PV_KW - INVERTER_KW) × period_hours.
-        battery_kwh: Total battery capacity, needed for evening bridge rule.
-        hours_until_cheap_rate: Hours until cheap-rate tariff starts, needed for bridge rule.
-        estimated_home_load_kw: Average household load in kW, needed for bridge rule.
-        bridge_battery_reserve_kwh: Minimum battery reserve to maintain, used in bridge calc.
-        enable_pre_cheap_rate_battery_bridge: Enable evening battery preservation rule.
-        
+        ctx: DecisionContext containing all inputs required for mode selection.
+
     Returns:
         Tuple of (mode_value: int, reason: str) explaining the mode choice.
     """
-    status_key = (status or "").upper()
-    period_key = (period or "").upper()
-    schedule_key = (schedule_period or "").upper()
+    status_key = (ctx.status or "").upper()
+    period_key = ctx.period or ""
+    schedule_key = (ctx.tariff or "").upper()
 
     if (
-        soc is not None
-        and status_key == "GREEN"
-        and headroom_kwh is not None
-        and headroom_kwh < headroom_target_kwh
+        ctx.soc is not None
+        and status_key == ForecastStatus.GREEN
+        and ctx.headroom_kwh is not None
+        and ctx.headroom_kwh < ctx.headroom_target_kwh
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
         reason = (
-            f"Headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
+            f"Headroom ({ctx.headroom_kwh:.2f} kWh) < target ({ctx.headroom_target_kwh:.2f} kWh). "
             "Preemptively exporting to grid."
         )
         return mode, reason
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and status_key in {"AMBER", "GREEN"}
-        and soc is not None
-        and soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
-        and headroom_kwh is not None
-        and headroom_kwh < headroom_target_kwh
+        and status_key in {ForecastStatus.AMBER, ForecastStatus.GREEN}
+        and ctx.soc is not None
+        and ctx.soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
+        and ctx.headroom_kwh is not None
+        and ctx.headroom_kwh < ctx.headroom_target_kwh
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
         period_label = {
-            "MORN": "Morning",
-            "AFTN": "Afternoon",
-            "EVE": "Evening",
-        }.get(period_key, period)
+            Period.MORN: "Morning",
+            Period.AFTN: "Afternoon",
+            Period.EVE: "Evening",
+        }.get(period_key, ctx.period)
         reason = (
             f"{period_label} high-SOC protection: "
-            f"SOC ({soc:.1f}%) >= {MORNING_HIGH_SOC_THRESHOLD_PERCENT:.1f}% and "
-            f"headroom ({headroom_kwh:.2f} kWh) < target ({headroom_target_kwh:.2f} kWh). "
+            f"SOC ({ctx.soc:.1f}%) >= {MORNING_HIGH_SOC_THRESHOLD_PERCENT:.1f}% and "
+            f"headroom ({ctx.headroom_kwh:.2f} kWh) < target ({ctx.headroom_target_kwh:.2f} kWh). "
             "Preemptively exporting to grid."
         )
         return mode, reason
 
-    if period_key == "NIGHT":
-        mode = PERIOD_TO_MODE["NIGHT"]
+    if period_key == Period.NIGHT:
+        mode = PERIOD_TO_MODE[Period.NIGHT]
         reason = "Night period detected. Applying configured night mode."
         return mode, reason
 
     # Before cheap-rate starts, prefer battery usage over charge-oriented behavior
     # when the battery can safely cover expected load until cheap-rate begins.
     if (
-        enable_pre_cheap_rate_battery_bridge
-        and period_key == "EVE"
-        and soc is not None
-        and battery_kwh is not None
-        and hours_until_cheap_rate is not None
-        and estimated_home_load_kw is not None
-        and hours_until_cheap_rate > 0
+        ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE
+        and period_key == Period.EVE
+        and ctx.soc is not None
+        and ctx.hours_until_cheap_rate is not None
+        and ctx.estimated_home_load_kw is not None
+        and ctx.hours_until_cheap_rate > 0
     ):
-        available_kwh = max(0.0, battery_kwh * (soc / 100.0) - bridge_battery_reserve_kwh)
-        required_kwh = max(0.0, hours_until_cheap_rate * estimated_home_load_kw)
+        reserve = ctx.bridge_battery_reserve_kwh or 0.0
+        available_kwh = max(0.0, BATTERY_KWH * (ctx.soc / 100.0) - reserve)
+        required_kwh = max(0.0, ctx.hours_until_cheap_rate * ctx.estimated_home_load_kw)
         if available_kwh >= required_kwh:
             mode = SIGEN_MODES["SELF_POWERED"]
             reason = (
@@ -181,7 +189,7 @@ def decide_operational_mode(
             return mode, reason
 
     mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["SELF_POWERED"])
-    reason = f"Default mapping for {status}."
+    reason = f"Default mapping for {ctx.status}."
 
     # During expensive peak tariff windows, prioritize self-powered operation
     # unless one of the explicit export-to-grid rules already triggered above.

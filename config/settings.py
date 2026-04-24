@@ -6,6 +6,8 @@ Configuration file for Sigen inverter operational mode mappings and forecast-to-
 Edit this file to adjust how forecast statuses and tariff periods map to Sigen operational modes.
 """
 
+from config.enums import ForecastStatus, Period
+
 # ==============================
 # System Specifications
 # ==============================
@@ -277,11 +279,11 @@ SIGEN_MODE_LABEL_TO_VALUE = {
 # Adjust these mappings to change automation behavior
 FORECAST_TO_MODE = {
     # Green: Good solar forecast, maximize self-consumption
-    "GREEN": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.GREEN: SIGEN_MODES["SELF_POWERED"],
     # Amber: Moderate solar, stay in deterministic self-consumption mode
-    "AMBER": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.AMBER: SIGEN_MODES["SELF_POWERED"],
     # Red: Poor solar, stay in deterministic self-consumption mode
-    "RED": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.RED: SIGEN_MODES["SELF_POWERED"],
 }
 
 # ==============================
@@ -290,7 +292,7 @@ FORECAST_TO_MODE = {
 # Map schedule period (NIGHT/DAY/PEAK) to Sigen operational mode.
 PERIOD_TO_MODE = {
     # Night: cheap-rate window behavior (charge-oriented when TOU charge windows are configured)
-    "NIGHT": SIGEN_MODES["TOU"],
+    Period.NIGHT: SIGEN_MODES["TOU"],
     # Day: deterministic self-consumption behavior
     "DAY": SIGEN_MODES["SELF_POWERED"],
     # Peak: high-demand hours, maximize self-consumption
