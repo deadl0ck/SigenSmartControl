@@ -7,11 +7,13 @@ persist/restore paths.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import main as main_module
+import logic.timed_export as timed_export_module
 from config.settings import (
     BATTERY_KWH,
     CHEAP_RATE_START_HOUR,
@@ -26,6 +28,8 @@ from logic.schedule_utils import (
     get_hours_until_cheap_rate,
     is_pre_sunrise_discharge_window,
 )
+
+_test_logger = logging.getLogger("test")
 
 
 def test_system_specs_imported() -> None:
@@ -159,10 +163,9 @@ def test_pre_period_export_by_when_deficit_zero_characterization() -> None:
     assert export_by == period_start
 
 
-def test_timed_export_state_round_trip_restore_path(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_timed_export_state_round_trip_restore_path(tmp_path: pytest.TempPathFactory) -> None:
     """Persisted timed-export state should round-trip with datetimes restored."""
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main_module, "TIMED_EXPORT_STATE_PATH", str(state_path))
 
     started_at = datetime(2026, 4, 19, 8, 0, tzinfo=timezone.utc)
     restore_at = datetime(2026, 4, 19, 8, 45, tzinfo=timezone.utc)
@@ -179,8 +182,10 @@ def test_timed_export_state_round_trip_restore_path(tmp_path: pytest.TempPathFac
         "export_soc_floor": 20.0,
     }
 
-    main_module._persist_timed_export_override(active_state)
-    loaded = main_module._load_timed_export_override()
+    timed_export_module.persist_timed_export_override(
+        active_state, logger=_test_logger, path=state_path
+    )
+    loaded = timed_export_module.load_timed_export_override(logger=_test_logger, path=state_path)
 
     assert loaded["active"] is True
     assert loaded["restore_mode"] == SIGEN_MODES["SELF_POWERED"]
@@ -190,11 +195,9 @@ def test_timed_export_state_round_trip_restore_path(tmp_path: pytest.TempPathFac
 
 def test_timed_export_state_invalid_datetime_falls_back_to_empty(
     tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Invalid persisted datetime should clear timed-export restore path safely."""
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main_module, "TIMED_EXPORT_STATE_PATH", str(state_path))
 
     invalid_payload = {
         "active": True,
@@ -204,25 +207,27 @@ def test_timed_export_state_invalid_datetime_falls_back_to_empty(
     }
     state_path.write_text(__import__("json").dumps(invalid_payload), encoding="utf-8")
 
-    loaded = main_module._load_timed_export_override()
+    loaded = timed_export_module.load_timed_export_override(logger=_test_logger, path=state_path)
 
-    assert loaded == main_module._empty_timed_export_override()
+    assert loaded == timed_export_module._empty_timed_export_override()
 
 
 def test_timed_export_state_inactive_removes_file(
     tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Persisting inactive state should remove any prior timed-export file."""
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main_module, "TIMED_EXPORT_STATE_PATH", str(state_path))
 
-    active = main_module._empty_timed_export_override()
+    active = timed_export_module._empty_timed_export_override()
     active.update({"active": True, "started_at": datetime.now(timezone.utc)})
-    main_module._persist_timed_export_override(active)
+    timed_export_module.persist_timed_export_override(active, logger=_test_logger, path=state_path)
     assert state_path.exists()
 
-    main_module._persist_timed_export_override(main_module._empty_timed_export_override())
+    timed_export_module.persist_timed_export_override(
+        timed_export_module._empty_timed_export_override(),
+        logger=_test_logger,
+        path=state_path,
+    )
 
     assert not state_path.exists()
 
