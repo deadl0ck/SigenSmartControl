@@ -3,6 +3,52 @@
 This module centralizes timed export state persistence and restore behavior.
 It keeps scheduler code in main.py focused on high-level loop flow while this
 module handles the start/restore lifecycle for timed GRID_EXPORT windows.
+
+## State machine
+
+The timed export override follows a three-state lifecycle:
+
+    inactive ──► active ──► restored ──► inactive (next tick)
+
+**inactive**: No override is in force.  ``timed_export_override["active"]``
+    is False.  ``maybe_restore_timed_grid_export`` returns ``"inactive"`` and
+    the scheduler proceeds with its normal per-period decisions.
+
+**active**: A GRID_EXPORT window is running.  ``timed_export_override["active"]``
+    is True and ``now_utc < restore_at``.  The scheduler skips all normal mode
+    decisions until the window ends or an SOC floor fires.
+
+**restored**: The export window ended (or an SOC floor fired) and the previous
+    mode was reinstated this tick.  ``maybe_restore_timed_grid_export`` returns
+    ``"restored"``.  The scheduler skips normal decisions for the *remainder of
+    this tick only* so that the fresh restore is not immediately overwritten;
+    normal decisions resume on the next tick.
+
+## Transitions
+
+* **inactive → active**: ``start_timed_grid_export()`` succeeds — the inverter
+  accepted the GRID_EXPORT command and state is written to disk.
+
+* **active → restored** (normal): ``restore_at`` is reached.  The previous mode
+  is restored and the state file is deleted.
+
+* **active → restored** (early, export SOC floor): While active, the battery SOC
+  drops to or below ``export_soc_floor``.  Checked first on every tick.
+
+* **active → restored** (early, clipping SOC floor): While active *and*
+  ``is_clipping_export`` is True, the battery SOC drops to or below
+  ``clipping_soc_floor``.  Checked after the export SOC floor.
+
+* **restored → inactive**: The caller discards the ``"restored"`` signal and the
+  state is already cleared; the *next* call to ``maybe_restore_timed_grid_export``
+  finds ``active=False`` and returns ``"inactive"``.
+
+## SOC floor precedence
+
+``export_soc_floor`` is checked before ``clipping_soc_floor`` so that an
+explicit caller-supplied floor always wins over the clipping-specific default.
+Both floors trigger the same early-restore action; the first one that fires
+short-circuits the rest of the checks.
 """
 
 import json
@@ -145,6 +191,11 @@ async def start_timed_grid_export(
 ) -> bool:
     """Switch to GRID_EXPORT for a bounded duration and schedule mode restore.
 
+    On success the state machine transitions from *inactive* to *active*: the
+    inverter is placed in GRID_EXPORT, the previous mode is recorded as the
+    restore target, and the state is persisted to disk.  The caller should skip
+    all remaining normal mode decisions for the current tick after a True return.
+
     Args:
         timed_export_override: Current in-memory timed export state.
         set_timed_export_override: Callback that updates and persists state.
@@ -153,8 +204,10 @@ async def start_timed_grid_export(
         duration_minutes: Requested export duration in minutes.
         now_utc: Current scheduler timestamp in UTC.
         battery_soc: Battery SOC at trigger time when available.
-        is_clipping_export: If True, apply clipping SOC floor checks.
-        export_soc_floor: Optional SOC floor that triggers early restore.
+        is_clipping_export: If True, apply clipping SOC floor checks during
+            the window in addition to any explicit export_soc_floor.
+        export_soc_floor: Optional SOC % at which the export is cut short early,
+            regardless of whether the window has elapsed.
         sigen: Sigen interaction instance or None.
         mode_names: Mapping of mode value to user-facing mode name.
         apply_mode_change: Callback that performs mode change and accounting.
@@ -162,7 +215,10 @@ async def start_timed_grid_export(
         log_mode_status: Optional callback for standardized pre-change mode logs.
 
     Returns:
-        True when timed export is activated, False otherwise.
+        True when the state machine moved to *active* (inverter accepted the
+        command).  False when the override was already active, the current mode
+        could not be read, or the mode-change command failed — in all False cases
+        the state is unchanged.
     """
     if timed_export_override["active"]:
         logger.info(
@@ -282,7 +338,14 @@ async def maybe_restore_timed_grid_export(
         logger: Scheduler logger.
 
     Returns:
-        One of: "active", "restored", or "inactive".
+        ``"inactive"`` — no override is currently active; the caller should
+            proceed with its normal per-period mode decisions this tick.
+        ``"active"`` — an override window is still running; the caller should
+            skip all normal mode decisions and wait for the window to expire.
+        ``"restored"`` — the export window just ended (time-based or SOC floor)
+            and the previous mode was reinstated this tick; the caller should
+            skip normal decisions for the remainder of *this* tick only, then
+            resume normally on the next tick.
     """
     if not timed_export_override["active"]:
         return "inactive"
@@ -292,6 +355,10 @@ async def maybe_restore_timed_grid_export(
     clipping_soc_floor = timed_export_override.get("clipping_soc_floor")
     export_soc_floor = timed_export_override.get("export_soc_floor")
 
+    # SOC floor checks: export_soc_floor is evaluated first because it is an
+    # explicit caller-supplied threshold (e.g. pre-period headroom protection)
+    # and should always win over the clipping-specific default.  The first floor
+    # that fires triggers an early restore and short-circuits the second check.
     if export_soc_floor is not None:
         current_soc = await fetch_soc("timed-export-soc-check")
         if current_soc is not None and current_soc <= export_soc_floor:
