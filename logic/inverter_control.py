@@ -7,10 +7,10 @@ that interact with inverter payloads, keeping main.py focused on orchestration.
 """
 
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import datetime, timezone
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 from config.settings import SIGEN_MODES
 from integrations.sigen_interaction import SigenPayloadError
@@ -22,7 +22,28 @@ from telemetry.telemetry_archive import (
 )
 
 
-ModeChangeNotifier = Callable[..., Awaitable[None]]
+class ModeChangeNotifier(Protocol):
+    """Callback invoked after a mode-change attempt, whether successful or not."""
+
+    async def __call__(
+        self,
+        *,
+        success: bool,
+        period: str,
+        reason: str,
+        requested_mode: int,
+        requested_mode_label: str,
+        current_mode_raw: Any,
+        mode_names: dict[int, str],
+        event_time_utc: datetime,
+        battery_soc: float | None,
+        solar_generated_today_kwh: float | None,
+        today_period_forecast: dict[str, tuple[int, str]] | None,
+        response: Any | None = None,
+        error: str | None = None,
+    ) -> None: ...
+
+
 ArchiveDecision = Callable[[], bool]
 ModeChangeArchiveAppender = Callable[..., None]
 
