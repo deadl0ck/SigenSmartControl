@@ -84,7 +84,9 @@ see exactly what values were used and why each decision was made.
 
    All solar trigger thresholds (`MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW`, `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`) and discharge rate estimates (`PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW`, `EVENING_EXPORT_ASSUMED_DISCHARGE_KW`) are automatically derived from your hardware specs — you do not need to touch them.
 
-5. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
+5. **Note for non-Irish users:** The default forecast provider is the **ESB county API**, which is an Irish electricity grid service and only works in Ireland. It divides the day into four periods — `Morn`, `Aftn`, `Eve`, and `Night` — aligned to local Irish time. If you are outside Ireland, set `FORECAST_PROVIDER` in `config/settings.py` to `"forecast_solar"` or `"quartz"` instead, and configure the corresponding API credentials. The period structure and decision logic work the same regardless of provider.
+
+6. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
 
 6. Start the scheduler:
    ```sh
