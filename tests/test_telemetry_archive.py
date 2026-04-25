@@ -1,11 +1,22 @@
-"""Tests for inverter telemetry archive persistence helpers."""
+"""Tests for inverter telemetry archive persistence helpers.
+
+Also covers the private scoring and collection helpers:
+_candidate_score, _collect_numeric_fields, and _extract_numeric_metric.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
 
+import pytest
+
 import telemetry.telemetry_archive as telemetry_archive
+from telemetry.telemetry_archive import (
+    _candidate_score,
+    _collect_numeric_fields,
+    _extract_numeric_metric,
+)
 
 
 def test_append_inverter_telemetry_snapshot(tmp_path, monkeypatch) -> None:
@@ -137,3 +148,171 @@ def test_append_mode_change_event(tmp_path, monkeypatch) -> None:
     assert event["requested_mode_label"] == "GRID_EXPORT"
     assert event["simulated"] is True
     assert event["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# _candidate_score tests
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_score_exact_leaf_match_returns_100() -> None:
+    """Exact leaf match against a candidate returns the maximum score of 100."""
+    path = ("data", "pvPower")
+    candidates = ("pvPower",)
+    assert _candidate_score(path, candidates) == 100
+
+
+def test_candidate_score_partial_leaf_match_returns_80() -> None:
+    """Candidate substring found inside the leaf (but not an exact match) returns 80."""
+    # leaf is "pvPowerInstant"; compact_candidate "pvpower" is contained within compact_leaf
+    path = ("data", "pvPowerInstant")
+    candidates = ("pvPower",)
+    assert _candidate_score(path, candidates) == 80
+
+
+def test_candidate_score_match_only_in_joined_path_returns_60() -> None:
+    """Candidate found in the joined path but NOT in the leaf alone returns 60."""
+    # leaf is "value", joined path is "pvpower.value" which contains "pvpower"
+    path = ("pvpower", "value")
+    candidates = ("pvPower",)
+    score = _candidate_score(path, candidates)
+    assert score == 60
+
+
+def test_candidate_score_no_match_returns_0() -> None:
+    """Path with no candidate match anywhere returns 0."""
+    path = ("device", "temperature")
+    candidates = ("pvPower", "solarPower")
+    assert _candidate_score(path, candidates) == 0
+
+
+def test_candidate_score_underscore_normalisation() -> None:
+    """Underscore-normalised candidate 'pv_power' matches camelCase leaf 'pvPower'."""
+    # compact_candidate = "pvpower", compact_leaf = "pvpower" → exact → 100
+    path = ("data", "pvPower")
+    candidates = ("pv_power",)
+    assert _candidate_score(path, candidates) == 100
+
+
+def test_candidate_score_empty_candidates_returns_0() -> None:
+    """Empty candidate tuple always returns 0 regardless of path."""
+    path = ("data", "pvPower")
+    assert _candidate_score(path, ()) == 0
+
+
+def test_candidate_score_multiple_candidates_highest_score_wins() -> None:
+    """When multiple candidates match at different levels, the highest score is returned."""
+    # "soc" is an exact leaf match (100), "solar" only appears in joined path of a different leaf
+    path = ("battery", "soc")
+    candidates = ("solar", "soc")
+    assert _candidate_score(path, candidates) == 100
+
+
+def test_candidate_score_single_element_path() -> None:
+    """A single-element path uses that element as both the leaf and the full joined string."""
+    path = ("pvPower",)
+    candidates = ("pvPower",)
+    assert _candidate_score(path, candidates) == 100
+
+
+# ---------------------------------------------------------------------------
+# _collect_numeric_fields tests
+# ---------------------------------------------------------------------------
+
+
+def test_collect_numeric_fields_basic_nested_dict() -> None:
+    """Basic nested dict returns correct (path, value) pairs for numeric leaves."""
+    payload = {"data": {"pvPower": 3.5, "batterySoc": 72}}
+    results = _collect_numeric_fields(payload)
+    paths = {path: value for path, value in results}
+    assert ("data", "pvPower") in paths
+    assert paths[("data", "pvPower")] == pytest.approx(3.5)
+    assert ("data", "batterySoc") in paths
+    assert paths[("data", "batterySoc")] == pytest.approx(72.0)
+
+
+def test_collect_numeric_fields_max_depth_guard() -> None:
+    """A dict nested deeper than max_depth stops recursion; leaf beyond the limit is absent."""
+    # Build a 13-level deep nested dict (default max_depth=10, so leaf is beyond the cutoff)
+    deep: dict = {"leaf": 42.0}
+    for _ in range(13):
+        deep = {"child": deep}
+
+    results = _collect_numeric_fields(deep, max_depth=10)
+    values = [v for _, v in results]
+    # The deeply-nested 42.0 must not appear in collected values
+    assert 42.0 not in values
+
+
+def test_collect_numeric_fields_non_numeric_values_excluded() -> None:
+    """Strings and booleans are excluded; only int/float leaves are returned."""
+    payload = {
+        "label": "green",   # string — must be excluded
+        "active": True,     # bool — must be excluded
+        "inactive": False,  # bool — must be excluded
+        "power": 5.0,       # float — must be included
+        "index": 3,         # int — must be included
+    }
+    results = _collect_numeric_fields(payload)
+    paths = {path: value for path, value in results}
+
+    assert ("label",) not in paths
+    assert ("active",) not in paths
+    assert ("inactive",) not in paths
+    assert ("power",) in paths
+    assert paths[("power",)] == pytest.approx(5.0)
+    assert ("index",) in paths
+    assert paths[("index",)] == pytest.approx(3.0)
+
+
+def test_collect_numeric_fields_list_items_indexed() -> None:
+    """List items are collected with their numeric index string in the path."""
+    payload = {"readings": [1.1, 2.2, 3.3]}
+    results = _collect_numeric_fields(payload)
+    paths = {path: value for path, value in results}
+
+    assert ("readings", "0") in paths
+    assert paths[("readings", "0")] == pytest.approx(1.1)
+    assert ("readings", "2") in paths
+    assert paths[("readings", "2")] == pytest.approx(3.3)
+
+
+def test_collect_numeric_fields_empty_dict_returns_empty() -> None:
+    """An empty dict returns an empty list."""
+    assert _collect_numeric_fields({}) == []
+
+
+def test_collect_numeric_fields_flat_dict_excludes_non_numeric() -> None:
+    """A flat dict with a mix of types returns only the two numeric leaves."""
+    payload = {"a": 1, "b": "hello", "c": 2.5, "d": None}
+    results = _collect_numeric_fields(payload)
+    paths = {path: value for path, value in results}
+    assert len(paths) == 2
+    assert ("a",) in paths
+    assert ("c",) in paths
+
+
+# ---------------------------------------------------------------------------
+# _extract_numeric_metric integration test
+# ---------------------------------------------------------------------------
+
+
+def test_extract_numeric_metric_realistic_energy_flow_pv_power() -> None:
+    """Realistic energy_flow payload with pvPower nested under 'data' returns correct value."""
+    energy_flow = {
+        "code": 200,
+        "msg": "success",
+        "data": {
+            "pvPower": 4200,       # reported in W; should be the top-ranked match
+            "batterySoc": 85,
+            "batteryPower": 500,
+            "gridExchange": -300,
+        },
+    }
+    candidates = ("pvPower", "solarPower", "ppv", "pv", "solar")
+    result = _extract_numeric_metric(energy_flow, candidates)
+
+    assert result is not None
+    path_str, value = result
+    assert "pvPower" in path_str or "pvpower" in path_str.lower()
+    assert value == pytest.approx(4200.0)
