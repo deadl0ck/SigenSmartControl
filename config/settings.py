@@ -192,6 +192,8 @@ CHEAP_RATE_END_HOUR = 8
 SURPLUS_CAPACITY_KW = SOLAR_PV_KW - INVERTER_KW  # e.g. 8.9 - 5.5 = 3.4 kW
 # Target free battery headroom before a Green period: 50% of total battery capacity.
 HEADROOM_TARGET_KWH = BATTERY_KWH * 0.5  # e.g. 24 × 0.5 = 12.0 kWh
+# Alternative physics-based formula: (SOLAR_PV_KW - INVERTER_KW) * 3 = surplus kW × 3 h reserve.
+# For this system that gives 10.2 kWh. BATTERY_KWH * 0.5 adds extra margin; adjust to taste.
 # Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
 # if current battery energy is sufficient to cover expected household demand.
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
@@ -206,7 +208,7 @@ ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
 # SOC floor below which no further pre-cheap-rate export is triggered.
 PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
 # Conservative assumed net battery discharge power used to size the export window.
-PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
+PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
 # High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
@@ -216,7 +218,7 @@ MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 50.0
 # Solar generation threshold (kW) for mid-period high-SOC safety export.
 # Only triggers when live solar is this strong and SOC >= MORNING_HIGH_SOC_THRESHOLD_PERCENT.
-MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = 3.5
+MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.39, 2)  # ~39% of array capacity
 # Live clipping-risk promotion: promote Amber to Green during a scheduler tick when
 # live solar generation and battery SOC both exceed configured thresholds, allowing
 # the headroom export rule to trigger early even on an underforecast day.
@@ -229,7 +231,7 @@ LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
 # Lowered so underforecast high-irradiance ramps are caught earlier.
 # 3.2 kW ≈ 36% of array capacity; at this level surplus already exceeds typical home load, so battery fill risk is real if headroom is low.
-LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.36, 2)  # ~36% of array capacity
 # SOC floor for mid-period clipping export: if timed export started by clipping-risk
 # promotion drops SOC to this floor, cancel the export and restore prior mode.
 # Set to 5% below the promotion threshold to avoid yo-yo behavior.
@@ -248,7 +250,7 @@ EVENING_EXPORT_TRIGGER_SOC_PERCENT = 75.0
 # Additional surplus above protected energy required before exporting.
 EVENING_EXPORT_MIN_EXCESS_KWH = 1.0
 # Conservative assumed net battery discharge power used to size export window.
-EVENING_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
+EVENING_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
 # Safety cap for one evening controlled export window.
 EVENING_EXPORT_MAX_DURATION_MINUTES = 120
 

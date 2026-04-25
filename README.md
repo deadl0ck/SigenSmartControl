@@ -72,15 +72,27 @@ see exactly what values were used and why each decision was made.
    BATTERY_KWH = 24    # your battery capacity in kWh
    ```
 
-4. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
+4. Adjust these additional settings in `config/settings.py` for your setup:
 
-5. Start the scheduler:
+   | Setting | Default | What to change |
+   |---|---|---|
+   | `LOCAL_TIMEZONE` | `"Europe/Dublin"` | Your local timezone string (e.g. `"Europe/London"`) |
+   | `CHEAP_RATE_START_HOUR` | `23` | Hour your cheap-rate electricity starts (local time) |
+   | `CHEAP_RATE_END_HOUR` | `8` | Hour your cheap-rate electricity ends (local time) |
+   | `ESTIMATED_HOME_LOAD_KW` | `0.8` | Your average household draw in kW when solar is low |
+   | `HEADROOM_TARGET_KWH` | `BATTERY_KWH * 0.5` | Free battery space to maintain before a Green forecast. The alternative physics formula is `(SOLAR_PV_KW - INVERTER_KW) * 3`; use whichever fits your clipping risk tolerance |
+
+   All solar trigger thresholds (`MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW`, `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`) and discharge rate estimates (`PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW`, `EVENING_EXPORT_ASSUMED_DISCHARGE_KW`) are automatically derived from your hardware specs — you do not need to touch them.
+
+5. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
+
+6. Start the scheduler:
    ```sh
    ./start_monitor.sh
    tail -f monitor.log
    ```
 
-6. When you are happy with the log output, set `FULL_SIMULATION_MODE = False` in `config/settings.py` and restart:
+7. When you are happy with the log output, set `FULL_SIMULATION_MODE = False` in `config/settings.py` and restart:
    ```sh
    ./restart_monitor.sh
    ```
@@ -195,6 +207,25 @@ SOLAR_PV_KW = 8.9
 INVERTER_KW = 5.5
 BATTERY_KWH = 24
 ```
+
+### Portability
+
+Changing the three hardware constants (`SOLAR_PV_KW`, `INVERTER_KW`, `BATTERY_KWH`) is enough to adapt the core decision logic to a different system. Most thresholds are derived automatically:
+
+- Solar trigger thresholds scale with `SOLAR_PV_KW` (e.g. `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = SOLAR_PV_KW * 0.36`)
+- Assumed discharge rates scale with `INVERTER_KW`
+- Headroom target scales with `BATTERY_KWH`
+- Forecast provider capacity parameters (`QUARTZ_SITE_CAPACITY_KWP`, `FORECAST_SOLAR_SITE_KWP`) are set to `SOLAR_PV_KW` automatically
+
+These settings are **not** derived from hardware and need manual review:
+
+| Setting | Why it needs review |
+|---|---|
+| `LOCAL_TIMEZONE` | Tariff window detection and period scheduling depend on local time |
+| `CHEAP_RATE_START_HOUR` / `CHEAP_RATE_END_HOUR` | Varies by energy provider and tariff plan |
+| `ESTIMATED_HOME_LOAD_KW` | Household draw varies; affects the evening battery-bridge rule |
+| `HEADROOM_TARGET_KWH` | Currently `BATTERY_KWH * 0.5`. The physics alternative is `(SOLAR_PV_KW - INVERTER_KW) * 3` (surplus kW × 3 h reserve). For systems with a large battery relative to array surplus, the physics formula is more appropriate |
+| `PRE_SUNRISE_DISCHARGE_MONTHS` | Months where pre-sunrise discharge is useful — adjust for your latitude and climate |
 
 ### Scheduler and decision thresholds
 
