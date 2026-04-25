@@ -62,6 +62,7 @@ from config.settings import (
     LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT,
     MAX_TIMED_EXPORT_MINUTES,
     SIGEN_MODES,
+    TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
 from logic.mode_control import ACTION_DIVIDER, extract_mode_value
 
@@ -183,10 +184,12 @@ async def start_timed_grid_export(
     battery_soc: float | None,
     is_clipping_export: bool,
     export_soc_floor: float | None,
-    sigen: Any,
-    mode_names: dict[int, str],
-    apply_mode_change: ModeChangeApplier,
-    logger: logging.Logger,
+    last_export_restore_at: datetime | None = None,
+    restore_cooldown_minutes: int = 0,
+    sigen: Any = None,
+    mode_names: dict[int, str] | None = None,
+    apply_mode_change: ModeChangeApplier | None = None,
+    logger: logging.Logger | None = None,
     log_mode_status: ModeStatusLogger | None = None,
 ) -> bool:
     """Switch to GRID_EXPORT for a bounded duration and schedule mode restore.
@@ -208,6 +211,12 @@ async def start_timed_grid_export(
             the window in addition to any explicit export_soc_floor.
         export_soc_floor: Optional SOC % at which the export is cut short early,
             regardless of whether the window has elapsed.
+        last_export_restore_at: UTC timestamp of the most recent restore, or None.
+            When set and restore_cooldown_minutes > 0, blocks new exports until the
+            cooldown window expires.
+        restore_cooldown_minutes: Minutes to suppress new exports after a restore.
+            Defaults to 0 (no cooldown). Typically sourced from
+            TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES.
         sigen: Sigen interaction instance or None.
         mode_names: Mapping of mode value to user-facing mode name.
         apply_mode_change: Callback that performs mode change and accounting.
@@ -228,6 +237,18 @@ async def start_timed_grid_export(
             timed_export_override["restore_at"],
         )
         return False
+
+    if last_export_restore_at is not None and restore_cooldown_minutes > 0:
+        cooldown_expires = last_export_restore_at + timedelta(minutes=restore_cooldown_minutes)
+        if now_utc < cooldown_expires:
+            remaining = int((cooldown_expires - now_utc).total_seconds() / 60)
+            logger.info(
+                "[TIMED EXPORT] Skipping new export — restore cooldown active for %s more minute(s) "
+                "(last restore: %s).",
+                remaining,
+                last_export_restore_at.isoformat(),
+            )
+            return False
 
     requested_minutes = max(1, duration_minutes)
     clamped_minutes = min(requested_minutes, MAX_TIMED_EXPORT_MINUTES)

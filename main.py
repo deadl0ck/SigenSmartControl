@@ -28,6 +28,7 @@ from config.settings import (
     INVERTER_KW,
     BATTERY_KWH,
     DEFAULT_SIMULATED_SOC_PERCENT,
+    TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
 from integrations.sigen_interaction import SigenInteraction, SigenPayloadError
 from integrations.sigen_auth import refresh_sigen_instance
@@ -327,6 +328,8 @@ async def run_scheduler() -> None:
             battery_soc=battery_soc,
             is_clipping_export=is_clipping_export,
             export_soc_floor=export_soc_floor,
+            last_export_restore_at=state.last_export_restore_at,
+            restore_cooldown_minutes=TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
             sigen=sigen,
             mode_names=mode_names,
             apply_mode_change=_apply_mode_change_tracked,

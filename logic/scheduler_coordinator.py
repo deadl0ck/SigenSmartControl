@@ -235,6 +235,7 @@ class SchedulerCoordinator:
                 self.state.timed_export_override["restore_at"],
             )
         else:
+            self.state.last_export_restore_at = now
             self.logger.info(
                 "[TIMED EXPORT] Restore completed this tick; skipping normal mode decisions until next tick."
             )
