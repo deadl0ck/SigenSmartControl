@@ -4,19 +4,20 @@
 
 1. [Overview](#overview)
 2. [Plain English Summary](#plain-english-summary)
-3. [Key Files](#key-files)
-4. [Setup](#setup)
-5. [Configuration](#configuration)
-6. [How It Works](#how-it-works)
-7. [Scheduler Behavior](#scheduler-behavior)
-8. [Logging](#logging)
-9. [Mode Test Utility](#mode-test-utility)
-10. [Email Notifications](#email-notifications)
-11. [Forecast Accuracy Report](#forecast-accuracy-report)
-12. [Tests](#tests)
-13. [Session Handoff Recovery](#session-handoff-recovery)
-14. [Recent Updates](#recent-updates)
-15. [Notes](#notes)
+3. [Quick Start](#quick-start)
+4. [Key Files](#key-files)
+5. [Setup](#setup)
+6. [Configuration](#configuration)
+7. [How It Works](#how-it-works)
+8. [Scheduler Behavior](#scheduler-behavior)
+9. [Logging](#logging)
+10. [Mode Test Utility](#mode-test-utility)
+11. [Email Notifications](#email-notifications)
+12. [Forecast Accuracy Report](#forecast-accuracy-report)
+13. [Tests](#tests)
+14. [Session Handoff Recovery](#session-handoff-recovery)
+15. [Recent Updates](#recent-updates)
+16. [Notes](#notes)
 
 ## Overview
 
@@ -43,32 +44,91 @@ forecast-to-mode mapping rules.
 This happens automatically on a timed loop, with detailed logs written on every check so you can
 see exactly what values were used and why each decision was made.
 
+## Quick Start
+
+**Requirements:** Python 3.11+, a Sigen inverter with API access, a Gmail account for notifications.
+
+1. Clone the repo and set up the environment:
+   ```sh
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements-dev.txt
+   ```
+
+2. Create a `.env` file in the project root:
+   ```ini
+   SIGEN_USERNAME=your_sigen_email
+   SIGEN_PASSWORD=your_sigen_password
+   SIGEN_LATITUDE=53.3498
+   SIGEN_LONGITUDE=-6.2603
+   EMAIL_SENDER=your_sender@gmail.com
+   EMAIL_RECEIVER=your_receiver@gmail.com
+   GMAIL_APP_PASSWORD=your_gmail_app_password
+   ```
+
+3. Set your hardware specs in `config/settings.py`:
+   ```python
+   SOLAR_PV_KW = 8.9   # your solar array size in kW
+   INVERTER_KW = 5.5   # your inverter capacity in kW
+   BATTERY_KWH = 24    # your battery capacity in kWh
+   ```
+
+4. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
+
+5. Start the scheduler:
+   ```sh
+   ./start_monitor.sh
+   tail -f monitor.log
+   ```
+
+6. When you are happy with the log output, set `FULL_SIMULATION_MODE = False` in `config/settings.py` and restart:
+   ```sh
+   ./restart_monitor.sh
+   ```
+
 ## Key Files
 
 ```text
 .
-├── main.py                           # Self-contained scheduler and runtime control loop
+├── main.py                              # Entry point; wires state, callbacks, and starts the loop
 ├── config/
-│   ├── settings.py                   # Runtime configuration and mode mappings
-│   └── constants.py                  # Environment-backed location constants
+│   ├── settings.py                      # All tunable thresholds and hardware specs
+│   ├── constants.py                     # Environment-backed location/path constants
+│   └── enums.py                         # Period and ForecastStatus enums
 ├── logic/
-│   └── decision_logic.py             # Shared decision logic used by runtime
+│   ├── scheduler_coordinator.py         # Main loop orchestration — delegates to per-tick handlers
+│   ├── scheduler_state.py               # Centralised mutable state dataclass (SchedulerState)
+│   ├── scheduler_operations.py          # Forecast/sunrise refresh, live solar sampling, telemetry
+│   ├── decision_logic.py                # Core mode-selection rules (headroom, SOC, tariff)
+│   ├── period_handler_shared.py         # Shared helpers used by morning/afternoon/evening handlers
+│   ├── decision_logging.py              # Canonical decision checkpoint logging function
+│   ├── morning.py                       # Morning period handler
+│   ├── afternoon.py                     # Afternoon period handler
+│   ├── evening.py                       # Evening period handler
+│   ├── night.py                         # Night window handler (TOU, pre-sunrise discharge, pre-cheap-rate export)
+│   ├── timed_export.py                  # Timed grid export state machine (inactive → active → restored)
+│   ├── mode_change.py                   # apply_mode_change (notification, archiving, simulation guard)
+│   └── mode_logging.py                  # Mode status logging helpers
 ├── integrations/
-│   ├── sigen_auth.py                 # Authentication and singleton creation for Sigen API client
-│   ├── sigen_official.py             # Official OpenAPI client (account/key auth, endpoint overrides)
-│   ├── sigen_interaction.py          # SigenInteraction wrapper for Sigen API calls
-│   └── tools/                        # Sigen diagnostics scripts (mode listing and API config checks)
+│   ├── sigen_interaction.py             # All Sigen API calls — centralizes mode get/set
+│   ├── sigen_auth.py                    # Lazy-loaded singleton Sigen client from .env credentials
+│   └── sigen_official.py               # Official OpenAPI client (app key/secret auth)
 ├── weather/
-│   ├── forecast.py                   # Solar forecast parsing
-│   └── sunrise_sunset.py             # Sunrise/sunset lookup used to derive period windows
+│   ├── forecast.py                      # Provider selection and comparison facade
+│   ├── providers/
+│   │   ├── esb.py                       # ESB county API provider (primary decision source)
+│   │   ├── forecast_solar.py            # Forecast.Solar provider (comparison)
+│   │   ├── quartz.py                    # Quartz provider (comparison)
+│   │   ├── comparison.py               # Side-by-side provider comparison and archiving
+│   │   └── common.py                    # Shared provider interfaces and base behavior
+│   └── sunrise_sunset.py               # Sunrise/sunset lookup for period window derivation
 ├── telemetry/
-│   └── forecast_calibration.py       # Daily bounded calibration generation from telemetry
-├── scripts/
-│   ├── compare_forecast_accuracy.py  # ESB/Forecast.Solar/Quartz vs inverter telemetry analysis
-│   ├── forecast_vs_actual.py         # Forecast-vs-actual reporting and status analysis
-│   ├── test_mode_switch.py           # Quick mode listing/switch test utility for live API checks
-│   └── test_mode_change_email.py     # Sends a test mode-change email via scheduler simulation path
-└── tests/                            # Test suite
+│   ├── telemetry_archive.py             # Inverter snapshot archiving and field extraction
+│   └── forecast_calibration.py          # Daily bounded calibration from telemetry
+├── notifications/
+│   ├── email_notifications.py           # Mode-change email formatting and sending
+│   └── notification_email_helpers.py   # Startup email and shared notification helpers
+├── scripts/                             # Analysis and diagnostic scripts (see Scripts Reference)
+└── tests/                               # Pytest test suite
 ```
 
 ## Setup
@@ -186,12 +246,6 @@ Meaning:
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 - `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
-```python
-HEADROOM_TARGET_KWH = 10.2
-```
-
-Meaning:
-
 - `HEADROOM_TARGET_KWH`: fixed battery headroom target (10.2 kWh = surplus capacity × 3 hours)
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
@@ -241,7 +295,7 @@ How the comparison is normalized:
 	- `Red`: less than `QUARTZ_RED_CAPACITY_FRACTION` (default 20%)
 	- `Amber`: from `QUARTZ_RED_CAPACITY_FRACTION` up to `QUARTZ_GREEN_CAPACITY_FRACTION` (default 20% to <40%)
 	- `Green`: `QUARTZ_GREEN_CAPACITY_FRACTION` or more (default >=40%)
-- ESB still exposes synthetic placeholder forecast values (`Red=100`, `Amber=300`, `Green=500`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic and not as measured site power.
+- ESB still exposes synthetic placeholder forecast values (`Red=1000`, `Amber=2500`, `Green=5000`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic and not as measured site power.
 
 Why the normalization exists:
 
@@ -684,11 +738,11 @@ For each check, the log includes:
 Example structure:
 
 ```text
-[Morn] PRE-PERIOD CHECK | now=... | period_start=... | forecast_w=500 | status=Green |
+[Morn] PRE-PERIOD CHECK | now=... | period_start=... | forecast_w=7500 | status=Green |
 expected_solar_kwh=1.50 | soc=82.0 | headroom_kwh=4.32 | headroom_target_kwh=10.20 |
 headroom_deficit_kwh=5.88 | solar_avg_kw_3=2.80 | effective_battery_export_kw=2.70 |
 lead_time_hours_adjusted=2.40 | export_by=... | decision_mode=GRID_EXPORT |
-outcome=waiting until export window opens | reason=Default mapping for Green.
+outcome=waiting until export window opens | reason=Forecast is Green — applying standard mode.
 ```
 
 ### Mode-change event archive
@@ -967,29 +1021,7 @@ git status
 
 ## Recent Updates
 
-- Added compact HTML email notifications for mode changes with clearer subject lines,
-	readable period labels, and SOC in both subject/body.
-- Added startup notification email summarizing current mode, SOC, and transitions
-	since 10:30 PM the previous night.
-- Added current-day solar production to startup and mode-change emails when the
-	inverter telemetry exposes `pvDayNrg`.
-- Added timeline filtering so notification summaries exclude simulated/test events.
-- Prevented pytest runs from polluting the live `data/mode_change_events.jsonl`
-	archive. Test-only event archiving can be explicitly re-enabled with
-	`SIGEN_ALLOW_MODE_CHANGE_ARCHIVE_IN_TESTS=true` when needed.
-- Hardened daytime scheduler transitions so only the latest already-elapsed
-	period can still run its period-start action after a delayed startup or
-	refresh.
-- Fixed mid-period clipping export selection so a finished period cannot remain
-	active after the next daytime period has started.
-- Persisted active timed export override state to `data/timed_export_state.json`
-	so an in-flight export/restore window survives process restarts.
-- Removed deprecated evening AI transition helper code that was no longer used
-	by the scheduler runtime.
-- Added characterization tests to freeze scheduler behavior before modular refactors,
-	covering night branching, timed export restore paths, and pre-period export timing.
-- Safely extracted night-window runtime logic into `handle_active_night_window()`
-	inside `run_scheduler()` with no behavior change.
+See `git log --oneline` for a full history of changes.
 
 ## Notes
 
