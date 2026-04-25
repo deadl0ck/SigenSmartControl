@@ -63,6 +63,10 @@ FULL_SIMULATION_MODE = False
 # Maximum allowed duration for timed grid export override (minutes) — prevents accidental
 # over-discharge or excessive grid arbitrage cycles.
 MAX_TIMED_EXPORT_MINUTES = 240
+# Minutes to block a new timed export after a restore completes, preventing
+# the inverter from oscillating between self-consumption and grid-export on
+# consecutive ticks immediately after a restore.
+TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES = 15
 
 # Night and timezone behavior.
 # Whether the scheduler should explicitly apply the configured night mode.

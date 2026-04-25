@@ -67,6 +67,8 @@ class SchedulerState:
         last_forecast_solar_archive_utc: Timestamp of last successful forecast.solar archive, or None.
         forecast_solar_archive_cooldown_until_utc: Rate-limit cooldown expiry for forecast.solar API, or None.
         timed_export_override: Configuration for timed export override feature.
+        last_export_restore_at: UTC timestamp of the most recent timed export restore,
+            or None if no restore has occurred yet. Used to enforce the restore cooldown.
         tick_mode_change_attempts: Count of mode-change attempts in the current tick.
         tick_mode_change_successes: Count of successful mode-changes in the current tick.
         tick_mode_change_failures: Count of failed mode-changes in the current tick.
@@ -97,6 +99,7 @@ class SchedulerState:
     last_forecast_solar_archive_utc: datetime | None = None
     forecast_solar_archive_cooldown_until_utc: datetime | None = None
     timed_export_override: dict[str, Any] = field(default_factory=dict)
+    last_export_restore_at: datetime | None = None
     tick_mode_change_attempts: int = 0
     tick_mode_change_successes: int = 0
     tick_mode_change_failures: int = 0
