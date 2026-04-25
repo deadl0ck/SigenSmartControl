@@ -29,7 +29,7 @@ from logic.schedule_utils import (
     suppress_elapsed_periods_except_latest,
     get_active_night_context,
 )
-from weather.forecast import archive_forecast_solar_snapshot
+from weather.providers.forecast_solar import archive_forecast_solar_snapshot
 from telemetry.forecast_calibration import get_period_calibration
 from config.enums import Period
 from config.settings import (

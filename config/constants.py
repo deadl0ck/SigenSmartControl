@@ -124,9 +124,6 @@ ESB_FORECAST_API_URL: Final[str] = (
 # Legacy CSV endpoint (kept for reference/backward compatibility only).
 MET_IE_FORECAST_CUR: Final[str] = "https://www.esbnetworks.ie/docs/default-source/dso/dso-renewableforecast-wind-solar.csv"
 
-# Backward-compatible alias used in existing code.
-COUNTY: Final[str] = ESB_FORECAST_COUNTY
-
 # Optional Open Quartz provider settings.
 QUARTZ_FORECAST_API_URL: Final[str] = os.getenv(
     "QUARTZ_FORECAST_API_URL",

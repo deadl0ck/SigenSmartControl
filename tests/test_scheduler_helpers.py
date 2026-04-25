@@ -13,6 +13,7 @@ import logging
 import main
 import logic.mode_change as mode_change_module
 import logic.timed_export as timed_export_module
+from logic.mode_change import apply_mode_change
 from logic.schedule_utils import is_pre_sunrise_discharge_window
 
 _test_logger = logging.getLogger("test")
@@ -273,12 +274,13 @@ class DummyModeInteraction:
 async def test_apply_mode_change_skips_when_already_target_mode() -> None:
     sigen = DummyModeInteraction(current_mode={"mode": 1})
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Already at target mode — no change needed.",
         mode_names={1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -289,12 +291,13 @@ async def test_apply_mode_change_skips_when_already_target_mode() -> None:
 async def test_apply_mode_change_sets_when_target_differs() -> None:
     sigen = DummyModeInteraction(current_mode=0)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Switching to target mode.",
         mode_names={0: "SELF_POWERED", 1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -313,12 +316,13 @@ async def test_apply_mode_change_does_not_archive_during_pytest(
 
     monkeypatch.setattr(mode_change_module, "append_mode_change_event", fake_append_mode_change_event)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Switching to target mode.",
         mode_names={0: "SELF_POWERED", 1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -340,12 +344,13 @@ async def test_apply_mode_change_simulation_triggers_email_notification(
     monkeypatch.setattr(mode_change_module, "FULL_SIMULATION_MODE", True)
     monkeypatch.setattr(mode_change_module, "_notify_mode_change_email", fake_notify)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=None,
         mode=1,
         period="Night->Morn",
         reason="Simulation email notification test.",
         mode_names={1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True

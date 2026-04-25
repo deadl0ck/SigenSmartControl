@@ -72,36 +72,6 @@ logger = logging.getLogger("sigen_control")
 POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 
 
-async def _notify_startup_email(
-    *,
-    current_mode_raw: Any,
-    battery_soc: float | None,
-    solar_generated_today_kwh: float | None,
-    today_period_forecast: dict[str, tuple[int, str]] | None,
-    mode_names: dict[int, str],
-    event_time_utc: datetime,
-) -> None:
-    """Backward-compatible wrapper for startup notification helper.
-
-    Args:
-        current_mode_raw: Current mode payload returned at startup.
-        battery_soc: Battery state-of-charge percentage, when available.
-        solar_generated_today_kwh: Current day's cumulative solar generation in kWh.
-        today_period_forecast: Daytime period forecast snapshot for today.
-        mode_names: Mapping from mode value to human-readable mode label.
-        event_time_utc: Startup timestamp in UTC.
-    """
-    await notify_startup_email(
-        current_mode_raw=current_mode_raw,
-        battery_soc=battery_soc,
-        solar_generated_today_kwh=solar_generated_today_kwh,
-        today_period_forecast=today_period_forecast,
-        mode_names=mode_names,
-        event_time_utc=event_time_utc,
-        logger=logger,
-    )
-
-
 async def log_current_mode_on_startup(
     sigen: SigenInteraction,
     mode_names: dict[int, str],
@@ -200,13 +170,14 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                     exc,
                 )
             startup_mode_raw, startup_soc, startup_solar_today_kwh = await log_current_mode_on_startup(sigen, mode_names)
-            await _notify_startup_email(
+            await notify_startup_email(
                 current_mode_raw=startup_mode_raw,
                 battery_soc=startup_soc,
                 solar_generated_today_kwh=startup_solar_today_kwh,
                 today_period_forecast=startup_today_period_forecast,
                 mode_names=mode_names,
                 event_time_utc=datetime.now(timezone.utc),
+                logger=logger,
             )
             return sigen
         except Exception as e:
@@ -231,31 +202,6 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
         max_attempts,
     )
     raise SystemExit(1)
-
-
-async def apply_mode_change(
-    *,
-    sigen: SigenInteraction | None,
-    mode: int,
-    period: str,
-    reason: str,
-    mode_names: dict[int, str],
-    export_duration_minutes: int | None = None,
-    battery_soc: float | None = None,
-    today_period_forecast: dict[str, tuple[int, str]] | None = None,
-) -> bool:
-    """Bind module-level logger and delegate to logic.mode_change.apply_mode_change."""
-    return await _apply_mode_change_core(
-        sigen=sigen,
-        mode=mode,
-        period=period,
-        reason=reason,
-        mode_names=mode_names,
-        logger=logger,
-        export_duration_minutes=export_duration_minutes,
-        battery_soc=battery_soc,
-        today_period_forecast=today_period_forecast,
-    )
 
 
 async def run_scheduler() -> None:
@@ -338,12 +284,13 @@ async def run_scheduler() -> None:
         """
         resolved_forecast = today_period_forecast or state.today_period_forecast
         state.tick_mode_change_attempts += 1
-        ok = await apply_mode_change(
+        ok = await _apply_mode_change_core(
             sigen=sigen,
             mode=mode,
             period=period,
             reason=reason,
             mode_names=mode_names,
+            logger=logger,
             export_duration_minutes=export_duration_minutes,
             battery_soc=battery_soc,
             today_period_forecast=resolved_forecast,

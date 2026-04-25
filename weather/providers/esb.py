@@ -9,7 +9,7 @@ import requests
 
 from config.settings import ESB_API_TIMEOUT_SECONDS
 from config.constants import (
-    COUNTY,
+    ESB_FORECAST_COUNTY,
     ESB_COUNTY_ID_MAP,
     ESB_FORECAST_API_BASE_URL,
     ESB_FORECAST_API_ENDPOINT,
@@ -31,7 +31,7 @@ class EsbSolarForecast(BaseSolarForecast):
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load county forecast rows from ESB API."""
         super().__init__(logger, "ESB county forecast")
-        self._load_esb_api_table(COUNTY)
+        self._load_esb_api_table(ESB_FORECAST_COUNTY)
 
     @staticmethod
     def _normalize_county_name(county: str) -> str:
