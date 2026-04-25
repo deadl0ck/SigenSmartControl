@@ -74,7 +74,7 @@ def test_evaluate_scenario_row_uses_non_bridge_path_when_usable_energy_is_low() 
 
     assert result["Period"] == "Eve"
     assert result["Target Mode"] == "SELF_POWERED"
-    assert result["Reason"] == "Default mapping for GREEN."
+    assert result["Reason"] == "Forecast is GREEN — applying standard mode."
 
 
 def test_annotate_scenario_rows_adds_scenario_set_numbers() -> None:

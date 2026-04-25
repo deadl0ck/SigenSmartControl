@@ -38,7 +38,7 @@ def test_peak_tariff_overrides_default_forecast_mode_to_self_powered():
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Schedule period is Peak" in reason
+    assert "Peak electricity tariff is active" in reason
 
 
 def test_peak_tariff_does_not_override_grid_export_rule():
@@ -78,7 +78,7 @@ def test_evening_red_uses_self_powered_when_battery_can_bridge_to_cheap_rate():
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Evening bridge rule" in reason
+    assert "staying in self-powered mode" in reason
 
 
 def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
@@ -98,7 +98,7 @@ def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Default mapping for Red" in reason
+    assert "Forecast is Red" in reason
 
 
 def test_morning_high_soc_protection_exports_for_amber_when_headroom_is_low():
@@ -118,7 +118,7 @@ def test_morning_high_soc_protection_exports_for_amber_when_headroom_is_low():
     )
 
     assert mode == SIGEN_MODES["GRID_EXPORT"]
-    assert "Morning high-SOC protection" in reason
+    assert "Battery is high" in reason
 
 
 def test_morning_high_soc_protection_does_not_trigger_below_threshold():
@@ -138,4 +138,4 @@ def test_morning_high_soc_protection_does_not_trigger_below_threshold():
     )
 
     assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Default mapping for Amber" in reason
+    assert "Forecast is Amber" in reason

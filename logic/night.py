@@ -87,9 +87,9 @@ def plan_pre_cheap_rate_night_export(
     )
 
     reason = (
-        "Pre-cheap-rate export strategy: discharge battery for arbitrage until "
-        f"SOC floor {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}% or cheap-rate "
-        f"window opens. SOC={soc:.1f}%, duration={duration_minutes} minutes."
+        "Exporting battery charge to the grid before cheap-rate electricity starts. "
+        f"Will stop when battery reaches {PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT:.1f}% "
+        f"or cheap rate begins. Battery at {soc:.1f}%, exporting for up to {duration_minutes} minutes."
     )
     return duration_minutes, reason
 

@@ -100,10 +100,9 @@ def plan_evening_controlled_export(
     )
     duration_minutes = max(1, min(required_minutes, EVENING_EXPORT_MAX_DURATION_MINUTES))
     reason = (
-        "Controlled evening export: surplus battery energy available above protected "
-        f"reserve. SOC={soc:.1f}%, exportable_excess={exportable_excess_kwh:.2f} kWh, "
-        f"hours_until_cheap_rate={hours_until_cheap_rate:.2f}, "
-        f"duration={duration_minutes} minutes."
+        f"Battery has spare charge ({exportable_excess_kwh:.2f} kWh above the protected reserve) "
+        f"with {hours_until_cheap_rate:.1f} hours until cheap rate — exporting the surplus now. "
+        f"Battery at {soc:.1f}%, running for up to {duration_minutes} minutes."
     )
     return duration_minutes, reason
 
@@ -222,12 +221,10 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                     (mid_period_headroom_deficit / mid_period_effective_battery_export_kw) * 60
                 )
                 mid_period_reason = (
-                    f"High-SOC safety export: SOC {mid_period_soc:.1f}% >= "
-                    f"{MORNING_HIGH_SOC_THRESHOLD_PERCENT:.0f}% threshold, "
-                    f"solar {mid_period_solar_kw:.1f} kW >= "
-                    f"{MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW:.1f} kW trigger, "
-                    f"headroom {mid_period_headroom_kwh:.2f} kWh < target "
-                    f"{mid_period_headroom_target_kwh:.2f} kWh"
+                    f"Battery is high ({mid_period_soc:.1f}%) and solar is strong "
+                    f"({mid_period_solar_kw:.1f} kW) but only {mid_period_headroom_kwh:.2f} kWh "
+                    f"headroom remains (needs {mid_period_headroom_target_kwh:.2f} kWh) — "
+                    "exporting to make room."
                 )
                 log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-HIGH-SOC-SAFETY",
