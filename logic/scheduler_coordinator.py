@@ -164,10 +164,9 @@ class SchedulerCoordinator:
                 self.logger.error(f"[SCHEDULER] Failed to refresh daily data: {e}. Retrying next tick.")
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 return True
-        elif (
-            FORECAST_REFRESH_INTERVAL_SECONDS > 0
-            and self.state.last_forecast_refresh_utc is not None
-            and (now - self.state.last_forecast_refresh_utc).total_seconds() >= FORECAST_REFRESH_INTERVAL_SECONDS
+        elif FORECAST_REFRESH_INTERVAL_SECONDS > 0 and (
+            self.state.last_forecast_refresh_utc is None
+            or (now - self.state.last_forecast_refresh_utc).total_seconds() >= FORECAST_REFRESH_INTERVAL_SECONDS
         ):
             try:
                 self.logger.info(
