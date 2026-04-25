@@ -7,283 +7,160 @@ Check off tasks with `[x]` as you complete them.
 
 ---
 
-## Task 1 — Fix unbounded deque in SchedulerState
+## Task 1 — Standardise `*_safety` variable naming in period handlers
 
-**Why:** `SchedulerState.live_solar_kw_samples` is declared with `deque(maxlen=None)` (unlimited),
-but `main.py` immediately reinitialises it with `maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT` (3).
-The dataclass default is dead code and will cause silent memory growth in any code path that
-skips the main.py reinitialisation — including tests.
-
-**Files to read:**
-- `logic/scheduler_state.py` (line ~61)
-- `main.py` (search for `live_solar_kw_samples`)
-- `config/settings.py` (for `LIVE_SOLAR_AVERAGE_SAMPLE_COUNT`)
-
-**What to do:**
-1. In `scheduler_state.py`, import `LIVE_SOLAR_AVERAGE_SAMPLE_COUNT` from `config.settings`.
-2. Change the default factory from `deque(maxlen=None)` to
-   `deque(maxlen=LIVE_SOLAR_AVERAGE_SAMPLE_COUNT)`.
-3. Remove the redundant reinitialisation line in `main.py`.
-4. Update the docstring to document the fixed capacity.
-
-**Acceptance criteria:**
-- `SchedulerState()` produces a bounded deque without any extra initialisation in `main.py`
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 2 — Consolidate shared `_log_check()` across period handler files
-
-**Why:** `_log_check()` is defined identically in `morning.py`, `afternoon.py`, `evening.py`, and
-`night.py` — roughly 250 lines of duplicated logging code. Improving the format or adding a field
-requires changes in four places.
-
-**Files to read:**
-- `logic/morning.py` (find `_log_check`)
-- `logic/afternoon.py` (same)
-- `logic/evening.py` (same)
-- `logic/night.py` (same)
-
-**What to do:**
-1. Create `logic/decision_logging.py` with a single `log_decision_checkpoint()` function whose
-   body is taken verbatim from one of the four copies (they are identical).
-2. Delete the four `_log_check()` definitions and replace every call site with
-   `log_decision_checkpoint(...)`.
-3. Adjust the parameter name from `_log_check`-style to match the new function signature.
-
-**Acceptance criteria:**
-- `_log_check` does not appear anywhere in the codebase
-- `logic/decision_logging.py` is the single source of the logging logic
-- Log output unchanged
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 3 — Extract shared period-handler logic to eliminate duplication across morning/afternoon/evening
-
-**Why:** `logic/morning.py` (588 lines), `logic/afternoon.py` (588 lines), and
-`logic/evening.py` (689 lines) are structurally near-identical. They each duplicate:
-- `_promote_status_for_live_clipping_risk()`
-- `_evaluate_period_mode_decision()`
-- The same pre-period / period-start control flow
-
-A bug fix or feature addition must be replicated across all three files. Evening has small
-additional logic (pre-cheap-rate bridge) but the core flow is the same.
+**Why:** `morning.py`, `afternoon.py`, `evening.py` use `soc_safety`,
+`solar_avg_kw_3_safety`, `headroom_kwh_safety` etc. for the mid-period safety
+check, while pre-period and period-start checks use plain names. The `_safety`
+suffix is ambiguous — it is neither a type qualifier nor a conventional Python
+naming pattern, and it obscures which branch of logic the variable belongs to.
 
 **Files to read:**
 - `logic/morning.py`
 - `logic/afternoon.py`
 - `logic/evening.py`
-- `logic/scheduler_coordinator.py` (where handlers are called)
 
 **What to do:**
-1. Create `logic/period_handler_shared.py` containing:
-   - `promote_status_for_live_clipping_risk()` — taken from morning.py
-   - `evaluate_period_mode_decision()` — taken from morning.py
-   - A generic `handle_daytime_period()` async function that encapsulates the shared
-     pre-period / period-start control flow, taking `period: str` as a parameter.
-2. Refactor `morning.py` and `afternoon.py` to thin wrapper modules (~20 lines each) that
-   call `handle_daytime_period("Morn")` / `handle_daytime_period("Aftn")`.
-3. Refactor `evening.py` similarly, keeping its additional evening-specific bridge logic as
-   a post-hook or extra branch inside `handle_daytime_period()` guarded by `period == "Eve"`.
-4. Update imports in `scheduler_coordinator.py` if needed.
+Rename all `*_safety` variables to `mid_period_*` across all three files, e.g.:
+- `soc_safety` → `mid_period_soc`
+- `solar_avg_kw_3_safety` → `mid_period_solar_kw`
+- `headroom_kwh_safety` → `mid_period_headroom_kwh`
+
+Search each file for any remaining `_safety`-suffixed names and rename them
+consistently.
 
 **Acceptance criteria:**
-- `morning.py` and `afternoon.py` are each ≤ 40 lines
-- `evening.py` is ≤ 100 lines (evening-specific logic only)
-- `period_handler_shared.py` is ≤ 400 lines
-- No duplicated helper functions remain across the three period files
+- No `*_safety` variable names remain in any period handler file
 - `python -m pytest -q` passes
 
-- [ ] Done
+- [x] Done
 
 ---
 
-## Task 4 — Tighten type hints on `SchedulerState` fields
+## Task 2 — Bundle period handler parameters into a dataclass
 
-**Why:** Several `SchedulerState` fields use imprecise types:
-- `ordered_period_windows: list` — should be `list[tuple[str, datetime]]`
-- `day_state: dict[str, dict[str, bool]]` — inner dict shape (`pre_set`, `start_set`,
-  `clipping_export_set`) is undocumented
-- `night_state: dict[str, Any]` — accepts any dict; callers access known keys without safety
-
-Static analysis and IDE autocomplete cannot help developers catch misuse.
+**Why:** `handle_morning_period()`, `handle_afternoon_period()`, and
+`handle_evening_period()` each accept 15+ keyword arguments. Call sites in
+`scheduler_coordinator.py` construct a `shared_kwargs` dict just to pass them all.
+Adding a new parameter requires touching four files, and forgetting one silently
+falls back to a default or raises a `TypeError` at runtime.
 
 **Files to read:**
-- `logic/scheduler_state.py`
-- `logic/scheduler_coordinator.py` (to see how day_state and night_state are accessed)
+- `logic/morning.py`
+- `logic/afternoon.py`
+- `logic/evening.py`
+- `logic/period_handler_shared.py`
+- `logic/scheduler_coordinator.py`
 
 **What to do:**
-1. Define `TypedDict` classes near the top of `scheduler_state.py`:
-   ```python
-   class DayStateEntry(TypedDict):
-       pre_set: bool
-       start_set: bool
-       clipping_export_set: bool
-
-   class NightState(TypedDict, total=False):
-       mode_set_key: tuple[date, int] | None
-       sleep_snapshot_for_date: date | None
-   ```
-2. Change field types:
-   - `ordered_period_windows: list` → `list[tuple[str, datetime]]`
-   - `day_state: dict[str, dict[str, bool]]` → `dict[str, DayStateEntry]`
-   - `night_state: dict[str, Any]` → `NightState`
-3. Fix any mypy errors at call sites.
+1. Define a `PeriodHandlerContext` dataclass in `logic/period_handler_shared.py`
+   containing all shared kwargs:
+   `now_utc`, `period_start`, `period_end_utc`, `period_state`,
+   `timed_export_override`, `solar_value`, `status`, `period_solar_kwh`,
+   `period_calibration`, `fetch_soc`, `get_live_solar_average_kw`,
+   `get_effective_battery_export_kw`, `start_timed_grid_export`,
+   `apply_mode_change`, `sigen`, `mode_names`.
+2. Change `handle_morning_period`, `handle_afternoon_period`, and
+   `handle_evening_period` to accept a single `ctx: PeriodHandlerContext`
+   parameter instead of individual kwargs.
+3. Update the `_process_period_windows` call site in `scheduler_coordinator.py`
+   to construct one `PeriodHandlerContext` and pass it.
 
 **Acceptance criteria:**
-- All `SchedulerState` fields have specific non-`Any` types
-- No bare `dict[str, Any]` for structured state
+- Each handler function signature is `async def handle_*_period(ctx: PeriodHandlerContext) -> bool`
+- `shared_kwargs` dict is gone from `scheduler_coordinator.py`
 - `python -m pytest -q` passes
 
-- [ ] Done
+- [x] Done
 
 ---
 
-## Task 5 — Make `current_date` a required field on `SchedulerState`
+## Task 3 — Use `__name__` for logger names instead of hardcoded `"sigen_control"`
 
-**Why:** `SchedulerState.current_date` is declared `datetime | None = None`, but
-`scheduler_operations.refresh_daily_data()` immediately checks `if state.current_date is None:
-raise RuntimeError()`. The None check is a runtime guard against incorrect usage, not a genuine
-optional state. Making it a required positional field removes an impossible error path and
-documents the precondition at the call site.
+**Why:** Every module does `logging.getLogger("sigen_control")`, which routes all
+log output through a single root logger. This prevents per-module log level control
+and makes it impossible to selectively silence or capture logs from a single module
+in tests. The standard Python convention is `logging.getLogger(__name__)`, which
+gives each module its own logger in the hierarchy (e.g. `logic.morning`,
+`logic.timed_export`).
 
 **Files to read:**
-- `logic/scheduler_state.py`
-- `logic/scheduler_operations.py` (search for `current_date`)
-- `main.py` (where `SchedulerState` is instantiated)
+- Run `grep -rn 'getLogger("sigen_control")' .` to find all affected files.
+- `main.py` (should keep `"sigen_control"` as the application root logger name)
 
 **What to do:**
-1. In `scheduler_state.py`, remove `= None` from `current_date` making it a required field.
-   Move it before any fields that have defaults (dataclass rules require this).
-2. In `main.py`, pass `current_date=now.date()` when constructing `SchedulerState`.
-3. Remove the `if state.current_date is None: raise RuntimeError()` guard in
-   `refresh_daily_data()` — it is now unreachable.
-4. Update the docstring on `SchedulerState` to document the field.
+Replace `logging.getLogger("sigen_control")` with `logging.getLogger(__name__)`
+in every module-level logger assignment **except `main.py`**. `main.py` should
+keep the `"sigen_control"` name because it is the root logger that logging
+configuration targets.
 
 **Acceptance criteria:**
-- `SchedulerState()` without `current_date` raises a `TypeError` (missing required arg)
-- `RuntimeError` guard in `refresh_daily_data()` deleted
+- No module outside `main.py` uses `"sigen_control"` as a logger name
 - `python -m pytest -q` passes
 
-- [ ] Done
+- [x] Done
 
 ---
 
-## Task 6 — Add explicit Protocol types for `apply_mode_change` callbacks
+## Task 4 — Fix inconsistent `Period` enum casing
 
-**Why:** `logic/inverter_control.py` defines `ModeChangeNotifier = Callable[..., Awaitable[None]]`.
-The ellipsis hides which keyword arguments are actually passed (success, period, reason,
-requested_mode, etc.). Callers and test mocks must read the implementation to learn the contract.
-A wrong keyword in a mock silently passes at definition time.
+**Why:** `Period.NIGHT = "NIGHT"` (all-caps) but `Period.MORN = "Morn"`,
+`Period.AFTN = "Aftn"`, `Period.EVE = "Eve"` (title case). The inconsistency
+means any code that switches on `period.value` or compares against a string
+literal must know which casing to use for each member. Dict keys in settings
+(e.g. `FORECAST_TO_MODE`) may also be affected.
 
 **Files to read:**
-- `logic/inverter_control.py` (lines ~25–50 and the apply_mode_change call sites inside)
-- `logic/mode_change.py`
-- `main.py` (where the callback is wired up)
+- `config/enums.py`
+- `config/settings.py` (search for `"NIGHT"` as a dict key)
+- Run `grep -rn '"NIGHT"' .` to find all hardcoded usages
 
 **What to do:**
-1. In `logic/inverter_control.py`, define an explicit `Protocol`:
-   ```python
-   class ModeChangeNotifier(Protocol):
-       async def __call__(
-           self,
-           *,
-           success: bool,
-           period: str,
-           reason: str,
-           requested_mode: int,
-           requested_mode_label: str,
-           current_mode_raw: Any,
-           mode_names: dict[int, str],
-           event_time_utc: datetime,
-           battery_soc: float | None,
-           solar_generated_today_kwh: float | None,
-           today_period_forecast: dict[str, tuple[int, str]] | None,
-           response: Any | None = None,
-           error: str | None = None,
-       ) -> None: ...
-   ```
-2. Replace the `Callable[..., Awaitable[None]]` alias with the Protocol.
-3. Add `-> bool` return type annotation to `apply_mode_change`.
-4. Fix any call sites that don't match the Protocol signature.
+1. Decide on title case (`"Night"`) to match the other three values.
+2. Change `Period.NIGHT = "NIGHT"` → `Period.NIGHT = "Night"` in `config/enums.py`.
+3. Update every occurrence of the bare string `"NIGHT"` used as a period name
+   (dict keys in settings, comparisons in logic files) to `"Night"` or
+   `Period.NIGHT`.
+4. Check `FORECAST_TO_MODE` and `PERIOD_TO_MODE` dicts in `config/settings.py`
+   for `"NIGHT"` keys and update them.
 
 **Acceptance criteria:**
-- `ModeChangeNotifier` is a `Protocol` with explicit keyword arguments
-- `apply_mode_change` has a `-> bool` return type
+- All `Period` enum values use title-case strings
+- `grep -rn '"NIGHT"' .` returns no results outside comments/docs
 - `python -m pytest -q` passes
 
-- [ ] Done
+- [x] Done
 
 ---
 
-## Task 7 — Document the timed export state machine
+## Task 5 — Add tests for `_candidate_score()` and `_collect_numeric_fields()` edge cases
 
-**Why:** `logic/timed_export.py` implements a multi-state override machine (inactive → active →
-restored → inactive) that is central to the scheduler's export decisions. The state transitions,
-return value semantics of `maybe_restore_timed_grid_export()` ("inactive" / "active" /
-"restored"), and the precedence of the two SOC-floor checks are not documented anywhere. A
-developer maintaining this file must reverse-engineer the state machine from the code.
-
-**Files to read:**
-- `logic/timed_export.py` (entire file)
-- `main.py` (usage of `maybe_restore_timed_grid_export`)
-
-**What to do:**
-1. Add a module-level docstring to `timed_export.py` that documents:
-   - The three states and transitions
-   - What triggers each transition (time elapsed, SOC floor reached)
-   - Precedence of `export_soc_floor` vs `clipping_soc_floor`
-2. Expand the docstring of `maybe_restore_timed_grid_export()` to document each return value:
-   - `"inactive"` — no override, proceed normally
-   - `"active"` — override in force, caller should skip normal decisions
-   - `"restored"` — override just ended, caller should skip this tick then resume
-3. Add an inline comment above the SOC-floor checks clarifying precedence.
-
-**Acceptance criteria:**
-- Module-level docstring describes all states and transitions
-- Return value semantics are documented on `maybe_restore_timed_grid_export()`
-- A new developer can understand the state machine from documentation alone
-- No values or logic changed
-- `python -m pytest -q` passes
-
-- [ ] Done
-
----
-
-## Task 8 — Add tests for period handler state mutations across multiple ticks
-
-**Why:** `handle_morning_period()`, `handle_afternoon_period()`, `handle_evening_period()` contain
-complex async control flow that mutates `state.day_state[period]` flags
-(`pre_set`, `start_set`, `clipping_export_set`) and `state.timed_export_override`. None of this
-mutation logic is covered by tests. A subtle ordering bug (e.g., `start_set` set before
-`pre_set`) would only surface at runtime over days.
+**Why:** `telemetry_archive.py` has complex field-name scoring logic
+(`_candidate_score`) and recursive field collection (`_collect_numeric_fields`)
+with a `max_depth` guard. These are the critical path for extracting live solar
+power and battery SOC from inverter payloads. If the inverter returns an
+unexpected payload shape the fallback scoring logic is entirely untested.
 
 **Files to read:**
-- `logic/morning.py` (or `period_handler_shared.py` after Task 3)
-- `logic/scheduler_state.py`
+- `telemetry/telemetry_archive.py` (the three private functions and `find_best_metric_value`)
 - `tests/conftest.py` (existing fixture patterns)
-- `tests/test_scheduler_core_logic.py` (existing integration test style)
 
 **What to do:**
-Create `tests/test_period_handler_ticks.py` with at minimum:
-- Test that `pre_set` is False initially, True after the pre-period branch runs
-- Test that `start_set` is False initially, True after the period-start branch runs
-- Test that `clipping_export_set` is True only when SOC and solar thresholds are met
-- Test that state is NOT mutated when conditions block the action (e.g., low SOC)
-- Test that `start_timed_grid_export` is called at most once per period (guarded by `pre_set`)
-- Test that `apply_mode_change` is called at most once per period-start (guarded by `start_set`)
-
-Use mocked async callables for `fetch_soc`, `get_live_solar_average_kw`,
-`start_timed_grid_export`, and `apply_mode_change`.
+Create `tests/test_telemetry_archive.py` with tests covering:
+- `_candidate_score`: exact leaf match returns 100
+- `_candidate_score`: partial leaf match returns 80
+- `_candidate_score`: match only in joined path returns 60
+- `_candidate_score`: no match returns 0
+- `_candidate_score`: underscore normalisation works
+  (e.g. `"pv_power"` candidate matches `"pvPower"` leaf)
+- `_collect_numeric_fields`: basic nested dict extraction returns correct paths and values
+- `_collect_numeric_fields`: `max_depth` guard stops recursion and returns empty at depth > 10
+- `_collect_numeric_fields`: non-numeric values (strings, bools) are excluded
+- Full `_extract_numeric_metric` integration with a realistic energy_flow payload shape
+  that has `pvPower` nested under a `data` key
 
 **Acceptance criteria:**
-- `tests/test_period_handler_ticks.py` has ≥ 8 test cases
-- All named state flags are tested for correct set/unset behaviour
+- `tests/test_telemetry_archive.py` has ≥ 8 test cases
 - `python -m pytest -q` passes
 
 - [ ] Done
