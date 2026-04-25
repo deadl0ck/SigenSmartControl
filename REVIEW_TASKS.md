@@ -163,4 +163,4 @@ Create `tests/test_telemetry_archive.py` with tests covering:
 - `tests/test_telemetry_archive.py` has ≥ 8 test cases
 - `python -m pytest -q` passes
 
-- [ ] Done
+- [x] Done
