@@ -6,7 +6,6 @@ provider-specific implementations to dedicated submodules.
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 
 from config.settings import (
@@ -16,7 +15,7 @@ from config.settings import (
     QUARTZ_RED_CAPACITY_FRACTION,
 )
 from config.constants import (
-    COUNTY,
+    ESB_FORECAST_COUNTY,
     FORECAST_COMPARISON_ARCHIVE_PATH,
     FORECAST_PROVIDER,
     FORECAST_SOLAR_SITE_KWP,
@@ -27,15 +26,11 @@ from config.constants import (
 from weather.providers.common import SolarForecastProvider
 from weather.providers.comparison import ComparisonConfig, ForecastComparisonProvider
 from weather.providers.esb import EsbSolarForecast
-from weather.providers.forecast_solar import (
-    ForecastSolarForecast as _ForecastSolarForecast,
-    archive_forecast_solar_snapshot as _archive_forecast_solar_snapshot,
-)
+from weather.providers.forecast_solar import ForecastSolarForecast as _ForecastSolarForecast
 from weather.providers.quartz import QuartzSolarForecast as _QuartzSolarForecast
 
 
-class SolarForecast(EsbSolarForecast):
-    """Backwards-compatible ESB provider class name."""
+SolarForecast = EsbSolarForecast
 
 
 class QuartzSolarForecast(_QuartzSolarForecast):
@@ -53,13 +48,7 @@ class QuartzSolarForecast(_QuartzSolarForecast):
         return "Green"
 
 
-class ForecastSolarForecast(_ForecastSolarForecast):
-    """Backwards-compatible Forecast.Solar provider class name."""
-
-
-def archive_forecast_solar_snapshot(logger: logging.Logger, now_utc: datetime) -> None:
-    """Archive one Forecast.Solar raw snapshot."""
-    _archive_forecast_solar_snapshot(logger, now_utc)
+ForecastSolarForecast = _ForecastSolarForecast
 
 
 class ComparingSolarForecastProvider(ForecastComparisonProvider):
@@ -87,7 +76,7 @@ class ComparingSolarForecastProvider(ForecastComparisonProvider):
             config=ComparisonConfig(
                 archive_path=FORECAST_COMPARISON_ARCHIVE_PATH,
                 local_timezone=LOCAL_TIMEZONE,
-                county=COUNTY,
+                county=ESB_FORECAST_COUNTY,
                 latitude=LATITUDE,
                 longitude=LONGITUDE,
                 quartz_site_capacity_kwp=QUARTZ_SITE_CAPACITY_KWP,

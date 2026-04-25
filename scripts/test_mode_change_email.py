@@ -1,11 +1,12 @@
 """Send a test mode-change notification email through the scheduler path.
 
-This script uses main.apply_mode_change() with a simulated interaction so it exercises
+This script uses apply_mode_change() with a simulated interaction so it exercises
 exactly the same email notification path as runtime mode-change events.
 """
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -13,6 +14,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
+from logic.mode_change import apply_mode_change
+
+_script_logger = logging.getLogger("test_mode_change_email")
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,13 +85,14 @@ async def run_test(mode: int, period: str, reason: str, soc: float) -> bool:
     try:
         # Force simulation path so the test does not send inverter commands.
         main.FULL_SIMULATION_MODE = True
-        return await main.apply_mode_change(
+        return await apply_mode_change(
             sigen=None,
             mode=mode,
             period=period,
             reason=reason,
             mode_names=mode_names,
             battery_soc=soc,
+            logger=_script_logger,
         )
     finally:
         main.FULL_SIMULATION_MODE = previous_full_sim
