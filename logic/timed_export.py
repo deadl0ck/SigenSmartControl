@@ -10,6 +10,9 @@ The timed export override follows a three-state lifecycle:
 
     inactive ──► active ──► restored ──► inactive (next tick)
 
+                    ▲                │
+                    └── extended ────┘  (stays active, restore_at bumped)
+
 **inactive**: No override is in force.  ``timed_export_override["active"]``
     is False.  ``maybe_restore_timed_grid_export`` returns ``"inactive"`` and
     the scheduler proceeds with its normal per-period decisions.
@@ -17,6 +20,14 @@ The timed export override follows a three-state lifecycle:
 **active**: A GRID_EXPORT window is running.  ``timed_export_override["active"]``
     is True and ``now_utc < restore_at``.  The scheduler skips all normal mode
     decisions until the window ends or an SOC floor fires.
+
+**extended**: ``restore_at`` was reached but SOC is still above ``export_soc_floor``,
+    meaning solar kept refilling the battery faster than the export drained it.
+    ``restore_at`` is bumped forward by the original ``duration_minutes`` (capped at
+    the ``MAX_TIMED_EXPORT_MINUTES`` wall from ``started_at``) and the state remains
+    *active*.  This prevents the stop/cooldown/restart cycle that would otherwise
+    add a 15-minute gap before export resumes.  Only applies when ``export_soc_floor``
+    is set (headroom-based exports); clipping exports are not extended.
 
 **restored**: The export window ended (or an SOC floor fired) and the previous
     mode was reinstated this tick.  ``maybe_restore_timed_grid_export`` returns
@@ -29,8 +40,14 @@ The timed export override follows a three-state lifecycle:
 * **inactive → active**: ``start_timed_grid_export()`` succeeds — the inverter
   accepted the GRID_EXPORT command and state is written to disk.
 
-* **active → restored** (normal): ``restore_at`` is reached.  The previous mode
-  is restored and the state file is deleted.
+* **active → active** (extended): ``restore_at`` is reached, ``export_soc_floor``
+  is set, and current SOC is still above that floor.  ``restore_at`` is advanced
+  and the override remains active.  Capped at ``started_at + MAX_TIMED_EXPORT_MINUTES``.
+
+* **active → restored** (normal): ``restore_at`` is reached and either no
+  ``export_soc_floor`` is configured, the cap has been reached, or SOC has
+  dropped to or below the floor.  The previous mode is restored and the state
+  file is deleted.
 
 * **active → restored** (early, export SOC floor): While active, the battery SOC
   drops to or below ``export_soc_floor``.  Checked first on every tick.
@@ -453,6 +470,38 @@ async def maybe_restore_timed_grid_export(
 
     if now_utc < restore_at:
         return "active"
+
+    # Auto-extension: before restoring, check whether headroom has actually been
+    # recovered. When solar keeps refilling the battery faster than the export drains
+    # it, SOC stays above the floor even after the planned window. In that case, bump
+    # restore_at forward by the original duration (capped at the MAX_TIMED_EXPORT_MINUTES
+    # wall from started_at) and stay active — this avoids the stop/cooldown/restart gap.
+    # Only headroom-based exports set export_soc_floor; clipping exports are not extended.
+    if export_soc_floor is not None:
+        started_at = timed_export_override.get("started_at")
+        original_duration = timed_export_override.get("duration_minutes") or 0
+        if started_at is not None:
+            max_end_utc = started_at + timedelta(minutes=MAX_TIMED_EXPORT_MINUTES)
+            if now_utc < max_end_utc:
+                extend_soc = await fetch_soc("timed-export-extend-check")
+                if extend_soc is not None and extend_soc > export_soc_floor:
+                    extension_end = now_utc + timedelta(minutes=max(original_duration, 1))
+                    new_restore_at = min(extension_end, max_end_utc)
+                    ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
+                    logger.info(
+                        "[TIMED EXPORT] Window expired but SOC (%.1f%%) is still above the "
+                        "%.1f%% floor — extending export by %s minute(s) "
+                        "(until %s, cap %s).",
+                        extend_soc,
+                        export_soc_floor,
+                        ext_minutes,
+                        new_restore_at.isoformat(),
+                        max_end_utc.isoformat(),
+                    )
+                    extended_state = dict(timed_export_override)
+                    extended_state["restore_at"] = new_restore_at
+                    set_timed_export_override(extended_state)
+                    return "active"
 
     restore_mode = timed_export_override["restore_mode"]
     restore_label = timed_export_override["restore_mode_label"]
