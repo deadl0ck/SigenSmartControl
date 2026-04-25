@@ -147,12 +147,10 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
                     (mid_period_headroom_deficit / mid_period_effective_battery_export_kw) * 60
                 )
                 mid_period_reason = (
-                    f"High-SOC safety export: SOC {mid_period_soc:.1f}% >= "
-                    f"{MORNING_HIGH_SOC_THRESHOLD_PERCENT:.0f}% threshold, "
-                    f"solar {mid_period_solar_kw:.1f} kW >= "
-                    f"{MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW:.1f} kW trigger, "
-                    f"headroom {mid_period_headroom_kwh:.2f} kWh < target "
-                    f"{mid_period_headroom_target_kwh:.2f} kWh"
+                    f"Battery is high ({mid_period_soc:.1f}%) and solar is strong "
+                    f"({mid_period_solar_kw:.1f} kW) but only {mid_period_headroom_kwh:.2f} kWh "
+                    f"headroom remains (needs {mid_period_headroom_target_kwh:.2f} kWh) — "
+                    "exporting to make room."
                 )
                 log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-HIGH-SOC-SAFETY",

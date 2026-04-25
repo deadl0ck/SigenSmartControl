@@ -56,10 +56,12 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 from config.constants import TIMED_EXPORT_STATE_PATH
 from config.settings import (
     LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT,
+    LOCAL_TIMEZONE,
     MAX_TIMED_EXPORT_MINUTES,
     SIGEN_MODES,
     TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
@@ -300,9 +302,11 @@ async def start_timed_grid_export(
     )
     logger.info(ACTION_DIVIDER)
 
+    restore_at_local = restore_at.astimezone(ZoneInfo(LOCAL_TIMEZONE))
+    restore_at_str = restore_at_local.strftime("%-d %b %Y %H:%M")
     apply_reason = (
-        f"{reason} Timed export override active for {clamped_minutes} minutes "
-        f"(until {restore_at.isoformat()}) before restoring previous mode {restore_label}."
+        f"{reason} Exporting to grid for {clamped_minutes} minutes "
+        f"(until {restore_at_str}), then returning to {restore_label}."
     )
     ok = await apply_mode_change(
         sigen=sigen,
@@ -401,8 +405,8 @@ async def maybe_restore_timed_grid_export(
                     mode=restore_mode,
                     period=f"{trigger_period} (timed-export-soc-floor)",
                     reason=(
-                        f"Timed export SOC floor reached at {current_soc:.1f}%. "
-                        f"Restoring {restore_label}."
+                        f"Battery reached the minimum level ({current_soc:.1f}%) — "
+                        f"stopping export and returning to {restore_label}."
                     ),
                     mode_names=mode_names,
                     battery_soc=current_soc,
@@ -432,8 +436,8 @@ async def maybe_restore_timed_grid_export(
                     mode=restore_mode,
                     period=f"{trigger_period} (clipping-export-soc-floor)",
                     reason=(
-                        f"Clipping export SOC floor reached at {current_soc:.1f}%. "
-                        f"Restoring {restore_label}."
+                        f"Battery reached the minimum level during clipping export ({current_soc:.1f}%) — "
+                        f"stopping export and returning to {restore_label}."
                     ),
                     mode_names=mode_names,
                     battery_soc=current_soc,
@@ -481,8 +485,7 @@ async def maybe_restore_timed_grid_export(
         mode=restore_mode,
         period=f"{trigger_period} (timed-export-restore)",
         reason=(
-            "Timed grid export window complete; restoring mode active before override "
-            f"({restore_label})."
+            f"Export window finished — returning to {restore_label}."
         ),
         mode_names=mode_names,
         battery_soc=restore_soc,

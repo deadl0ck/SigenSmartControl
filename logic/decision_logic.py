@@ -134,8 +134,8 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
         reason = (
-            f"Headroom ({ctx.headroom_kwh:.2f} kWh) < target ({ctx.headroom_target_kwh:.2f} kWh). "
-            "Preemptively exporting to grid."
+            f"Battery has {ctx.headroom_kwh:.2f} kWh headroom but needs {ctx.headroom_target_kwh:.2f} kWh — "
+            "exporting to make room for incoming solar."
         )
         return mode, reason
 
@@ -154,16 +154,14 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
             Period.EVE: "Evening",
         }.get(period_key, ctx.period)
         reason = (
-            f"{period_label} high-SOC protection: "
-            f"SOC ({ctx.soc:.1f}%) >= {MORNING_HIGH_SOC_THRESHOLD_PERCENT:.1f}% and "
-            f"headroom ({ctx.headroom_kwh:.2f} kWh) < target ({ctx.headroom_target_kwh:.2f} kWh). "
-            "Preemptively exporting to grid."
+            f"Battery is high ({ctx.soc:.1f}%) with only {ctx.headroom_kwh:.2f} kWh headroom "
+            f"(needs {ctx.headroom_target_kwh:.2f} kWh) — exporting to make room for incoming solar."
         )
         return mode, reason
 
     if period_key == Period.NIGHT:
         mode = PERIOD_TO_MODE[Period.NIGHT]
-        reason = "Night period detected. Applying configured night mode."
+        reason = "Night window active — applying configured night mode."
         return mode, reason
 
     # Before cheap-rate starts, prefer battery usage over charge-oriented behavior
@@ -182,22 +180,22 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
         if available_kwh >= required_kwh:
             mode = SIGEN_MODES["SELF_POWERED"]
             reason = (
-                "Evening bridge rule: battery has enough usable energy "
-                f"({available_kwh:.2f} kWh) to cover expected load until cheap-rate "
-                f"starts ({required_kwh:.2f} kWh required). Prioritizing self-powered mode."
+                f"Battery has enough charge ({available_kwh:.2f} kWh) to power the home "
+                f"until cheap-rate electricity starts ({required_kwh:.2f} kWh needed) — "
+                "staying in self-powered mode."
             )
             return mode, reason
 
     mode = FORECAST_TO_MODE.get(status_key, SIGEN_MODES["SELF_POWERED"])
-    reason = f"Default mapping for {ctx.status}."
+    reason = f"Forecast is {ctx.status} — applying standard mode."
 
     # During expensive peak tariff windows, prioritize self-powered operation
     # unless one of the explicit export-to-grid rules already triggered above.
     if schedule_key == "PEAK" and mode != SIGEN_MODES["GRID_EXPORT"]:
         mode = PERIOD_TO_MODE["PEAK"]
         reason = (
-            f"{reason} Schedule period is Peak, so prioritizing self-powered mode "
-            "to reduce grid import."
+            f"{reason} Peak electricity tariff is active — "
+            "using battery to avoid expensive grid imports."
         )
 
     return mode, reason

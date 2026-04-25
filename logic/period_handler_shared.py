@@ -117,9 +117,8 @@ def _promote_status_for_live_clipping_risk(
         return status, None
 
     reason = (
-        "Live clipping-risk override: promoting AMBER to GREEN because "
-        f"SOC={soc:.1f}% and avg live solar={avg_live_solar_kw:.2f} kW is near "
-        f"or above configured trigger ({trigger_kw:.1f} kW)."
+        f"Solar output is high ({avg_live_solar_kw:.2f} kW) and battery is nearly full "
+        f"({soc:.1f}%) — treating forecast as Green to trigger export."
     )
     return "Green", reason
 
