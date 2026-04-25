@@ -19,6 +19,7 @@ from config.settings import (
     CALIBRATION_CLIPPING_RATE_WEIGHT,
     CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
     CALIBRATION_DEFAULT_POWER_MULTIPLIER,
+    CALIBRATION_MIN_SOLAR_KW,
     CALIBRATION_MULTIPLIER_STEP_MAX,
     CALIBRATION_RATIO_MAX,
     CALIBRATION_RATIO_MIN,
@@ -209,13 +210,13 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         extracted_metrics = derived.get("extracted_metrics", {})
         solar_power_kw = extracted_metrics.get("solar_power_kw")
         forecast_w = _extract_forecast_value_w(snapshot.get("forecast_today"), period)
-        if isinstance(solar_power_kw, (int, float)) and forecast_w and forecast_w > 0:
-            ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
-            ratios_by_period[period].append(
-                max(CALIBRATION_RATIO_MIN, min(CALIBRATION_RATIO_MAX, ratio))
-            )
-
-        clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
+        if isinstance(solar_power_kw, (int, float)) and solar_power_kw >= CALIBRATION_MIN_SOLAR_KW:
+            if forecast_w and forecast_w > 0:
+                ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
+                ratios_by_period[period].append(
+                    max(CALIBRATION_RATIO_MIN, min(CALIBRATION_RATIO_MAX, ratio))
+                )
+            clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
 
     for period in PERIODS:
         prior_period = get_period_calibration(prior, period)
