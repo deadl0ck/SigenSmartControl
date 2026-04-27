@@ -889,6 +889,10 @@ All files under `scripts/` are documented below.
 	- Prints today's ESB and Quartz forecasts side-by-side.
 	- Run: `python scripts/todays_forecast_both.py`
 
+- `scripts/solar_clipping_chart.py`
+	- Generates a stacked bar chart of the last 7 days of solar production split by period (Morn/Aftn/Eve), with an ESB forecast colour strip beside each day, promotion markers (`P`) where Amber was promoted to Green, and clipping duration on a secondary axis. Saves to `data/solar_clipping_last7days.png`.
+	- Run: `python scripts/solar_clipping_chart.py`
+
 ## Email Notifications
 
 When the scheduler issues a mode-change command, it sends an email notification with:
