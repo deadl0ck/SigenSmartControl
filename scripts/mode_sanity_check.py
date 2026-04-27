@@ -21,16 +21,12 @@ from config.constants import MODE_CHANGE_EVENTS_ARCHIVE_PATH
 from config.settings import LOCAL_TIMEZONE, SIGEN_MODES
 from integrations.sigen_interaction import SigenInteraction
 from logic.mode_control import extract_mode_value
+from utils.terminal_formatting import ANSI_GREEN, ANSI_RED, colorize_text
 
 
 TEST_ONLY_REASONS = {
     "Simulation email notification test.",
 }
-
-GREEN = "\033[92m"
-RED = "\033[91m"
-RESET = "\033[0m"
-
 
 def _build_mode_name_map() -> dict[int, str]:
     """Return reverse map from mode value to label."""
@@ -191,7 +187,11 @@ def _print_match_check(
     event_mode_text = _mode_display(event_mode, mode_names)
     current_mode_text = _mode_display(current_mode_value, mode_names)
     match = event_mode is not None and current_mode_value is not None and event_mode == current_mode_value
-    match_text = f"{GREEN}True{RESET}" if match else f"{RED}False{RESET}"
+    match_text = (
+        colorize_text("True", ANSI_GREEN)
+        if match
+        else colorize_text("False", ANSI_RED)
+    )
 
     print(f"Reference event period: {event.get('period', 'N/A')}")
     print(f"Reference event mode:   {event_mode_text}")

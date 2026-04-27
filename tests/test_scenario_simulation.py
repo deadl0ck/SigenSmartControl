@@ -32,11 +32,11 @@ def test_generate_scenario_rows_forces_red_during_night_window() -> None:
 
 
 def test_derive_period_for_hour_maps_night_and_daytime_hours() -> None:
-    assert derive_period_for_hour("07:00") == "NIGHT"
+    assert derive_period_for_hour("07:00") == "Night"
     assert derive_period_for_hour("08:00") == "Morn"
     assert derive_period_for_hour("12:00") == "Aftn"
     assert derive_period_for_hour("21:00") == "Eve"
-    assert derive_period_for_hour("23:00") == "NIGHT"
+    assert derive_period_for_hour("23:00") == "Night"
 
 
 def test_evaluate_scenario_row_uses_tou_during_night() -> None:
@@ -47,7 +47,7 @@ def test_evaluate_scenario_row_uses_tou_during_night() -> None:
         current_mode="SELF_POWERED",
     )
 
-    assert result["Period"] == "NIGHT"
+    assert result["Period"] == "Night"
     assert result["Target Mode"] == "TOU"
     assert result["Action"] == "CHANGE_MODE"
 
@@ -74,7 +74,7 @@ def test_evaluate_scenario_row_uses_non_bridge_path_when_usable_energy_is_low() 
 
     assert result["Period"] == "Eve"
     assert result["Target Mode"] == "SELF_POWERED"
-    assert result["Reason"] == "Default mapping for GREEN."
+    assert result["Reason"] == "Forecast is GREEN — applying standard mode."
 
 
 def test_annotate_scenario_rows_adds_scenario_set_numbers() -> None:

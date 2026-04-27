@@ -8,8 +8,15 @@ from typing import Any
 
 import pytest
 
+import logging
+
 import main
+import logic.mode_change as mode_change_module
+import logic.timed_export as timed_export_module
+from logic.mode_change import apply_mode_change
 from logic.schedule_utils import is_pre_sunrise_discharge_window
+
+_test_logger = logging.getLogger("test")
 
 
 def test_suppress_elapsed_periods_except_latest_marks_only_stale_periods() -> None:
@@ -98,9 +105,8 @@ def test_mid_period_window_end_excludes_morning_after_afternoon_starts() -> None
     assert now >= aftn_start and now < aftn_end
 
 
-def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persist_and_load_timed_export_override(tmp_path) -> None:
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
     override = {
         "active": True,
         "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
@@ -114,8 +120,8 @@ def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.Mo
         "export_soc_floor": None,
     }
 
-    main._persist_timed_export_override(override)
-    loaded = main._load_timed_export_override()
+    timed_export_module.persist_timed_export_override(override, logger=_test_logger, path=state_path)
+    loaded = timed_export_module.load_timed_export_override(logger=_test_logger, path=state_path)
 
     assert state_path.exists()
     assert loaded["active"] is True
@@ -125,11 +131,10 @@ def test_persist_and_load_timed_export_override(tmp_path, monkeypatch: pytest.Mo
     assert loaded["restore_at"] == override["restore_at"]
 
 
-def test_persist_timed_export_override_clears_inactive_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persist_timed_export_override_clears_inactive_file(tmp_path) -> None:
     state_path = tmp_path / "timed_export_state.json"
-    monkeypatch.setattr(main, "TIMED_EXPORT_STATE_PATH", str(state_path))
 
-    main._persist_timed_export_override(
+    timed_export_module.persist_timed_export_override(
         {
             "active": True,
             "started_at": datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc),
@@ -141,11 +146,17 @@ def test_persist_timed_export_override_clears_inactive_file(tmp_path, monkeypatc
             "is_clipping_export": False,
             "clipping_soc_floor": None,
             "export_soc_floor": None,
-        }
+        },
+        logger=_test_logger,
+        path=state_path,
     )
     assert state_path.exists()
 
-    main._persist_timed_export_override(main._empty_timed_export_override())
+    timed_export_module.persist_timed_export_override(
+        timed_export_module._empty_timed_export_override(),
+        logger=_test_logger,
+        path=state_path,
+    )
 
     assert not state_path.exists()
 
@@ -228,7 +239,7 @@ def test_order_daytime_periods_enforces_morn_aftn_eve_order() -> None:
         "Eve": (3000, "Green"),
         "Morn": (1200, "Amber"),
         "Aftn": (2200, "Green"),
-        "NIGHT": (0, "Red"),
+        "Night": (0, "Red"),
     }
 
     assert main.order_daytime_periods(period_forecast) == ["Morn", "Aftn", "Eve"]
@@ -239,7 +250,7 @@ def test_order_daytime_periods_appends_unknown_daytime_periods() -> None:
         "Shoulder": (700, "Amber"),
         "Eve": (2100, "Green"),
         "Morn": (800, "Amber"),
-        "NIGHT": (0, "Red"),
+        "Night": (0, "Red"),
     }
 
     assert main.order_daytime_periods(period_forecast) == ["Morn", "Eve", "Shoulder"]
@@ -263,12 +274,13 @@ class DummyModeInteraction:
 async def test_apply_mode_change_skips_when_already_target_mode() -> None:
     sigen = DummyModeInteraction(current_mode={"mode": 1})
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Already at target mode — no change needed.",
         mode_names={1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -279,12 +291,13 @@ async def test_apply_mode_change_skips_when_already_target_mode() -> None:
 async def test_apply_mode_change_sets_when_target_differs() -> None:
     sigen = DummyModeInteraction(current_mode=0)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Switching to target mode.",
         mode_names={0: "SELF_POWERED", 1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -301,14 +314,15 @@ async def test_apply_mode_change_does_not_archive_during_pytest(
     def fake_append_mode_change_event(**kwargs: Any) -> None:
         called["append"] = True
 
-    monkeypatch.setattr(main, "append_mode_change_event", fake_append_mode_change_event)
+    monkeypatch.setattr(mode_change_module, "append_mode_change_event", fake_append_mode_change_event)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=sigen,
         mode=1,
         period="Eve (period-start)",
         reason="Switching to target mode.",
         mode_names={0: "SELF_POWERED", 1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True
@@ -321,21 +335,22 @@ async def test_apply_mode_change_simulation_triggers_email_notification(
 ) -> None:
     called: dict[str, Any] = {"email": False}
 
-    async def fake_notify(**kwargs):
+    async def fake_notify(logger: Any, **kwargs: Any) -> None:
         called["email"] = True
         assert kwargs["success"] is True
         assert kwargs["period"] == "Night->Morn"
         assert kwargs["requested_mode"] == 1
 
-    monkeypatch.setattr(main, "FULL_SIMULATION_MODE", True)
-    monkeypatch.setattr(main, "_notify_mode_change_email", fake_notify)
+    monkeypatch.setattr(mode_change_module, "FULL_SIMULATION_MODE", True)
+    monkeypatch.setattr(mode_change_module, "_notify_mode_change_email", fake_notify)
 
-    ok = await main.apply_mode_change(
+    ok = await apply_mode_change(
         sigen=None,
         mode=1,
         period="Night->Morn",
         reason="Simulation email notification test.",
         mode_names={1: "AI"},
+        logger=_test_logger,
     )
 
     assert ok is True

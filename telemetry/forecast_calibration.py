@@ -19,6 +19,7 @@ from config.settings import (
     CALIBRATION_CLIPPING_RATE_WEIGHT,
     CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER,
     CALIBRATION_DEFAULT_POWER_MULTIPLIER,
+    CALIBRATION_MIN_SOLAR_KW,
     CALIBRATION_MULTIPLIER_STEP_MAX,
     CALIBRATION_RATIO_MAX,
     CALIBRATION_RATIO_MIN,
@@ -128,7 +129,12 @@ def _extract_forecast_value_w(forecast_for_day: Any, period: str) -> int | None:
 
 
 def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
-    """Read telemetry JSONL records inside the rolling analysis window."""
+    """Read telemetry JSONL records inside the rolling analysis window.
+
+    Streams the JSONL file line-by-line and uses a fast string pre-filter to
+    skip lines whose ``captured_at`` date precedes the cutoff without calling
+    ``json.loads()``.
+    """
     path = Path(INVERTER_TELEMETRY_ARCHIVE_PATH)
     if not path.exists():
         return []
@@ -136,19 +142,35 @@ def _read_recent_telemetry(now_utc: datetime) -> list[dict[str, Any]]:
     cutoff_date = now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date() - timedelta(
         days=CALIBRATION_WINDOW_DAYS
     )
-    snapshots: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            snapshot = json.loads(line)
-            captured_at = datetime.fromisoformat(snapshot["captured_at"])
-        except Exception:
-            continue
+    cutoff_str = cutoff_date.strftime("%Y-%m-%d")
+    _DATE_LEN = 10  # "YYYY-MM-DD"
+    _KEY = '"captured_at"'
 
-        if captured_at.date() < cutoff_date:
-            continue
-        snapshots.append(snapshot)
+    snapshots: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Fast pre-filter: extract the captured_at date without full JSON parse.
+            key_idx = line.find(_KEY)
+            if key_idx == -1:
+                continue
+            val_start = line.find('"', key_idx + len(_KEY) + 1)
+            if val_start == -1:
+                continue
+            date_str = line[val_start + 1: val_start + 1 + _DATE_LEN]
+            if date_str < cutoff_str:
+                continue
+
+            try:
+                snapshot = json.loads(line)
+                datetime.fromisoformat(snapshot["captured_at"])
+            except Exception:
+                continue
+
+            snapshots.append(snapshot)
 
     return snapshots
 
@@ -188,13 +210,13 @@ def build_and_save_forecast_calibration(now_utc: datetime | None = None) -> dict
         extracted_metrics = derived.get("extracted_metrics", {})
         solar_power_kw = extracted_metrics.get("solar_power_kw")
         forecast_w = _extract_forecast_value_w(snapshot.get("forecast_today"), period)
-        if isinstance(solar_power_kw, (int, float)) and forecast_w and forecast_w > 0:
-            ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
-            ratios_by_period[period].append(
-                max(CALIBRATION_RATIO_MIN, min(CALIBRATION_RATIO_MAX, ratio))
-            )
-
-        clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
+        if isinstance(solar_power_kw, (int, float)) and solar_power_kw >= CALIBRATION_MIN_SOLAR_KW:
+            if forecast_w and forecast_w > 0:
+                ratio = (float(solar_power_kw) * 1000.0) / float(forecast_w)
+                ratios_by_period[period].append(
+                    max(CALIBRATION_RATIO_MIN, min(CALIBRATION_RATIO_MAX, ratio))
+                )
+            clipping_by_period[period].append(bool(derived.get("likely_clipping", False)))
 
     for period in PERIODS:
         prior_period = get_period_calibration(prior, period)

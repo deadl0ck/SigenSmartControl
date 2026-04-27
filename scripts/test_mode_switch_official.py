@@ -24,6 +24,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from integrations.sigen_official import OFFICIAL_MODE_INT_TO_ENUM, SigenOfficial
+from utils.payload_tree import log_payload_tree
 
 
 logging.basicConfig(
@@ -31,54 +32,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("test_mode_switch_official")
-
-
-def _format_tree_leaf(value: Any) -> str:
-    """Format a scalar value for tree logging."""
-    return repr(value)
-
-
-def _iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
-    """Convert nested dict/list payloads into ASCII tree lines."""
-    lines: list[str] = []
-
-    if isinstance(payload, dict):
-        items = list(payload.items())
-        for index, (key, value) in enumerate(items):
-            is_last = index == len(items) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
-
-            if isinstance(value, (dict, list)):
-                lines.append(f"{prefix}{branch}{key}:")
-                lines.extend(_iter_tree_lines(value, child_prefix))
-            else:
-                lines.append(f"{prefix}{branch}{key}: {_format_tree_leaf(value)}")
-        return lines
-
-    if isinstance(payload, list):
-        for index, value in enumerate(payload):
-            is_last = index == len(payload) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
-            label = f"[{index}]"
-
-            if isinstance(value, (dict, list)):
-                lines.append(f"{prefix}{branch}{label}:")
-                lines.extend(_iter_tree_lines(value, child_prefix))
-            else:
-                lines.append(f"{prefix}{branch}{label}: {_format_tree_leaf(value)}")
-        return lines
-
-    lines.append(f"{prefix}`- {_format_tree_leaf(payload)}")
-    return lines
-
-
-def log_payload_tree(title: str, payload: Any) -> None:
-    """Log nested payload data as a readable multi-line tree."""
-    logger.info("%s:", title)
-    for line in _iter_tree_lines(payload):
-        logger.info("  %s", line)
 
 
 async def show_current_mode(client: SigenOfficial) -> None:
@@ -99,21 +52,21 @@ async def show_monitoring_payloads(client: SigenOfficial) -> None:
     except RuntimeError as exc:
         logger.warning("Official system list unavailable: %s", exc)
     else:
-        log_payload_tree("Official system list payload", systems)
+        log_payload_tree(logger, "Official system list payload", systems)
 
     try:
         summary = await client.get_system_summary()
     except RuntimeError as exc:
         logger.warning("Official system summary unavailable: %s", exc)
     else:
-        log_payload_tree("Official system summary payload", summary)
+        log_payload_tree(logger, "Official system summary payload", summary)
 
     try:
         energy_flow = await client.get_energy_flow()
     except RuntimeError as exc:
         logger.warning("Official energy flow unavailable: %s", exc)
     else:
-        log_payload_tree("Official energy flow payload", energy_flow)
+        log_payload_tree(logger, "Official energy flow payload", energy_flow)
 
 
 async def show_supported_modes(client: SigenOfficial) -> None:

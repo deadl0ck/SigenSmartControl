@@ -121,6 +121,10 @@ async def process_periods(
 
 ### Simplicity First (Project Preference)
 - **Prefer the simplest code that works today.**
+- **Prioritize clean, clear code over clever code.** Use straightforward control flow and
+    descriptive names so another developer can understand intent quickly.
+- **Favor readability and maintainability over compactness.** If two options both work,
+    choose the one that is easier to read and explain.
 - **Do not add speculative parameters or abstractions** for future use.
 - If a parameter is not actively used by current behavior and call sites, **remove it**.
 - Add complexity only when there is a present, tested requirement.

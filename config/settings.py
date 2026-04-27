@@ -6,6 +6,8 @@ Configuration file for Sigen inverter operational mode mappings and forecast-to-
 Edit this file to adjust how forecast statuses and tariff periods map to Sigen operational modes.
 """
 
+from config.enums import ForecastStatus, Period
+
 # ==============================
 # System Specifications
 # ==============================
@@ -25,6 +27,7 @@ LOG_LEVEL = "INFO"  # Change to 'DEBUG' for more detailed logs
 # ==============================
 # Scheduler cadence.
 # How often the self-contained scheduler wakes up to re-check forecast windows.
+# 5 minutes balances API rate limits against decision latency; finer cadence adds no value given inverter mode-change overhead.
 POLL_INTERVAL_MINUTES = 5
 # How often to refresh forecast data during the day (0 disables intra-day refresh).
 FORECAST_REFRESH_INTERVAL_MINUTES = 30
@@ -42,10 +45,13 @@ FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES = 60
 # Live solar and pre-period export calculations.
 # How far ahead of a period start we begin monitoring SOC for a possible export.
 # Increased to start proactive headroom checks earlier on fast-ramp solar mornings.
+# 180 min (3 h) covers the full morning ramp: at 3.4 kW surplus × 3 h = ~10 kWh, matching HEADROOM_TARGET_KWH.
 MAX_PRE_PERIOD_WINDOW_MINUTES = 180
 # Number of live-solar samples used in rolling average calculations.
+# 3 samples at 5-min intervals = 15-min average; smooths cloud transients without lagging behind genuine ramps.
 LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
 # Lower bound for effective battery export capacity in pre-period calculations.
+# 0.2 kW is the minimum measurable net export after inverter standby losses; values below this are indistinguishable from idle.
 MIN_EFFECTIVE_BATTERY_EXPORT_KW = 0.2
 
 # Simulation and safety controls.
@@ -57,6 +63,10 @@ FULL_SIMULATION_MODE = False
 # Maximum allowed duration for timed grid export override (minutes) — prevents accidental
 # over-discharge or excessive grid arbitrage cycles.
 MAX_TIMED_EXPORT_MINUTES = 240
+# Minutes to block a new timed export after a restore completes, preventing
+# the inverter from oscillating between self-consumption and grid-export on
+# consecutive ticks immediately after a restore.
+TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES = 15
 
 # Night and timezone behavior.
 # Whether the scheduler should explicitly apply the configured night mode.
@@ -71,10 +81,12 @@ ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE = True
 # Example: "4,5,6,7,8,9" for Apr-Sep.
 PRE_SUNRISE_DISCHARGE_MONTHS = "4,5,6,7,8,9"
 # Minutes before sunrise to begin pre-sunrise discharge in enabled months.
+# 120 min (2 h) gives enough time at ~2 kW discharge to clear ~4 kWh, creating meaningful headroom before solar ramps up.
 PRE_SUNRISE_DISCHARGE_LEAD_MINUTES = 120
 # Minimum SOC required before pre-sunrise discharge is allowed to switch away
 # from night charging behavior. Below this threshold, the scheduler keeps the
 # configured night mode instead of discharging into the morning.
+# 65% (~15.6 kWh) ensures enough overnight reserve remains after 2 h discharge to cover typical morning household load if solar underperforms.
 PRE_SUNRISE_DISCHARGE_MIN_SOC_PERCENT = 65.0
 # Local timezone used for schedule windows.
 LOCAL_TIMEZONE = "Europe/Dublin"
@@ -107,7 +119,9 @@ SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
 # Red: output_fraction < QUARTZ_RED_CAPACITY_FRACTION
 # Amber: QUARTZ_RED_CAPACITY_FRACTION <= output_fraction < QUARTZ_GREEN_CAPACITY_FRACTION
 # Green: output_fraction >= QUARTZ_GREEN_CAPACITY_FRACTION
+# 20% of 8.9 kW ≈ 1.8 kW: below this the inverter cannot meaningfully charge the battery; treat as Red.
 QUARTZ_RED_CAPACITY_FRACTION = 0.20
+# 40% of 8.9 kW ≈ 3.6 kW: above this, surplus exceeds ESTIMATED_HOME_LOAD_KW and meaningful storage is likely; treat as Green.
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
 
 # Telemetry clipping heuristics.
@@ -128,8 +142,9 @@ CALIBRATION_DEFAULT_POWER_MULTIPLIER = 1.0
 CALIBRATION_DEFAULT_EXPORT_LEAD_BUFFER_MULTIPLIER = 1.1
 CALIBRATION_RATIO_MIN = 0.5
 CALIBRATION_RATIO_MAX = 2.0
-CALIBRATION_TARGET_MULTIPLIER_MIN = 0.85
-CALIBRATION_TARGET_MULTIPLIER_MAX = 1.5
+CALIBRATION_TARGET_MULTIPLIER_MIN = 0.70
+CALIBRATION_TARGET_MULTIPLIER_MAX = 1.75
+CALIBRATION_MIN_SOLAR_KW = 0.1  # exclude near-zero readings from ratio calculation
 CALIBRATION_TARGET_LEAD_BUFFER_MAX = 1.6
 CALIBRATION_MULTIPLIER_STEP_MAX = 0.08
 CALIBRATION_CLIPPING_RATE_WEIGHT = 0.25
@@ -177,6 +192,8 @@ CHEAP_RATE_END_HOUR = 8
 SURPLUS_CAPACITY_KW = SOLAR_PV_KW - INVERTER_KW  # e.g. 8.9 - 5.5 = 3.4 kW
 # Target free battery headroom before a Green period: 50% of total battery capacity.
 HEADROOM_TARGET_KWH = BATTERY_KWH * 0.5  # e.g. 24 × 0.5 = 12.0 kWh
+# Alternative physics-based formula: (SOLAR_PV_KW - INVERTER_KW) * 3 = surplus kW × 3 h reserve.
+# For this system that gives 10.2 kWh. BATTERY_KWH * 0.5 adds extra margin; adjust to taste.
 # Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
 # if current battery energy is sufficient to cover expected household demand.
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
@@ -191,16 +208,17 @@ ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
 # SOC floor below which no further pre-cheap-rate export is triggered.
 PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
 # Conservative assumed net battery discharge power used to size the export window.
-PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
+PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
 # High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 # SOC threshold for the mid-period high-SOC safety export check (combined with solar).
 # When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.
+# 50% (12 kWh) matches HEADROOM_TARGET_KWH: above this the battery cannot absorb a full-day Green surplus without clipping.
 MORNING_HIGH_SOC_THRESHOLD_PERCENT = 50.0
 # Solar generation threshold (kW) for mid-period high-SOC safety export.
 # Only triggers when live solar is this strong and SOC >= MORNING_HIGH_SOC_THRESHOLD_PERCENT.
-MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = 3.5
+MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.39, 2)  # ~39% of array capacity
 # Live clipping-risk promotion: promote Amber to Green during a scheduler tick when
 # live solar generation and battery SOC both exceed configured thresholds, allowing
 # the headroom export rule to trigger early even on an underforecast day.
@@ -212,7 +230,8 @@ LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
 # Lowered so underforecast high-irradiance ramps are caught earlier.
-LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 3.2
+# 3.2 kW ≈ 36% of array capacity; at this level surplus already exceeds typical home load, so battery fill risk is real if headroom is low.
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.36, 2)  # ~36% of array capacity
 # SOC floor for mid-period clipping export: if timed export started by clipping-risk
 # promotion drops SOC to this floor, cancel the export and restore prior mode.
 # Set to 5% below the promotion threshold to avoid yo-yo behavior.
@@ -231,7 +250,7 @@ EVENING_EXPORT_TRIGGER_SOC_PERCENT = 75.0
 # Additional surplus above protected energy required before exporting.
 EVENING_EXPORT_MIN_EXCESS_KWH = 1.0
 # Conservative assumed net battery discharge power used to size export window.
-EVENING_EXPORT_ASSUMED_DISCHARGE_KW = 2.0
+EVENING_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
 # Safety cap for one evening controlled export window.
 EVENING_EXPORT_MAX_DURATION_MINUTES = 120
 
@@ -253,6 +272,8 @@ SIGEN_MODES = {
     # User-defined custom operation logic
     "CUSTOM": 9,  # Custom Operation Mode
 }
+
+SIGEN_MODE_NAMES: dict[int, str] = {v: k for k, v in SIGEN_MODES.items()}
 
 # Mapping of API label responses to numeric mode values.
 # This is used when get_operational_mode returns a text label rather than an integer.
@@ -277,11 +298,11 @@ SIGEN_MODE_LABEL_TO_VALUE = {
 # Adjust these mappings to change automation behavior
 FORECAST_TO_MODE = {
     # Green: Good solar forecast, maximize self-consumption
-    "GREEN": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.GREEN: SIGEN_MODES["SELF_POWERED"],
     # Amber: Moderate solar, stay in deterministic self-consumption mode
-    "AMBER": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.AMBER: SIGEN_MODES["SELF_POWERED"],
     # Red: Poor solar, stay in deterministic self-consumption mode
-    "RED": SIGEN_MODES["SELF_POWERED"],
+    ForecastStatus.RED: SIGEN_MODES["SELF_POWERED"],
 }
 
 # ==============================
@@ -290,7 +311,7 @@ FORECAST_TO_MODE = {
 # Map schedule period (NIGHT/DAY/PEAK) to Sigen operational mode.
 PERIOD_TO_MODE = {
     # Night: cheap-rate window behavior (charge-oriented when TOU charge windows are configured)
-    "NIGHT": SIGEN_MODES["TOU"],
+    Period.NIGHT: SIGEN_MODES["TOU"],
     # Day: deterministic self-consumption behavior
     "DAY": SIGEN_MODES["SELF_POWERED"],
     # Peak: high-demand hours, maximize self-consumption

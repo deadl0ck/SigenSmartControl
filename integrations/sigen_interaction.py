@@ -6,27 +6,24 @@ recovery when token refresh fails (refresh -> full re-auth -> retry once).
 
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
-import os
-import sys
-
-from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
-from config.settings import FULL_SIMULATION_MODE, SIGEN_MODES
 import logging
 
+from integrations.sigen_auth import get_sigen_instance, refresh_sigen_instance
+from config.settings import FULL_SIMULATION_MODE, SIGEN_MODE_NAMES, SIGEN_MODES
+from utils.terminal_formatting import ANSI_PURPLE, colorize_text
+
 logger = logging.getLogger(__name__)
-MODE_NAMES = {value: name for name, value in SIGEN_MODES.items()}
+MODE_NAMES = SIGEN_MODE_NAMES
 ACTION_DIVIDER = "*" * 96
-_PURPLE = "\033[95m"
-_RESET = "\033[0m"
+
+
+class SigenPayloadError(Exception):
+    """Raised when the Sigen API returns a structurally unexpected payload."""
 
 
 def _divider_line() -> str:
     """Return divider line, colorized purple when terminal output supports ANSI colors."""
-    force_color = os.getenv("FORCE_COLOR", "").strip().lower() in {"1", "true", "yes", "on"}
-    is_tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
-    if (is_tty or force_color) and not os.getenv("NO_COLOR"):
-        return f"{_PURPLE}{ACTION_DIVIDER}{_RESET}"
-    return ACTION_DIVIDER
+    return colorize_text(ACTION_DIVIDER, ANSI_PURPLE)
 
 
 class SigenApiProtocol(Protocol):
@@ -84,10 +81,15 @@ class SigenInteraction:
 
     @staticmethod
     def _is_missing_data_key_error(exc: Exception) -> bool:
-        """Return True when upstream response parsing failed on missing 'data' key."""
+        """Return True when upstream response parsing failed on missing 'data' key.
+
+        The Sigen API wraps all responses in a top-level ``data`` envelope.  A
+        ``KeyError`` whose first argument is exactly ``"data"`` means that
+        envelope was absent — a known intermittent upstream quirk.
+        """
         if not isinstance(exc, KeyError):
             return False
-        return any("data" in str(part).lower() for part in exc.args)
+        return exc.args[0] == "data" if exc.args else False
 
     async def _call_with_reauth_once(
         self,
@@ -231,11 +233,14 @@ class SigenInteraction:
                     raise
                 logger.error(
                     "[ENERGY FLOW] Retry also failed due to missing expected key (%s). "
-                    "Returning empty payload for this tick.",
+                    "Raising SigenPayloadError.",
                     retry_exc,
                     exc_info=True,
                 )
-                return {}
+                raise SigenPayloadError(
+                    f"get_energy_flow: missing expected 'data' key after retry "
+                    f"(exc_args={retry_exc.args!r})"
+                ) from retry_exc
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
         """Get the list of supported operational modes.
