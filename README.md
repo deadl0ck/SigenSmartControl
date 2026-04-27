@@ -10,14 +10,16 @@
 6. [Configuration](#configuration)
 7. [How It Works](#how-it-works)
 8. [Scheduler Behavior](#scheduler-behavior)
-9. [Logging](#logging)
-10. [Mode Test Utility](#mode-test-utility)
-11. [Email Notifications](#email-notifications)
-12. [Forecast Accuracy Report](#forecast-accuracy-report)
-13. [Tests](#tests)
-14. [Session Handoff Recovery](#session-handoff-recovery)
-15. [Recent Updates](#recent-updates)
-16. [Notes](#notes)
+9. [Night Mode and TOU Strategy](#night-mode-and-tou-strategy)
+10. [Logging](#logging)
+11. [Mode Test Utility](#mode-test-utility)
+12. [Email Notifications](#email-notifications)
+13. [Forecast Accuracy Report](#forecast-accuracy-report)
+14. [Adding a Forecast Provider](#adding-a-forecast-provider)
+15. [Tests](#tests)
+16. [Session Handoff Recovery](#session-handoff-recovery)
+17. [Recent Updates](#recent-updates)
+18. [Notes](#notes)
 
 ## Overview
 
@@ -726,6 +728,33 @@ The scheduler:
 10. Applies pre-period export at most once per period per day
 11. Applies the definitive period-start mode at most once per period per day
 
+## Night Mode and TOU Strategy
+
+During the cheap-rate window (23:00–08:00 by default), the scheduler applies `PERIOD_TO_MODE["NIGHT"]`, which defaults to `TOU` mode. This hands control to the time-based charge schedule stored on the inverter.
+
+**You need to configure the TOU schedule yourself in the Sigen app or inverter settings.** The scheduler only switches the inverter *into* TOU mode at the start of the cheap-rate window — what TOU actually does (when to charge, at what rate, up to what SOC) is entirely defined by the schedule you program there. Set it to match your own tariff. There is no universal right answer: the best configuration depends on your electricity rates, battery size, EV charging needs, and the rate you receive for exporting to the grid.
+
+### Overnight sequence
+
+1. At the start of the cheap-rate window (23:00 by default), the scheduler switches to `TOU` mode.
+2. The inverter's own TOU schedule charges the battery from the grid at the cheap rate.
+3. At the end of the cheap-rate window (08:00 by default), daytime decision logic resumes.
+
+Optional behaviors that run around the night window:
+
+- **Pre-cheap-rate export** (`ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT`): in the evening, if SOC is above a configured floor, the system runs a timed `GRID_EXPORT` window to discharge the battery before cheap-rate charging begins. This avoids paying for grid charge on top of energy that was already in the battery.
+- **Summer pre-sunrise discharge** (`ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`): in the configured summer months, the system switches to self-powered shortly before sunrise to create space for morning PV capture.
+
+### Example strategy (the setup this project was built for)
+
+- **Cheap rate: 23:00–08:00.** The battery is fully recharged from the grid overnight at the cheap rate.
+- **EV is also charged overnight** from the grid at the cheap rate, not from surplus solar during the day.
+- **Daytime surplus solar is exported** to the grid rather than being redirected to the EV.
+
+The reason for not charging the EV from solar: the rate received for exporting solar exceeds the cost difference between cheap-rate night electricity and daytime grid electricity. It is cheaper overall to charge the EV at night and collect the export payment for the solar instead. The EV and the battery never compete with the daytime export window.
+
+This means the daytime strategy is straightforward: maximize self-consumption to avoid grid import, and export when the battery is full or clipping risk is high.
+
 ## Logging
 
 Logging is controlled by `LOG_LEVEL` in `config/settings.py`.
@@ -788,29 +817,24 @@ Each event includes timestamp, period/context, requested mode, reason, prior mod
 
 ## Mode Test Utility
 
-Run this script to inspect current mode, list all available operational modes returned by the active API client, and optionally switch to a selected mode value:
+Run this script to inspect current mode, list all available operational modes returned by the official API client, and optionally switch to a selected mode value:
 
 ```sh
-python scripts/test_mode_switch.py
+python scripts/test_mode_switch_official.py
 ```
 
 Optional usage:
 
 ```sh
-python scripts/test_mode_switch.py --list
-python scripts/test_mode_switch.py 1
-python scripts/test_mode_switch.py 5
+python scripts/test_mode_switch_official.py --list
+python scripts/test_mode_switch_official.py 5 --apply
 ```
 
 Behavior:
 
-- With no mode parameter (or `--list`), it prints:
-	- the current operational mode
-	- the full available modes list (label + integer value)
-- With a mode value, it prints:
-	- current mode before switching
-	- mode set response payload
-	- current mode after switching
+- With no arguments (or `--list`), it prints the current operational mode and the full available modes list.
+- With a mode value and `--apply`, it sends a real mode-change command and prints the response.
+- Without `--apply`, mode values are shown but no command is sent (safe default).
 
 Important:
 
@@ -837,23 +861,17 @@ All files under `scripts/` are documented below.
 	- Optional: `python scripts/suggest_forecast_multiplier.py --days 30` (default window is 30 days)
 
 - `scripts/forecast_vs_actual.py`
-	- Convenience wrapper to run tests from shell.
-	- Run: `bash scripts/test.sh`
+	- Full forecast vs actual report comparing ESB, Forecast.Solar, Quartz, and measured inverter telemetry by daytime period. See [Forecast Accuracy Report](#forecast-accuracy-report) for column descriptions.
+	- Run: `python scripts/forecast_vs_actual.py`
 
-- `scripts/test_legacy_api.py`
-	- Read-only diagnostic for the legacy third-party Sigen client.
-	- Run: `python scripts/test_legacy_api.py`
-	- Optional: `python scripts/test_legacy_api.py --json --skip-signals`
+- `scripts/forecast_command_summary.py`
+	- Summarizes forecast-driven inverter commands from the mode-change archive. Useful for reviewing what the scheduler decided and why across recent days.
+	- Run: `python scripts/forecast_command_summary.py`
 
 - `scripts/test_mode_change_email.py`
 	- Sends a test mode-change notification email through scheduler email path.
 	- Run: `python scripts/test_mode_change_email.py`
 	- Optional: `python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason "Testing email path"`
-
-- `scripts/test_mode_switch.py`
-	- Legacy/active-client mode check and mode switch helper.
-	- Run: `python scripts/test_mode_switch.py`
-	- Optional: `python scripts/test_mode_switch.py --list` and `python scripts/test_mode_switch.py <mode_id>`
 
 - `scripts/test_mode_switch_official.py`
 	- Official API mode diagnostics and optional official mode switch (`--apply`).
@@ -991,6 +1009,106 @@ Notes:
 
 - ESB period watts are synthetic status placeholders, so ESB watt MAE/MAPE should be interpreted cautiously; ESB status accuracy is the more meaningful metric.
 - After updating `FORECAST_SOLAR_POWER_MULTIPLIER`, only new scheduler/provider refreshes will reflect the change in future archive snapshots.
+
+## Adding a Forecast Provider
+
+The scheduler is built around a stable `SolarForecastProvider` protocol. Adding a new provider is around 80–100 lines of code and does not require touching any decision logic.
+
+### The interface
+
+Any class that implements these five methods is a valid provider — no inheritance required:
+
+```python
+class SolarForecastProvider(Protocol):
+    def get_todays_period_forecast(self) -> dict[str, tuple[int, str]]: ...
+    def get_tomorrows_period_forecast(self) -> dict[str, tuple[int, str]]: ...
+    def get_todays_solar_values(self) -> list[str]: ...   # compact R/A/G codes
+    def get_simple_inverter_plan(self) -> dict[str, str]: ...
+    def is_good_day(self) -> bool: ...
+```
+
+The return type `dict[str, tuple[int, str]]` maps period name → `(watts, status)`, e.g.:
+```python
+{"Morn": (4200, "Green"), "Aftn": (2800, "Amber"), "Eve": (900, "Red")}
+```
+
+### The easy path — subclass `BaseSolarForecast`
+
+If your API returns time-series power values (kW by timestamp), subclass `BaseSolarForecast` from `weather/providers/common.py`. It provides all five protocol methods for free — you only need to fetch data and populate `self.table_data`.
+
+`table_data` is a list of `(day_label, period, watts, status)` tuples:
+
+```python
+# day_label: three-letter capitalised weekday, e.g. "Mon", "Tue"
+# period:    "Morn", "Aftn", "Eve", or "Night"
+# watts:     integer average power in watts for that period
+# status:    "Red", "Amber", or "Green"
+self.table_data = [
+    ("Mon", "Morn", 4200, "Green"),
+    ("Mon", "Aftn", 2800, "Amber"),
+    ("Mon", "Eve",   900, "Red"),
+]
+```
+
+### Mapping timestamps to periods
+
+Use this pattern (copied from `weather/providers/quartz.py`) to convert API timestamps into period labels:
+
+```python
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from config.settings import LOCAL_TIMEZONE
+
+def _period_from_hour(hour_local: int) -> str:
+    if 7 <= hour_local < 12:  return "Morn"
+    if 12 <= hour_local < 16: return "Aftn"
+    if 16 <= hour_local < 20: return "Eve"
+    return "Night"
+
+local_tz = ZoneInfo(LOCAL_TIMEZONE)
+for timestamp, kw_value in api_response.items():
+    dt = datetime.fromisoformat(timestamp).astimezone(local_tz)
+    period = _period_from_hour(dt.hour)
+    day_label = dt.strftime("%a").capitalize()  # e.g. "Mon"
+```
+
+### Mapping kW to Red/Amber/Green
+
+Use the capacity-fraction thresholds already defined in `config/settings.py`:
+
+```python
+from config.settings import QUARTZ_RED_CAPACITY_FRACTION, QUARTZ_GREEN_CAPACITY_FRACTION
+from config.constants import SOLAR_PV_KW  # or QUARTZ_SITE_CAPACITY_KWP
+
+def _status_from_avg_kw(avg_kw: float) -> str:
+    fraction = avg_kw / SOLAR_PV_KW
+    if fraction < QUARTZ_RED_CAPACITY_FRACTION:   return "Red"    # < 20%
+    if fraction < QUARTZ_GREEN_CAPACITY_FRACTION: return "Amber"  # 20–40%
+    return "Green"                                                 # >= 40%
+```
+
+### Wiring it in
+
+1. Create `weather/providers/myprovider.py` with your class.
+2. In `weather/forecast.py`, import your class and add one branch to `create_solar_forecast_provider()`:
+
+```python
+from weather.providers.myprovider import MyProvider
+
+def create_solar_forecast_provider(logger):
+    ...
+    if FORECAST_PROVIDER == "myprovider":
+        return MyProvider(logger)
+    ...
+```
+
+3. Set `FORECAST_PROVIDER = "myprovider"` in `config/settings.py`.
+
+That is all. The calibration system, decision logic, and email notifications all work unchanged with any provider that satisfies the interface.
+
+### Using your provider as a comparison source
+
+If you want to run your provider in parallel with ESB (for comparison without changing decisions), pass it as the `secondary` or `tertiary` argument to `ComparingSolarForecastProvider` in `create_solar_forecast_provider()`. It will be archived to `data/forecast_comparisons.jsonl` automatically.
 
 ## Tests
 
