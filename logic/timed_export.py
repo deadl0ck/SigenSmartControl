@@ -84,6 +84,7 @@ from config.settings import (
     TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
 from logic.mode_control import ACTION_DIVIDER, extract_mode_value
+from logic.schedule_utils import is_cheap_rate_window
 
 
 ModeChangeApplier = Callable[..., Awaitable[bool]]
@@ -300,6 +301,15 @@ async def start_timed_grid_export(
                     current_mode_raw,
                 )
                 return False
+            # TOU is a night-only mode. If the inverter is in TOU outside the cheap-rate
+            # window (e.g. left over from an overnight Sigen schedule), restoring to it
+            # after a daytime export would leave it in the wrong mode all day.
+            if restore_mode == SIGEN_MODES["TOU"] and not is_cheap_rate_window(now_utc):
+                logger.info(
+                    "[TIMED EXPORT] Current mode is TOU outside cheap-rate window — "
+                    "will restore to SELF_POWERED instead."
+                )
+                restore_mode = SIGEN_MODES["SELF_POWERED"]
             restore_label = str(mode_names.get(restore_mode, restore_mode))
         except Exception as exc:
             logger.warning(
