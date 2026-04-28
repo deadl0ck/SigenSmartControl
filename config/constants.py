@@ -185,3 +185,12 @@ GOOD_DAY_THRESHOLD: Final[float] = 1.5
 
 # Public API endpoint for sunrise/sunset times (see sunrise_sunset.py)
 SUNRISE_SUNSET_API_URL: Final[str] = "https://api.sunrise-sunset.org/json"
+
+# SwitchBot API credentials — obtained from the SwitchBot app under
+# Profile → Preferences → tap the version number several times to reveal developer options.
+SWITCHBOT_TOKEN: Final[str] = os.getenv("SWITCHBOT_TOKEN", "").strip()
+SWITCHBOT_SECRET: Final[str] = os.getenv("SWITCHBOT_SECRET", "").strip()
+
+# SwitchBot device ID for the immersion heater switch.
+# Find it by calling GET https://api.switch-bot.com/v1.1/devices with your credentials.
+SWITCHBOT_IMMERSION_DEVICE_ID: Final[str] = os.getenv("SWITCHBOT_IMMERSION_DEVICE_ID", "").strip()
