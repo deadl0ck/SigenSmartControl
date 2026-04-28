@@ -138,12 +138,14 @@ def compute_esb_forecast(comparisons: list[dict]) -> dict[date, dict[str, str]]:
 
 
 def compute_grid_flows(telemetry: list[dict]) -> dict[date, dict[str, float]]:
-    """Return daily daytime grid import and total grid export in kWh per day.
+    """Return daily grid import, daytime solar export, and night battery export in kWh.
 
     Import is restricted to DAYTIME_HOURS (08:00–22:59) to exclude cheap-rate charging.
-    Export covers all hours.
+    Export is split: daytime (solar-driven) vs night (battery arbitrage, cheap-rate window).
     """
-    flows: dict[date, dict[str, float]] = defaultdict(lambda: {"import": 0.0, "export": 0.0})
+    flows: dict[date, dict[str, float]] = defaultdict(
+        lambda: {"import": 0.0, "export_day": 0.0, "export_night": 0.0}
+    )
     for r in telemetry:
         power = r["energy_flow"].get("buySellPower")
         if power is None:
@@ -154,7 +156,10 @@ def compute_grid_flows(telemetry: list[dict]) -> dict[date, dict[str, float]]:
         if power < 0 and h in DAYTIME_HOURS:
             flows[d]["import"] += abs(power) * TICK_HOURS
         elif power > 0:
-            flows[d]["export"] += power * TICK_HOURS
+            if h in DAYTIME_HOURS:
+                flows[d]["export_day"] += power * TICK_HOURS
+            else:
+                flows[d]["export_night"] += power * TICK_HOURS
     return dict(flows)
 
 
@@ -236,20 +241,26 @@ def main() -> None:
                          fontsize=7, color="white", fontweight="bold", zorder=5)
             fcast_bottom += STRIP_SECTION_H
 
-    # Grid import (daytime) and export lines on primary axis
+    # Grid import and split export lines on primary axis
     import_kwh = [grid_flows.get(d, {}).get("import", 0.0) for d in days]
-    export_kwh = [grid_flows.get(d, {}).get("export", 0.0) for d in days]
+    export_day_kwh = [grid_flows.get(d, {}).get("export_day", 0.0) for d in days]
+    export_night_kwh = [grid_flows.get(d, {}).get("export_night", 0.0) for d in days]
     ax1.plot(prod_centers, import_kwh, color="#ef476f", linewidth=1.5,
-             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid import (daytime kWh)")
-    ax1.plot(prod_centers, export_kwh, color="#06d6a0", linewidth=1.5,
-             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid export (kWh)")
-    for i, (imp, exp) in enumerate(zip(import_kwh, export_kwh)):
+             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid import daytime (kWh)")
+    ax1.plot(prod_centers, export_day_kwh, color="#06d6a0", linewidth=1.5,
+             linestyle="--", marker="o", markersize=5, zorder=6, label="Solar export daytime (kWh)")
+    ax1.plot(prod_centers, export_night_kwh, color="#a8dadc", linewidth=1.5,
+             linestyle=":", marker="s", markersize=5, zorder=6, label="Battery export night (kWh)")
+    for i, (imp, exp_d, exp_n) in enumerate(zip(import_kwh, export_day_kwh, export_night_kwh)):
         if imp > 0.1:
             ax1.text(prod_centers[i], imp + 0.3, f"{imp:.1f}",
                      ha="center", va="bottom", fontsize=7, color="#ef476f", zorder=7)
-        if exp > 0.1:
-            ax1.text(prod_centers[i], exp + 0.3, f"{exp:.1f}",
+        if exp_d > 0.1:
+            ax1.text(prod_centers[i], exp_d + 0.3, f"{exp_d:.1f}",
                      ha="center", va="bottom", fontsize=7, color="#06d6a0", zorder=7)
+        if exp_n > 0.1:
+            ax1.text(prod_centers[i], exp_n + 0.3, f"{exp_n:.1f}",
+                     ha="center", va="bottom", fontsize=7, color="#a8dadc", zorder=7)
 
     # Clipping on secondary axis as scatter markers
     clip_mins = [clipping.get(d, 0) * TICK_MINUTES for d in days]
@@ -276,7 +287,7 @@ def main() -> None:
 
     ax1.set_title("Daily Solar Production by Period — Last 7 Days\n"
                   "Bars: actual kWh (Morn/Aftn/Eve) | Strip: ESB forecast (R/A/G) 'P'=promoted | "
-                  "Lines: grid import (daytime) & export | Dots: clipping minutes",
+                  "Lines: grid import, solar export, battery arbitrage export | Dots: clipping minutes",
                   color="#ffffff", fontsize=11, pad=12)
 
     # Legend
@@ -288,11 +299,13 @@ def main() -> None:
     ]
     import_line = plt.Line2D([0], [0], color="#ef476f", linewidth=1.5, linestyle="--",
                              marker="o", markersize=5, label="Grid import daytime (kWh)")
-    export_line = plt.Line2D([0], [0], color="#06d6a0", linewidth=1.5, linestyle="--",
-                             marker="o", markersize=5, label="Grid export (kWh)")
+    export_day_line = plt.Line2D([0], [0], color="#06d6a0", linewidth=1.5, linestyle="--",
+                                 marker="o", markersize=5, label="Solar export daytime (kWh)")
+    export_night_line = plt.Line2D([0], [0], color="#a8dadc", linewidth=1.5, linestyle=":",
+                                   marker="s", markersize=5, label="Battery export night (kWh)")
     clip_dot = plt.scatter([], [], color="#f77f00", s=60, label="Clipping (min)")
     ax1.legend(
-        handles=prod_patches + fcast_patches + [import_line, export_line, clip_dot],
+        handles=prod_patches + fcast_patches + [import_line, export_day_line, export_night_line, clip_dot],
         facecolor="#16213e", edgecolor="#444466", labelcolor="#e0e0e0",
         fontsize=8, loc="upper left",
     )

@@ -913,8 +913,11 @@ Three equal-height coloured sections show the ESB forecast that was active at th
 **Grid import line (pink dashed, with dots)**
 Daily kWh imported from the grid during daytime hours only (08:00–23:00 by default, controlled by `CHEAP_RATE_END_HOUR` / `CHEAP_RATE_START_HOUR` in settings). Cheap-rate night imports are excluded — those are expected and deliberate.
 
-**Grid export line (mint green dashed, with dots)**
-Daily kWh exported to the grid across all hours. Includes both daytime export windows triggered by the scheduler and any pre-cheap-rate evening export.
+**Solar export line (mint green dashed, with dots)**
+kWh exported to the grid during daytime hours (08:00–23:00). This is surplus solar the battery couldn't absorb, exported when the scheduler opens a GRID_EXPORT window.
+
+**Battery arbitrage export line (light blue dotted, with squares)**
+kWh exported to the grid during cheap-rate hours (23:00–08:00). This is the pre-cheap-rate export strategy: the battery is discharged to grid before the cheap rate opens, then recharged overnight at the lower tariff. Profit = (export rate × kWh exported) − (cheap rate × kWh recharged).
 
 **Clipping markers (orange dots, right axis)**
 Total minutes during the day where the inverter was likely at its output ceiling (5.5 kW). High clipping usually means the battery was full and export wasn't active — the promotion and export logic exists to reduce this.
