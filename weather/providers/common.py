@@ -7,9 +7,7 @@ import logging
 from typing import Protocol, TypeAlias
 
 from config.constants import AMBER_VAL, GOOD_DAY_THRESHOLD, GREEN_VAL
-
-
-DIVIDER = "+" + "-" * 11 + "+" + "-" * 10 + "+" + "-" * 13 + "+" + "-" * 8 + "+"
+from utils.terminal_formatting import render_table
 TableRow: TypeAlias = tuple[str, str, int, str]
 PeriodForecast: TypeAlias = dict[str, tuple[int, str]]
 InverterPlan: TypeAlias = dict[str, str]
@@ -73,38 +71,32 @@ class BaseSolarForecast:
         return 1000
 
     def _log_table(self) -> None:
-        """Print normalized table rows in an ASCII table."""
-        header = f"| {'Day':^9} | {'Period':^8} | {'Solar Value':^11} | {'Status':^6} |"
-        self.logger.info("[FORECAST-TABLE] %s", self.provider_label)
-        self.logger.info(DIVIDER)
-        self.logger.info(header)
-        self.logger.info(DIVIDER)
-
-        previous_day: str | None = None
-        for day, period, value, status in self.table_data:
-            if previous_day and day != previous_day:
-                self.logger.info(DIVIDER)
-            self.logger.info(f"| {day:^9} | {period:^8} | {value:^11} | {status:^6} |")
-            previous_day = day
-
-        self.logger.info(DIVIDER)
+        """Print normalized table rows using box-drawing characters."""
+        rows = [[day, period, str(value), status] for day, period, value, status in self.table_data if period != "Night"]
+        divider_after = {i for i in range(len(rows) - 1) if rows[i][0] != rows[i + 1][0]}
+        table = render_table(
+            ["Day", "Period", "Solar Value", "Status"],
+            rows,
+            title=self.provider_label,
+            divider_after=divider_after,
+        )
+        self.logger.info("[FORECAST-TABLE]")
+        for line in table.splitlines():
+            self.logger.info(line)
 
     def get_todays_solar_values(self) -> list[str]:
         """Return today's daytime statuses as compact codes (R/A/G)."""
         today_day = self._get_today()
         values: list[str] = []
 
-        self.logger.info(
-            "Solar Values for today (%s) [%s]:",
-            today_day,
-            self.provider_label,
-        )
-        self.logger.info(DIVIDER)
+        rows = []
         for day, period, value, status in self.table_data:
             if day == today_day and period != "Night":
-                self.logger.info(f"| {day:^9} | {period:^8} | {value:^11} | {status:^6} |")
+                rows.append([day, period, str(value), status])
                 values.append("G" if status == "Green" else "A" if status == "Amber" else "R")
-        self.logger.info(DIVIDER)
+        title = f"Solar Values for today ({today_day}) [{self.provider_label}]"
+        for line in render_table(["Day", "Period", "Solar Value", "Status"], rows, title=title).splitlines():
+            self.logger.info(line)
         return values
 
     def get_todays_period_forecast(self) -> PeriodForecast:

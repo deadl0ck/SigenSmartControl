@@ -28,19 +28,38 @@ import matplotlib.ticker as ticker
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
+from config.settings import (
+    CHEAP_RATE_END_HOUR,
+    CHEAP_RATE_START_HOUR,
+    FORECAST_ANALYSIS_MORNING_START_HOUR,
+    FORECAST_ANALYSIS_MORNING_END_HOUR,
+    FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
+    FORECAST_ANALYSIS_EVENING_END_HOUR,
+    LOCAL_TIMEZONE,
+)
+
 TELEMETRY_PATH = _ROOT / "data" / "inverter_telemetry.jsonl"
 FORECAST_PATH = _ROOT / "data" / "forecast_comparisons.jsonl"
 EVENTS_PATH = _ROOT / "data" / "mode_change_events.jsonl"
 
-LOCAL_TZ = zoneinfo.ZoneInfo("Europe/Dublin")
+LOCAL_TZ = zoneinfo.ZoneInfo(LOCAL_TIMEZONE)
 TICK_MINUTES = 5
 PERIODS = ("Morn", "Aftn", "Eve")
 
 # pvDayNrg boundary hours in local time: start-of-Morn, Morn/Aftn split, Aftn/Eve split, end-of-Eve
-PERIOD_BOUNDARY_HOURS = (7, 12, 16, 20)
+PERIOD_BOUNDARY_HOURS = (
+    FORECAST_ANALYSIS_MORNING_START_HOUR,
+    FORECAST_ANALYSIS_MORNING_END_HOUR,
+    FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
+    FORECAST_ANALYSIS_EVENING_END_HOUR,
+)
 
 PROD_COLORS = {"Morn": "#f9c74f", "Aftn": "#f3722c", "Eve": "#577590"}
 FORECAST_COLORS = {"Green": "#2a9d8f", "Amber": "#e9c46a", "Red": "#e63946"}
+
+# Hours considered daytime for grid import — excludes cheap-rate window (CHEAP_RATE_START_HOUR–CHEAP_RATE_END_HOUR)
+DAYTIME_HOURS = set(range(CHEAP_RATE_END_HOUR, CHEAP_RATE_START_HOUR))
+TICK_HOURS = TICK_MINUTES / 60
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -118,6 +137,27 @@ def compute_esb_forecast(comparisons: list[dict]) -> dict[date, dict[str, str]]:
     return result
 
 
+def compute_grid_flows(telemetry: list[dict]) -> dict[date, dict[str, float]]:
+    """Return daily daytime grid import and total grid export in kWh per day.
+
+    Import is restricted to DAYTIME_HOURS (08:00–22:59) to exclude cheap-rate charging.
+    Export covers all hours.
+    """
+    flows: dict[date, dict[str, float]] = defaultdict(lambda: {"import": 0.0, "export": 0.0})
+    for r in telemetry:
+        power = r["energy_flow"].get("buySellPower")
+        if power is None:
+            continue
+        power = float(power)
+        d = local_date(r["captured_at"])
+        h = local_hour(r["captured_at"])
+        if power < 0 and h in DAYTIME_HOURS:
+            flows[d]["import"] += abs(power) * TICK_HOURS
+        elif power > 0:
+            flows[d]["export"] += power * TICK_HOURS
+    return dict(flows)
+
+
 def compute_promotions(events: list[dict]) -> dict[date, set[str]]:
     """Return set of promoted period names per day."""
     promoted: dict[date, set[str]] = defaultdict(set)
@@ -139,6 +179,7 @@ def main() -> None:
     clipping = compute_clipping(telemetry)
     forecasts = compute_esb_forecast(comparisons)
     promotions = compute_promotions(events)
+    grid_flows = compute_grid_flows(telemetry)
 
     today = max(production.keys())
     days = [today - timedelta(days=6 - i) for i in range(7)]
@@ -195,6 +236,21 @@ def main() -> None:
                          fontsize=7, color="white", fontweight="bold", zorder=5)
             fcast_bottom += STRIP_SECTION_H
 
+    # Grid import (daytime) and export lines on primary axis
+    import_kwh = [grid_flows.get(d, {}).get("import", 0.0) for d in days]
+    export_kwh = [grid_flows.get(d, {}).get("export", 0.0) for d in days]
+    ax1.plot(prod_centers, import_kwh, color="#ef476f", linewidth=1.5,
+             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid import (daytime kWh)")
+    ax1.plot(prod_centers, export_kwh, color="#06d6a0", linewidth=1.5,
+             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid export (kWh)")
+    for i, (imp, exp) in enumerate(zip(import_kwh, export_kwh)):
+        if imp > 0.1:
+            ax1.text(prod_centers[i], imp + 0.3, f"{imp:.1f}",
+                     ha="center", va="bottom", fontsize=7, color="#ef476f", zorder=7)
+        if exp > 0.1:
+            ax1.text(prod_centers[i], exp + 0.3, f"{exp:.1f}",
+                     ha="center", va="bottom", fontsize=7, color="#06d6a0", zorder=7)
+
     # Clipping on secondary axis as scatter markers
     clip_mins = [clipping.get(d, 0) * TICK_MINUTES for d in days]
     ax2.scatter(range(n), clip_mins, color="#f77f00", s=60, zorder=5, label="Clipping (min)")
@@ -219,7 +275,8 @@ def main() -> None:
     ax2.set_ylim(bottom=0)
 
     ax1.set_title("Daily Solar Production by Period — Last 7 Days\n"
-                  "Bars: actual kWh (Morn/Aftn/Eve) | Strip: ESB forecast (R/A/G) 'P'=promoted | Dots: clipping minutes",
+                  "Bars: actual kWh (Morn/Aftn/Eve) | Strip: ESB forecast (R/A/G) 'P'=promoted | "
+                  "Lines: grid import (daytime) & export | Dots: clipping minutes",
                   color="#ffffff", fontsize=11, pad=12)
 
     # Legend
@@ -229,9 +286,13 @@ def main() -> None:
         mpatches.Patch(color=FORECAST_COLORS["Amber"], label="ESB: Amber"),
         mpatches.Patch(color=FORECAST_COLORS["Red"], label="ESB: Red"),
     ]
+    import_line = plt.Line2D([0], [0], color="#ef476f", linewidth=1.5, linestyle="--",
+                             marker="o", markersize=5, label="Grid import daytime (kWh)")
+    export_line = plt.Line2D([0], [0], color="#06d6a0", linewidth=1.5, linestyle="--",
+                             marker="o", markersize=5, label="Grid export (kWh)")
     clip_dot = plt.scatter([], [], color="#f77f00", s=60, label="Clipping (min)")
     ax1.legend(
-        handles=prod_patches + fcast_patches + [clip_dot],
+        handles=prod_patches + fcast_patches + [import_line, export_line, clip_dot],
         facecolor="#16213e", edgecolor="#444466", labelcolor="#e0e0e0",
         fontsize=8, loc="upper left",
     )

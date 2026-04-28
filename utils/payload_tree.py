@@ -38,8 +38,8 @@ def iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
         items = list(payload.items())
         for index, (key, value) in enumerate(items):
             is_last = index == len(items) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
+            branch = "└─ " if is_last else "├─ "
+            child_prefix = prefix + ("   " if is_last else "│  ")
 
             if isinstance(value, (dict, list)):
                 lines.append(f"{prefix}{branch}{key}:")
@@ -51,8 +51,8 @@ def iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
     if isinstance(payload, list):
         for index, value in enumerate(payload):
             is_last = index == len(payload) - 1
-            branch = "`- " if is_last else "|- "
-            child_prefix = prefix + ("   " if is_last else "|  ")
+            branch = "└─ " if is_last else "├─ "
+            child_prefix = prefix + ("   " if is_last else "│  ")
             label = f"[{index}]"
 
             if isinstance(value, (dict, list)):
@@ -62,7 +62,7 @@ def iter_tree_lines(payload: Any, prefix: str = "") -> list[str]:
                 lines.append(f"{prefix}{branch}{label}: {format_tree_leaf(value)}")
         return lines
 
-    lines.append(f"{prefix}`- {format_tree_leaf(payload)}")
+    lines.append(f"{prefix}└─ {format_tree_leaf(payload)}")
     return lines
 
 

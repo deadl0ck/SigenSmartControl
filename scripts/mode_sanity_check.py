@@ -21,7 +21,7 @@ from config.constants import MODE_CHANGE_EVENTS_ARCHIVE_PATH
 from config.settings import LOCAL_TIMEZONE, SIGEN_MODES
 from integrations.sigen_interaction import SigenInteraction
 from logic.mode_control import extract_mode_value
-from utils.terminal_formatting import ANSI_GREEN, ANSI_RED, colorize_text
+from utils.terminal_formatting import ANSI_GREEN, ANSI_RED, colorize_text, render_table, render_section_header
 
 
 TEST_ONLY_REASONS = {
@@ -112,22 +112,22 @@ def _load_todays_events(
 
 def _print_todays_events(events: list[dict[str, Any]], mode_names: dict[int, str]) -> None:
     """Print today's events in chronological order."""
-    print("\n=== Today's Mode Changes ===")
+    print("\n" + render_section_header("Today's Mode Changes"))
     if not events:
-        print("No mode-change events recorded today.")
+        print("  No mode-change events recorded today.")
         return
 
+    rows = []
     for event in events:
         dt = event["_parsed_captured_at"].astimezone(ZoneInfo(LOCAL_TIMEZONE))
-        time_label = dt.strftime("%H:%M:%S")
-        period = event.get("period", "N/A")
-        mode_text = _format_mode(event, mode_names)
-        success = event.get("success")
-        simulated = event.get("simulated")
-        print(
-            f"- {time_label} | {period:<28} | target={mode_text:<24} "
-            f"| success={success} simulated={simulated}"
-        )
+        rows.append([
+            dt.strftime("%H:%M:%S"),
+            event.get("period", "N/A"),
+            _format_mode(event, mode_names),
+            str(event.get("success", "?")),
+            "yes" if event.get("simulated") else "no",
+        ])
+    print(render_table(["Time", "Period", "Mode", "OK", "Sim"], rows))
 
 
 def _event_mode_value(event: dict[str, Any]) -> int | None:
@@ -178,9 +178,9 @@ def _print_match_check(
     mode_names: dict[int, str],
 ) -> None:
     """Print whether current mode matches a reference event's requested mode."""
-    print(f"\n=== {title} ===")
+    print("\n" + render_section_header(title))
     if event is None:
-        print("No reference event available.")
+        print("  No reference event available.")
         return
 
     event_mode = _event_mode_value(event)
@@ -193,10 +193,13 @@ def _print_match_check(
         else colorize_text("False", ANSI_RED)
     )
 
-    print(f"Reference event period: {event.get('period', 'N/A')}")
-    print(f"Reference event mode:   {event_mode_text}")
-    print(f"Current live mode:      {current_mode_text}")
-    print(f"Match:                  {match_text}")
+    rows = [
+        ["Reference period", event.get("period", "N/A")],
+        ["Reference mode", event_mode_text],
+        ["Current live mode", current_mode_text],
+        ["Match", match_text],
+    ]
+    print(render_table(["Field", "Value"], rows))
 
 
 async def main() -> int:
@@ -226,11 +229,16 @@ async def main() -> int:
 
     _print_todays_events(events, mode_names)
 
-    print("\n=== Current Mode (Live) ===")
+    print("\n" + render_section_header("Current Mode (Live)"))
     try:
         current_mode_value, current_mode_raw = await _fetch_current_mode()
-        print(f"Current mode: {_mode_display(current_mode_value, mode_names)}")
-        print(f"Raw mode payload: {current_mode_raw}")
+        print(render_table(
+            ["Field", "Value"],
+            [
+                ["Current mode", _mode_display(current_mode_value, mode_names)],
+                ["Raw payload", str(current_mode_raw)],
+            ],
+        ))
     except Exception as exc:
         print(f"Failed to fetch current mode: {exc}")
         return 1

@@ -14,7 +14,7 @@ from utils.terminal_formatting import ANSI_PURPLE, colorize_text
 
 logger = logging.getLogger(__name__)
 MODE_NAMES = SIGEN_MODE_NAMES
-ACTION_DIVIDER = "*" * 96
+ACTION_DIVIDER = "─" * 96
 
 
 class SigenPayloadError(Exception):

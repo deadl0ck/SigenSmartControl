@@ -890,8 +890,37 @@ All files under `scripts/` are documented below.
 	- Run: `python scripts/todays_forecast_both.py`
 
 - `scripts/solar_clipping_chart.py`
-	- Generates a stacked bar chart of the last 7 days of solar production split by period (Morn/Aftn/Eve), with an ESB forecast colour strip beside each day, promotion markers (`P`) where Amber was promoted to Green, and clipping duration on a secondary axis. Saves to `data/solar_clipping_last7days.png`.
+	- Generates a stacked bar chart of the last 7 days of solar production and grid flows. See [Solar Clipping Chart](#solar-clipping-chart) below for full details.
 	- Run: `python scripts/solar_clipping_chart.py`
+
+## Solar Clipping Chart
+
+```bash
+python scripts/solar_clipping_chart.py
+# Output: data/solar_clipping_last7days.png
+```
+
+![Solar clipping chart](docs/solar_clipping_last7days.png)
+
+The chart covers the last 7 days and combines four data sources into one view:
+
+**Production bars (left bar per day, stacked)**
+Each day shows a stacked bar split into three coloured segments — Morning (yellow), Afternoon (orange), and Evening (blue) — with the kWh value labelled inside each segment and the daily total above the bar. Production is derived from the cumulative `pvDayNrg` counter in the inverter telemetry, sampled at the period boundary hours defined in `config/settings.py`.
+
+**ESB forecast strip (narrow strip to the right of each bar)**
+Three equal-height coloured sections show the ESB forecast that was active at the start of that day: Green, Amber, or Red. A `P` marker appears in any section where the forecast was promoted from Amber to Green mid-period due to live clipping risk (SOC and live solar both above threshold).
+
+**Grid import line (pink dashed, with dots)**
+Daily kWh imported from the grid during daytime hours only (08:00–23:00 by default, controlled by `CHEAP_RATE_END_HOUR` / `CHEAP_RATE_START_HOUR` in settings). Cheap-rate night imports are excluded — those are expected and deliberate.
+
+**Grid export line (mint green dashed, with dots)**
+Daily kWh exported to the grid across all hours. Includes both daytime export windows triggered by the scheduler and any pre-cheap-rate evening export.
+
+**Clipping markers (orange dots, right axis)**
+Total minutes during the day where the inverter was likely at its output ceiling (5.5 kW). High clipping usually means the battery was full and export wasn't active — the promotion and export logic exists to reduce this.
+
+**Reading the chart together**
+On a good solar day you expect: a tall stacked bar, a Green forecast strip, a low or zero import line, a high export line, and few or no clipping minutes. A day with high clipping and no export dot means the battery hit full without the export window triggering — check the SOC threshold and forecast status for that day.
 
 ## Email Notifications
 

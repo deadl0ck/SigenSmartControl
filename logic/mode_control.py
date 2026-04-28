@@ -15,7 +15,7 @@ from config.settings import (
 )
 
 logger = logging.getLogger(__name__)
-ACTION_DIVIDER = "=" * 100
+ACTION_DIVIDER = "─" * 100
 
 
 def _normalize_mode_label(label: str) -> str:

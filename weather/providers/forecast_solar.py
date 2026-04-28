@@ -115,7 +115,7 @@ class ForecastSolarForecast(BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Forecast.Solar API."""
-        super().__init__(logger, "Forecast.Solar site-level forecast")
+        super().__init__(logger, f"Forecast.Solar ({LATITUDE:.4f}, {LONGITUDE:.4f})")
         self._load_forecast_solar_table()
 
     @staticmethod

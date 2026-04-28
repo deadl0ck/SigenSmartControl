@@ -28,7 +28,7 @@ class QuartzSolarForecast(BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load forecasts from Open Quartz API."""
-        super().__init__(logger, "Quartz site-level forecast")
+        super().__init__(logger, f"Quartz ({LATITUDE:.4f}, {LONGITUDE:.4f})")
         self._load_quartz_table()
 
     @staticmethod

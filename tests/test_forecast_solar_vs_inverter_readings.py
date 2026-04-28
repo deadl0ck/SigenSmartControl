@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from config.settings import LOCAL_TIMEZONE
 from scripts.forecast_solar_vs_inverter_readings import (
     build_forecast_hourly_averages,
     build_inverter_hourly_generation,
@@ -13,7 +14,7 @@ from scripts.forecast_solar_vs_inverter_readings import (
 
 def test_build_inverter_hourly_generation_sums_positive_pvdaynrg_deltas() -> None:
     """Hourly actuals should be the sum of positive cumulative-energy deltas."""
-    local_tz = ZoneInfo("Europe/Dublin")
+    local_tz = ZoneInfo(LOCAL_TIMEZONE)
     target_date = date(2026, 4, 10)
     telemetry_records = [
         {
@@ -49,7 +50,7 @@ def test_build_inverter_hourly_generation_sums_positive_pvdaynrg_deltas() -> Non
 
 def test_build_forecast_hourly_averages_uses_latest_snapshot_only() -> None:
     """Forecast averages should use only the most recent snapshot with target points."""
-    local_tz = ZoneInfo("Europe/Dublin")
+    local_tz = ZoneInfo(LOCAL_TIMEZONE)
     target_date = date(2026, 4, 10)
     forecast_records = [
         {

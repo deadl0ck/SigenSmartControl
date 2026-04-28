@@ -30,7 +30,7 @@ class EsbSolarForecast(BaseSolarForecast):
 
     def __init__(self, logger: logging.Logger) -> None:
         """Initialize provider and load county forecast rows from ESB API."""
-        super().__init__(logger, "ESB county forecast")
+        super().__init__(logger, f"ESB county forecast ({ESB_FORECAST_COUNTY})")
         self._load_esb_api_table(ESB_FORECAST_COUNTY)
 
     @staticmethod
