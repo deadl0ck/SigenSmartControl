@@ -328,9 +328,6 @@ PERIOD_TO_MODE = {
 # Requires SWITCHBOT_TOKEN, SWITCHBOT_SECRET, and SWITCHBOT_IMMERSION_DEVICE_ID in .env.
 SWITCHBOT_IMMERSION_ENABLED = False
 
-# Duration of each boost in minutes. The switch is turned off automatically after this time.
-SWITCHBOT_IMMERSION_BOOST_DURATION_MINUTES = 60
-
 # Battery SOC must be at or above this percentage before a boost is triggered.
 # Set high enough that the boost doesn't leave the battery short for evening self-consumption.
 SWITCHBOT_IMMERSION_MIN_SOC_PERCENT = 80.0

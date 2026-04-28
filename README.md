@@ -1019,10 +1019,9 @@ SWITCHBOT_IMMERSION_DEVICE_ID=your_device_id
 
 ```python
 SWITCHBOT_IMMERSION_ENABLED = True
-SWITCHBOT_IMMERSION_MIN_SOC_PERCENT = 80.0       # trigger SOC floor
-SWITCHBOT_IMMERSION_SOLAR_TRIGGER_KW = 3.0        # minimum live solar kW
-SWITCHBOT_IMMERSION_BOOST_DURATION_MINUTES = 60   # how long to run
-SWITCHBOT_IMMERSION_MAX_BOOSTS_PER_DAY = 1        # daily limit
+SWITCHBOT_IMMERSION_MIN_SOC_PERCENT = 80.0        # trigger SOC floor
+SWITCHBOT_IMMERSION_SOLAR_TRIGGER_KW = 3.0         # minimum live solar kW
+SWITCHBOT_IMMERSION_MAX_BOOSTS_PER_DAY = 1         # daily limit
 SWITCHBOT_IMMERSION_VALID_PERIODS = {"Morn", "Aftn"}
 ```
 
@@ -1035,12 +1034,11 @@ SWITCHBOT_IMMERSION_VALID_PERIODS = {"Morn", "Aftn"}
 Log output uses the `[IMMERSION]` prefix. A successful boost looks like:
 
 ```
-[IMMERSION] Conditions met — SOC=84.2% (≥80.0%), solar=3.45 kW (≥3.0 kW), period=Aftn. Starting 60-minute boost.
-[IMMERSION] Turned ON. Response: {'statusCode': 100, ...}
-...
-[IMMERSION] 60-minute boost complete — turning off.
-[IMMERSION] Turned OFF. Response: {'statusCode': 100, ...}
+[IMMERSION] Conditions met — SOC=84.2% (≥80.0%), solar=3.45 kW (≥3.0 kW), period=Aftn. Triggering boost.
+[IMMERSION] Boost triggered. Response: {'statusCode': 100, ...}
 ```
+
+The heater's built-in one-hour timer handles the cutoff — no turn-off command is sent.
 
 ## Forecast Accuracy Report
 
