@@ -248,7 +248,7 @@ def main() -> None:
     ax1.plot(prod_centers, import_kwh, color="#ef476f", linewidth=1.5,
              linestyle="--", marker="o", markersize=5, zorder=6, label="Grid import daytime (kWh)")
     ax1.plot(prod_centers, export_day_kwh, color="#06d6a0", linewidth=1.5,
-             linestyle="--", marker="o", markersize=5, zorder=6, label="Solar export daytime (kWh)")
+             linestyle="--", marker="o", markersize=5, zorder=6, label="Grid export daytime (kWh)")
     ax1.plot(prod_centers, export_night_kwh, color="#a8dadc", linewidth=1.5,
              linestyle=":", marker="s", markersize=5, zorder=6, label="Battery export night (kWh)")
     for i, (imp, exp_d, exp_n) in enumerate(zip(import_kwh, export_day_kwh, export_night_kwh)):
@@ -287,7 +287,7 @@ def main() -> None:
 
     ax1.set_title("Daily Solar Production by Period — Last 7 Days\n"
                   "Bars: actual kWh (Morn/Aftn/Eve) | Strip: ESB forecast (R/A/G) 'P'=promoted | "
-                  "Lines: grid import, solar export, battery arbitrage export | Dots: clipping minutes",
+                  "Lines: grid import, grid export (daytime), battery arbitrage export (night) | Dots: clipping minutes",
                   color="#ffffff", fontsize=11, pad=12)
 
     # Legend
@@ -300,7 +300,7 @@ def main() -> None:
     import_line = plt.Line2D([0], [0], color="#ef476f", linewidth=1.5, linestyle="--",
                              marker="o", markersize=5, label="Grid import daytime (kWh)")
     export_day_line = plt.Line2D([0], [0], color="#06d6a0", linewidth=1.5, linestyle="--",
-                                 marker="o", markersize=5, label="Solar export daytime (kWh)")
+                                 marker="o", markersize=5, label="Grid export daytime (kWh)")
     export_night_line = plt.Line2D([0], [0], color="#a8dadc", linewidth=1.5, linestyle=":",
                                    marker="s", markersize=5, label="Battery export night (kWh)")
     clip_dot = plt.scatter([], [], color="#f77f00", s=60, label="Clipping (min)")

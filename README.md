@@ -913,8 +913,8 @@ Three equal-height coloured sections show the ESB forecast that was active at th
 **Grid import line (pink dashed, with dots)**
 Daily kWh imported from the grid during daytime hours only (08:00–23:00 by default, controlled by `CHEAP_RATE_END_HOUR` / `CHEAP_RATE_START_HOUR` in settings). Cheap-rate night imports are excluded — those are expected and deliberate.
 
-**Solar export line (mint green dashed, with dots)**
-kWh exported to the grid during daytime hours (08:00–23:00). This is surplus solar the battery couldn't absorb, exported when the scheduler opens a GRID_EXPORT window.
+**Grid export daytime line (mint green dashed, with dots)**
+Total kWh sent to the grid during daytime hours (08:00–23:00) — this is what the smart meter records and what you get paid for. It includes both surplus solar and battery energy discharged during GRID_EXPORT windows. It will be higher than the "solar exported" figure shown in the Sigen app, which tracks energy source attribution rather than total grid flow.
 
 **Battery arbitrage export line (light blue dotted, with squares)**
 kWh exported to the grid during cheap-rate hours (23:00–08:00). This is the pre-cheap-rate export strategy: the battery is discharged to grid before the cheap rate opens, then recharged overnight at the lower tariff. Profit = (export rate × kWh exported) − (cheap rate × kWh recharged).
