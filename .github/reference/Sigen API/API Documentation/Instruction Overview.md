@@ -1,3 +1,0 @@
-Currently, our system supports various commands, such as modifying the energy storage operating mode and issuing battery instructions. For battery commands, Sigenergy supports multiple scenarios to meet different application contexts and personalized requirements.
-
-During operation, parameter settings are crucial. In forced charge or discharge modes, the power must be specified, as the system requires a clear power value to drive the equipment; without specifying the power, the system cannot respond to the command. In other modes, setting the power is not required. For specific usage, please refer to the examples.

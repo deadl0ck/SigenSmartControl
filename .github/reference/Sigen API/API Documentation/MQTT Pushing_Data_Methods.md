@@ -1,6 +1,0 @@
-1. **Periodic Pushing**
-For real-time operation data, the system will push the data regularly according to a set cycle. For example, it will push data such as voltage, current, power, and frequency every minute. The recipient can adjust the subscribed Topics and processing logic as needed to meet actual requirements.
-2. **Change Pushing**
-For rated parameter and system status data, the system will only push the data when there are changes. This can reduce unnecessary data transmission and improve system efficiency. The recipient can promptly obtain information on data changes and make corresponding adjustments.
-3. **Alarm Pushing**
-For alarm information, once a device triggers an alarm, the relevant information will be immediately pushed to the alarm information Topic through the MQTT protocol. This real-time pushing mechanism ensures that the recipient can be informed of the device's abnormal conditions in a timely manner, so as to quickly take countermeasures and ensure the stable operation of the system.
