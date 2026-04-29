@@ -13,7 +13,6 @@
    - [Scheduler and decision thresholds](#scheduler-and-decision-thresholds)
    - [Tariff schedule windows](#tariff-schedule-windows)
    - [Forecast providers](#forecast-providers-esb-primary-forecastsolar-backup-quartz-fallback)
-   - [Adding a new forecast provider](#adding-a-new-forecast-provider)
    - [Mode mappings](#mode-mappings)
    - [Decision order](#final-decision-order-very-important)
 7. [How It Works](#how-it-works)
@@ -405,17 +404,6 @@ Daily bounded calibration is also applied from that telemetry:
 - Changes are deliberately bounded per day so the system cannot swing too far overnight.
 - The rule structure does not self-rewrite. It keeps the existing decision logic with fixed hardware-based headroom targets.
 - Manual rebuild is also available with `python telemetry/forecast_calibration.py`.
-
-### Adding a new forecast provider
-
-The provider interface is intentionally simple — any source that can return a `Red`/`Amber`/`Green` status per period can be wired in. The steps are:
-
-1. Create a class in `weather/providers/` that subclasses `BaseSolarForecast` and implements `get_forecast()`.
-2. Map your timestamps to `Morn`/`Aftn`/`Eve`/`Night` periods using local time.
-3. Normalise your numeric kW output to `Red`/`Amber`/`Green` against your array capacity.
-4. Register the new provider in `weather/forecast.py` and add a `FORECAST_PROVIDER` value for it.
-
-See [Adding a Forecast Provider](#adding-a-forecast-provider) for the full interface definition, worked examples, and wiring instructions.
 
 ### Mode mappings
 
