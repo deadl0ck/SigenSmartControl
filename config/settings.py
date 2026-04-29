@@ -113,6 +113,8 @@ QUARTZ_API_TIMEOUT_SECONDS = 30
 FORECAST_SOLAR_API_TIMEOUT_SECONDS = 30
 # HTTP timeout for sunrise/sunset API requests.
 SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
+# SMTP connection timeout for outbound email notifications.
+EMAIL_SMTP_TIMEOUT_SECONDS = 12
 
 # Quartz normalization thresholds.
 # Quartz period status normalization thresholds as fractions of configured array capacity.
@@ -334,6 +336,8 @@ SWITCHBOT_IMMERSION_MAX_BOOSTS_PER_DAY = 1
 # Periods during which a boost may be triggered. Avoids late-day triggers that
 # would heat water without enough cheap-rate overnight recharge to benefit from.
 SWITCHBOT_IMMERSION_VALID_PERIODS: set[str] = {"Morn", "Aftn"}
+# HTTP timeout for SwitchBot Cloud API requests.
+SWITCHBOT_API_TIMEOUT_SECONDS = 10
 
 # ==============================
 # Data File Paths

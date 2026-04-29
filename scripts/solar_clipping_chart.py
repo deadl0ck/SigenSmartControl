@@ -36,6 +36,7 @@ from config.settings import (
     FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
     FORECAST_ANALYSIS_EVENING_END_HOUR,
     LOCAL_TIMEZONE,
+    POLL_INTERVAL_MINUTES,
 )
 
 TELEMETRY_PATH = _ROOT / "data" / "inverter_telemetry.jsonl"
@@ -43,7 +44,7 @@ FORECAST_PATH = _ROOT / "data" / "forecast_comparisons.jsonl"
 EVENTS_PATH = _ROOT / "data" / "mode_change_events.jsonl"
 
 LOCAL_TZ = zoneinfo.ZoneInfo(LOCAL_TIMEZONE)
-TICK_MINUTES = 5
+TICK_MINUTES = POLL_INTERVAL_MINUTES
 PERIODS = ("Morn", "Aftn", "Eve")
 
 # pvDayNrg boundary hours in local time: start-of-Morn, Morn/Aftn split, Aftn/Eve split, end-of-Eve

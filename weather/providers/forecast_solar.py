@@ -13,6 +13,12 @@ from zoneinfo import ZoneInfo
 import requests
 
 from config.settings import (
+    FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
+    FORECAST_ANALYSIS_AFTERNOON_START_HOUR,
+    FORECAST_ANALYSIS_EVENING_END_HOUR,
+    FORECAST_ANALYSIS_EVENING_START_HOUR,
+    FORECAST_ANALYSIS_MORNING_END_HOUR,
+    FORECAST_ANALYSIS_MORNING_START_HOUR,
     FORECAST_SOLAR_API_TIMEOUT_SECONDS,
     FORECAST_SOLAR_POWER_MULTIPLIER,
     LOCAL_TIMEZONE,
@@ -121,11 +127,11 @@ class ForecastSolarForecast(BaseSolarForecast):
     @staticmethod
     def _period_from_hour(hour_local: int) -> str:
         """Map local hour to project period labels."""
-        if 7 <= hour_local < 12:
+        if FORECAST_ANALYSIS_MORNING_START_HOUR <= hour_local < FORECAST_ANALYSIS_MORNING_END_HOUR:
             return "Morn"
-        if 12 <= hour_local < 16:
+        if FORECAST_ANALYSIS_AFTERNOON_START_HOUR <= hour_local < FORECAST_ANALYSIS_AFTERNOON_END_HOUR:
             return "Aftn"
-        if 16 <= hour_local < 20:
+        if FORECAST_ANALYSIS_EVENING_START_HOUR <= hour_local < FORECAST_ANALYSIS_EVENING_END_HOUR:
             return "Eve"
         return "Night"
 

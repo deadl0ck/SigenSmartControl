@@ -17,9 +17,11 @@ from typing import Any
 
 import aiohttp
 
+from config.settings import SWITCHBOT_API_TIMEOUT_SECONDS
+
 
 SWITCHBOT_API_BASE_URL = "https://api.switch-bot.com/v1.1"
-_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=SWITCHBOT_API_TIMEOUT_SECONDS)
 
 
 def _build_headers(token: str, secret: str) -> dict[str, str]:

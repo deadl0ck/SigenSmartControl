@@ -28,6 +28,12 @@ from config.settings import (
     CALIBRATION_TARGET_MULTIPLIER_MAX,
     CALIBRATION_TARGET_MULTIPLIER_MIN,
     CALIBRATION_WINDOW_DAYS,
+    FORECAST_ANALYSIS_AFTERNOON_END_HOUR,
+    FORECAST_ANALYSIS_AFTERNOON_START_HOUR,
+    FORECAST_ANALYSIS_EVENING_END_HOUR,
+    FORECAST_ANALYSIS_EVENING_START_HOUR,
+    FORECAST_ANALYSIS_MORNING_END_HOUR,
+    FORECAST_ANALYSIS_MORNING_START_HOUR,
     LOCAL_TIMEZONE,
 )
 from config.constants import FORECAST_CALIBRATION_PATH, INVERTER_TELEMETRY_ARCHIVE_PATH
@@ -104,11 +110,11 @@ def _bounded_step(
 def _infer_period_from_local_time(captured_at_local: datetime) -> str | None:
     """Map local wall-clock time into daytime forecast periods."""
     hour = captured_at_local.hour
-    if 7 <= hour < 12:
+    if FORECAST_ANALYSIS_MORNING_START_HOUR <= hour < FORECAST_ANALYSIS_MORNING_END_HOUR:
         return "Morn"
-    if 12 <= hour < 16:
+    if FORECAST_ANALYSIS_AFTERNOON_START_HOUR <= hour < FORECAST_ANALYSIS_AFTERNOON_END_HOUR:
         return "Aftn"
-    if 16 <= hour < 20:
+    if FORECAST_ANALYSIS_EVENING_START_HOUR <= hour < FORECAST_ANALYSIS_EVENING_END_HOUR:
         return "Eve"
     return None
 

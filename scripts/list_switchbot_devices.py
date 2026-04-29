@@ -17,6 +17,7 @@ _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
 from config.constants import SWITCHBOT_SECRET, SWITCHBOT_TOKEN
+from config.settings import SWITCHBOT_API_TIMEOUT_SECONDS
 from integrations.switchbot_interaction import SWITCHBOT_API_BASE_URL, _build_headers
 from utils.terminal_formatting import render_table
 
@@ -34,7 +35,7 @@ async def main() -> int:
         async with session.get(
             url,
             headers=_build_headers(SWITCHBOT_TOKEN, SWITCHBOT_SECRET),
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=SWITCHBOT_API_TIMEOUT_SECONDS),
         ) as resp:
             resp.raise_for_status()
             data = await resp.json()

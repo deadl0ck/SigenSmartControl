@@ -10,6 +10,8 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 
+from config.settings import EMAIL_SMTP_TIMEOUT_SECONDS
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ class EmailSender:
             RuntimeError: If all SMTP connection strategies fail.
         """
         smtp_server = "smtp.gmail.com"
-        timeout_seconds = 12
+        timeout_seconds = EMAIL_SMTP_TIMEOUT_SECONDS
         context = ssl.create_default_context()
 
         msg = EmailMessage()
