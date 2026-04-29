@@ -126,6 +126,12 @@ see exactly what values were used and why each decision was made.
 ```text
 .
 ├── main.py                              # Entry point; wires state, callbacks, and starts the loop
+├── requirements.txt                     # Runtime dependencies
+├── requirements-dev.txt                 # Runtime + test dependencies
+├── start_monitor.sh                     # Start scheduler in background
+├── stop_monitor.sh                      # Stop scheduler
+├── restart_monitor.sh                   # Stop then start scheduler
+├── start_venv.sh                        # Activate virtual environment
 ├── config/
 │   ├── settings.py                      # All tunable thresholds and hardware specs
 │   ├── constants.py                     # Environment-backed location/path constants
@@ -143,27 +149,45 @@ see exactly what values were used and why each decision was made.
 │   ├── night.py                         # Night window handler (TOU, pre-sunrise discharge, pre-cheap-rate export)
 │   ├── timed_export.py                  # Timed grid export state machine (inactive → active → restored)
 │   ├── mode_change.py                   # apply_mode_change (notification, archiving, simulation guard)
-│   └── mode_logging.py                  # Mode status logging helpers
+│   ├── mode_control.py                  # Inverter operational mode management and decision logic
+│   ├── mode_logging.py                  # Mode status logging helpers
+│   ├── inverter_control.py              # Command/write helpers and live-solar sampling
+│   ├── immersion_control.py             # SwitchBot immersion heater boost control
+│   ├── scenario_simulation.py           # Deterministic multi-day scenario generation and evaluation
+│   └── schedule_utils.py               # Period detection and cheap-rate window calculations
 ├── integrations/
 │   ├── sigen_interaction.py             # All Sigen API calls — centralizes mode get/set
 │   ├── sigen_auth.py                    # Lazy-loaded singleton Sigen client from .env credentials
-│   └── sigen_official.py               # Official OpenAPI client (app key/secret auth)
+│   ├── sigen_official.py               # Official OpenAPI client (app key/secret auth)
+│   ├── switchbot_interaction.py         # SwitchBot API client (immersion heater control)
+│   └── tools/
+│       ├── check_api_config.py          # Diagnostic: query current Sigen API mode configuration
+│       └── check_modes.py               # Print all available inverter operational modes
+├── email/
+│   └── email_sender.py                  # Gmail SMTP transport with STARTTLS/SSL fallback
 ├── weather/
 │   ├── forecast.py                      # Provider selection and comparison facade
 │   ├── providers/
 │   │   ├── esb.py                       # ESB county API provider (primary decision source)
 │   │   ├── forecast_solar.py            # Forecast.Solar provider (comparison)
 │   │   ├── quartz.py                    # Quartz provider (comparison)
-│   │   ├── comparison.py               # Side-by-side provider comparison and archiving
-│   │   └── common.py                    # Shared provider interfaces and base behavior
+│   │   ├── comparison.py                # Side-by-side provider comparison and archiving
+│   │   └── common.py                    # Shared provider interfaces and base behaviour
 │   └── sunrise_sunset.py               # Sunrise/sunset lookup for period window derivation
 ├── telemetry/
 │   ├── telemetry_archive.py             # Inverter snapshot archiving and field extraction
 │   └── forecast_calibration.py          # Daily bounded calibration from telemetry
 ├── notifications/
 │   ├── email_notifications.py           # Mode-change email formatting and sending
-│   └── notification_email_helpers.py   # Startup email and shared notification helpers
-├── scripts/                             # Analysis and diagnostic scripts (see Scripts Reference)
+│   └── notification_email_helpers.py    # Startup email and shared notification helpers
+├── utils/
+│   ├── logging_formatters.py            # Colour log formatter
+│   ├── payload_tree.py                  # Debug helper: log nested API payload as a tree
+│   ├── sensitive_values.py              # Mask credentials in log output
+│   └── terminal_formatting.py          # ANSI colours, tables, and section headers
+├── scripts/                             # Analysis, diagnostic, and utility scripts
+│   ├── install_handoff_timer.sh         # Install systemd timer for session handoff snapshots
+│   └── update_handoff_snapshot.sh       # Write docs/session-handoff-auto.md snapshot
 └── tests/                               # Pytest test suite
 ```
 
@@ -187,8 +211,8 @@ pip install -r requirements-dev.txt
 ```ini
 SIGEN_USERNAME=your_sigen_email
 SIGEN_PASSWORD=your_sigen_password
-SIGEN_LATITUDE=53.3498
-SIGEN_LONGITUDE=-6.2603
+SIGEN_LATITUDE=your_latitude
+SIGEN_LONGITUDE=your_longitude
 EMAIL_SENDER=your_sender@gmail.com
 EMAIL_RECEIVER=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=your_gmail_app_password

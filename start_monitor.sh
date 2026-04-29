@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd /home/martin/git/SigenSmartControl
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 LOCK_FILE=".monitor.pid"
 LOG_FILE="monitor.log"
