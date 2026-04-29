@@ -24,3 +24,10 @@ logs/
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Runtime files
+.monitor.pid
+monitor.log
+resume_last_session.txt
+REFACTORING.md
+REVIEW_TASKS.md

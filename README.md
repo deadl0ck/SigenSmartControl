@@ -8,18 +8,38 @@
 4. [Key Files](#key-files)
 5. [Setup](#setup)
 6. [Configuration](#configuration)
+   - [Hardware](#hardware)
+   - [Portability](#portability)
+   - [Scheduler and decision thresholds](#scheduler-and-decision-thresholds)
+   - [Tariff schedule windows](#tariff-schedule-windows)
+   - [Forecast providers](#forecast-providers-esb-primary-forecastsolar-backup-quartz-fallback)
+   - [Mode mappings](#mode-mappings)
+   - [Decision order](#final-decision-order-very-important)
 7. [How It Works](#how-it-works)
+   - [Scheduler State Machine](#scheduler-state-machine)
+   - [Battery headroom calculation](#battery-headroom-calculation)
+   - [Export-to-grid rules](#export-to-grid-rules)
+   - [Night behavior](#night-behavior)
+   - [Full simulation mode](#full-simulation-mode-dry-run)
 8. [Scheduler Behavior](#scheduler-behavior)
 9. [Night Mode and TOU Strategy](#night-mode-and-tou-strategy)
+   - [Overnight sequence](#overnight-sequence)
+   - [Example strategy](#example-strategy-the-setup-this-project-was-built-for)
 10. [Logging](#logging)
+    - [Mode-change event archive](#mode-change-event-archive)
 11. [Mode Test Utility](#mode-test-utility)
-12. [Email Notifications](#email-notifications)
-13. [Forecast Accuracy Report](#forecast-accuracy-report)
-14. [Adding a Forecast Provider](#adding-a-forecast-provider)
-15. [Tests](#tests)
-16. [Session Handoff Recovery](#session-handoff-recovery)
-17. [Recent Updates](#recent-updates)
-18. [Notes](#notes)
+12. [Scripts Reference](#scripts-reference)
+13. [Solar Clipping Chart](#solar-clipping-chart)
+14. [Email Notifications](#email-notifications)
+15. [Immersion Heater Control (SwitchBot)](#immersion-heater-control-switchbot) *(optional)*
+    - [How it works](#how-it-works-1)
+    - [Setup](#setup-1)
+16. [Forecast Accuracy Report](#forecast-accuracy-report)
+17. [Adding a Forecast Provider](#adding-a-forecast-provider)
+18. [Tests](#tests)
+19. [Session Handoff Recovery](#session-handoff-recovery)
+20. [Recent Updates](#recent-updates)
+21. [Notes](#notes)
 
 ## Overview
 
@@ -106,6 +126,12 @@ see exactly what values were used and why each decision was made.
 ```text
 .
 ├── main.py                              # Entry point; wires state, callbacks, and starts the loop
+├── requirements.txt                     # Runtime dependencies
+├── requirements-dev.txt                 # Runtime + test dependencies
+├── start_monitor.sh                     # Start scheduler in background
+├── stop_monitor.sh                      # Stop scheduler
+├── restart_monitor.sh                   # Stop then start scheduler
+├── start_venv.sh                        # Activate virtual environment
 ├── config/
 │   ├── settings.py                      # All tunable thresholds and hardware specs
 │   ├── constants.py                     # Environment-backed location/path constants
@@ -123,27 +149,45 @@ see exactly what values were used and why each decision was made.
 │   ├── night.py                         # Night window handler (TOU, pre-sunrise discharge, pre-cheap-rate export)
 │   ├── timed_export.py                  # Timed grid export state machine (inactive → active → restored)
 │   ├── mode_change.py                   # apply_mode_change (notification, archiving, simulation guard)
-│   └── mode_logging.py                  # Mode status logging helpers
+│   ├── mode_control.py                  # Inverter operational mode management and decision logic
+│   ├── mode_logging.py                  # Mode status logging helpers
+│   ├── inverter_control.py              # Command/write helpers and live-solar sampling
+│   ├── immersion_control.py             # SwitchBot immersion heater boost control
+│   ├── scenario_simulation.py           # Deterministic multi-day scenario generation and evaluation
+│   └── schedule_utils.py               # Period detection and cheap-rate window calculations
 ├── integrations/
 │   ├── sigen_interaction.py             # All Sigen API calls — centralizes mode get/set
 │   ├── sigen_auth.py                    # Lazy-loaded singleton Sigen client from .env credentials
-│   └── sigen_official.py               # Official OpenAPI client (app key/secret auth)
+│   ├── sigen_official.py               # Official OpenAPI client (app key/secret auth)
+│   ├── switchbot_interaction.py         # SwitchBot API client (immersion heater control)
+│   └── tools/
+│       ├── check_api_config.py          # Diagnostic: query current Sigen API mode configuration
+│       └── check_modes.py               # Print all available inverter operational modes
+├── email/
+│   └── email_sender.py                  # Gmail SMTP transport with STARTTLS/SSL fallback
 ├── weather/
 │   ├── forecast.py                      # Provider selection and comparison facade
 │   ├── providers/
 │   │   ├── esb.py                       # ESB county API provider (primary decision source)
 │   │   ├── forecast_solar.py            # Forecast.Solar provider (comparison)
 │   │   ├── quartz.py                    # Quartz provider (comparison)
-│   │   ├── comparison.py               # Side-by-side provider comparison and archiving
-│   │   └── common.py                    # Shared provider interfaces and base behavior
+│   │   ├── comparison.py                # Side-by-side provider comparison and archiving
+│   │   └── common.py                    # Shared provider interfaces and base behaviour
 │   └── sunrise_sunset.py               # Sunrise/sunset lookup for period window derivation
 ├── telemetry/
 │   ├── telemetry_archive.py             # Inverter snapshot archiving and field extraction
 │   └── forecast_calibration.py          # Daily bounded calibration from telemetry
 ├── notifications/
 │   ├── email_notifications.py           # Mode-change email formatting and sending
-│   └── notification_email_helpers.py   # Startup email and shared notification helpers
-├── scripts/                             # Analysis and diagnostic scripts (see Scripts Reference)
+│   └── notification_email_helpers.py    # Startup email and shared notification helpers
+├── utils/
+│   ├── logging_formatters.py            # Colour log formatter
+│   ├── payload_tree.py                  # Debug helper: log nested API payload as a tree
+│   ├── sensitive_values.py              # Mask credentials in log output
+│   └── terminal_formatting.py          # ANSI colours, tables, and section headers
+├── scripts/                             # Analysis, diagnostic, and utility scripts
+│   ├── install_handoff_timer.sh         # Install systemd timer for session handoff snapshots
+│   └── update_handoff_snapshot.sh       # Write docs/session-handoff-auto.md snapshot
 └── tests/                               # Pytest test suite
 ```
 
@@ -167,8 +211,8 @@ pip install -r requirements-dev.txt
 ```ini
 SIGEN_USERNAME=your_sigen_email
 SIGEN_PASSWORD=your_sigen_password
-SIGEN_LATITUDE=53.3498
-SIGEN_LONGITUDE=-6.2603
+SIGEN_LATITUDE=your_latitude
+SIGEN_LONGITUDE=your_longitude
 EMAIL_SENDER=your_sender@gmail.com
 EMAIL_RECEIVER=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=your_gmail_app_password
@@ -977,6 +1021,8 @@ python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason
 
 ## Immersion Heater Control (SwitchBot)
 
+*The poor man's Eddi.*
+
 The scheduler can trigger a timed hot-water boost via a SwitchBot plug switch when solar generation is strong and the battery is well-charged. This consumes surplus renewable energy locally rather than exporting it.
 
 ### How it works
@@ -988,11 +1034,13 @@ Each scheduler tick (every 5 minutes), the immersion logic checks:
 3. **Active period is allowed** (default: Morn or Aftn) — avoids late-evening triggers.
 4. **Daily boost limit not reached** (default: 1 per day).
 
-If all conditions are met, it turns the switch on. After the configured duration (default 60 minutes) it turns it off automatically — no manual intervention needed.
+If all conditions are met, it sends a single **turn-on** command to the SwitchBot switch. No turn-off command is needed — the immersion heater's built-in boost mode runs for one hour and then cuts out automatically.
 
 The feature is fully simulation-mode aware: when `FULL_SIMULATION_MODE = True` in `config/settings.py`, commands are logged but not sent to the SwitchBot API.
 
 ### Setup
+
+**Hardware required:** a [SwitchBot Bot](https://www.switch-bot.com/products/switchbot-bot) (the button-presser that physically triggers the immersion boost switch). One Bot per immersion heater. No wiring — it clamps onto the existing boost button.
 
 **1. Get your SwitchBot API credentials**
 
@@ -1037,6 +1085,8 @@ Log output uses the `[IMMERSION]` prefix. A successful boost looks like:
 [IMMERSION] Conditions met — SOC=84.2% (≥80.0%), solar=3.45 kW (≥3.0 kW), period=Aftn. Triggering boost.
 [IMMERSION] Boost triggered. Response: {'statusCode': 100, ...}
 ```
+
+**Automatic cutoff**
 
 The heater's built-in one-hour timer handles the cutoff — no turn-off command is sent.
 
