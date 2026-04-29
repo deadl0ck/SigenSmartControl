@@ -139,11 +139,14 @@ async def fetch_soc(
         logger.info(
             f"[{period}] SOC: {simulated_soc_percent}% (simulated; inverter unavailable in dry-run mode)"
         )
+        state.last_known_soc = simulated_soc_percent
         return simulated_soc_percent
     try:
         energy_flow: dict[str, Any] = await sigen.get_energy_flow()
         soc = energy_flow.get("batterySoc")
         logger.info(f"[{period}] SOC: {soc}%")
+        if soc is not None:
+            state.last_known_soc = float(soc)
         return soc
     except SigenPayloadError as exc:
         logger.error("[%s] Inverter payload error fetching SOC — skipping tick: %s", period, exc)

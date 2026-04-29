@@ -32,6 +32,8 @@ from logic.schedule_utils import (
 from weather.providers.forecast_solar import archive_forecast_solar_snapshot
 from telemetry.forecast_calibration import get_period_calibration
 from config.enums import Period
+from config.settings import SWITCHBOT_IMMERSION_ENABLED
+from logic.immersion_control import check_immersion_boost
 from config.settings import (
     POLL_INTERVAL_MINUTES,
     FORECAST_REFRESH_INTERVAL_MINUTES,
@@ -252,6 +254,35 @@ class SchedulerCoordinator:
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
         return True
 
+    def _get_active_period(self, now: datetime) -> str | None:
+        """Return the name of the currently active daytime period, or None.
+
+        Walks ordered_period_windows in reverse and returns the first period
+        whose start time has elapsed.
+        """
+        active = None
+        for period, start in self.state.ordered_period_windows:
+            if now >= start:
+                active = period
+        return active
+
+    async def _check_immersion_boost(self, now: datetime, today: date) -> None:
+        """Evaluate immersion heater boost conditions and act if appropriate."""
+        if not SWITCHBOT_IMMERSION_ENABLED:
+            return
+        from zoneinfo import ZoneInfo
+        from config.settings import LOCAL_TIMEZONE
+        today_local = now.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date()
+        await check_immersion_boost(
+            immersion_state=self.state.immersion_state,
+            now_utc=now,
+            today_local=today_local,
+            soc_percent=self.state.last_known_soc,
+            live_solar_avg_kw=self._get_live_solar_avg(),
+            active_period=self._get_active_period(now),
+            logger=self.logger,
+        )
+
     async def _process_period_windows(self, now: datetime, today: date) -> None:
         """Evaluate the night window or each daytime period handler for this tick."""
         if (
@@ -367,9 +398,11 @@ class SchedulerCoordinator:
             await sample_live_solar_power(self.state, now, self.sigen, self.logger)
 
             if await self._check_timed_export_active(now):
+                await self._check_immersion_boost(now, today)
                 continue
 
             await self._process_period_windows(now, today)
+            await self._check_immersion_boost(now, today)
 
             self.logger.info(
                 "[SCHEDULER] Tick mode-change summary: attempted=%s successful=%s failed=%s",

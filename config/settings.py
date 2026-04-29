@@ -322,6 +322,28 @@ PERIOD_TO_MODE = {
 # from config.settings import SIGEN_MODES, FORECAST_TO_MODE, PERIOD_TO_MODE
 
 # ==============================
+# SwitchBot Immersion Heater
+# ==============================
+# Master enable for the immersion heater boost feature.
+# Requires SWITCHBOT_TOKEN, SWITCHBOT_SECRET, and SWITCHBOT_IMMERSION_DEVICE_ID in .env.
+SWITCHBOT_IMMERSION_ENABLED = False
+
+# Battery SOC must be at or above this percentage before a boost is triggered.
+# Set high enough that the boost doesn't leave the battery short for evening self-consumption.
+SWITCHBOT_IMMERSION_MIN_SOC_PERCENT = 80.0
+
+# Rolling average live solar must be at or above this kW to trigger a boost.
+# Ensures the panels are genuinely generating surplus before heating water.
+SWITCHBOT_IMMERSION_SOLAR_TRIGGER_KW = 3.0
+
+# Maximum number of boost cycles per calendar day. One is usually enough.
+SWITCHBOT_IMMERSION_MAX_BOOSTS_PER_DAY = 1
+
+# Periods during which a boost may be triggered. Avoids late-day triggers that
+# would heat water without enough cheap-rate overnight recharge to benefit from.
+SWITCHBOT_IMMERSION_VALID_PERIODS: set[str] = {"Morn", "Aftn"}
+
+# ==============================
 # Data File Paths
 # ==============================
 # Paths are relative to the project root directory.

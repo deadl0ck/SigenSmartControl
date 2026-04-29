@@ -243,6 +243,7 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                     period=PERIOD, reason=mid_period_reason,
                     duration_minutes=mid_period_duration_minutes,
                     now_utc=now_utc, battery_soc=mid_period_soc, is_clipping_export=True,
+                    export_soc_floor=DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
                 )
                 if mid_period_override_started:
                     return True

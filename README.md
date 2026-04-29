@@ -172,6 +172,11 @@ SIGEN_LONGITUDE=-6.2603
 EMAIL_SENDER=your_sender@gmail.com
 EMAIL_RECEIVER=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=your_gmail_app_password
+
+# Optional — SwitchBot immersion heater (see Immersion Heater section below)
+SWITCHBOT_TOKEN=your_switchbot_token
+SWITCHBOT_SECRET=your_switchbot_secret
+SWITCHBOT_IMMERSION_DEVICE_ID=your_device_id
 ```
 
 4. Edit `config/settings.py` for your hardware and scheduler settings.
@@ -969,6 +974,71 @@ Optional arguments:
 ```sh
 python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason "Testing email path"
 ```
+
+## Immersion Heater Control (SwitchBot)
+
+The scheduler can trigger a timed hot-water boost via a SwitchBot plug switch when solar generation is strong and the battery is well-charged. This consumes surplus renewable energy locally rather than exporting it.
+
+### How it works
+
+Each scheduler tick (every 5 minutes), the immersion logic checks:
+
+1. **SOC ≥ threshold** (default 80%) — battery is full enough that the boost won't leave it short for evening self-consumption.
+2. **Live solar ≥ trigger** (default 3.0 kW rolling average) — panels are genuinely generating surplus.
+3. **Active period is allowed** (default: Morn or Aftn) — avoids late-evening triggers.
+4. **Daily boost limit not reached** (default: 1 per day).
+
+If all conditions are met, it turns the switch on. After the configured duration (default 60 minutes) it turns it off automatically — no manual intervention needed.
+
+The feature is fully simulation-mode aware: when `FULL_SIMULATION_MODE = True` in `config/settings.py`, commands are logged but not sent to the SwitchBot API.
+
+### Setup
+
+**1. Get your SwitchBot API credentials**
+
+In the SwitchBot app: Profile → Preferences → tap the app version number several times until developer options appear. Copy the **token** and **secret**.
+
+**2. Find your device ID**
+
+```bash
+curl -s -H "Authorization: YOUR_TOKEN" \
+     https://api.switch-bot.com/v1.1/devices | python3 -m json.tool
+```
+
+Look for your plug/switch in the `deviceList` and copy its `deviceId`.
+
+**3. Add to `.env`**
+
+```ini
+SWITCHBOT_TOKEN=your_token
+SWITCHBOT_SECRET=your_secret
+SWITCHBOT_IMMERSION_DEVICE_ID=your_device_id
+```
+
+**4. Enable and tune in `config/settings.py`**
+
+```python
+SWITCHBOT_IMMERSION_ENABLED = True
+SWITCHBOT_IMMERSION_MIN_SOC_PERCENT = 80.0        # trigger SOC floor
+SWITCHBOT_IMMERSION_SOLAR_TRIGGER_KW = 3.0         # minimum live solar kW
+SWITCHBOT_IMMERSION_MAX_BOOSTS_PER_DAY = 1         # daily limit
+SWITCHBOT_IMMERSION_VALID_PERIODS = {"Morn", "Aftn"}
+```
+
+**5. Restart the monitor**
+
+```bash
+./restart_monitor.sh
+```
+
+Log output uses the `[IMMERSION]` prefix. A successful boost looks like:
+
+```
+[IMMERSION] Conditions met — SOC=84.2% (≥80.0%), solar=3.45 kW (≥3.0 kW), period=Aftn. Triggering boost.
+[IMMERSION] Boost triggered. Response: {'statusCode': 100, ...}
+```
+
+The heater's built-in one-hour timer handles the cutoff — no turn-off command is sent.
 
 ## Forecast Accuracy Report
 

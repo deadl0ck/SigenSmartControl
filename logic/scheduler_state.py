@@ -73,6 +73,8 @@ class SchedulerState:
         tick_mode_change_successes: Count of successful mode-changes in the current tick.
         tick_mode_change_failures: Count of failed mode-changes in the current tick.
         sleep_override_seconds: Override sleep duration in seconds, or None for normal polling.
+        last_known_soc: Most recent battery SOC percentage fetched this session, or None.
+        immersion_state: Daily boost counter for the SwitchBot immersion heater (boosts_today, last_boost_date).
     """
 
     current_date: date
@@ -104,3 +106,8 @@ class SchedulerState:
     tick_mode_change_successes: int = 0
     tick_mode_change_failures: int = 0
     sleep_override_seconds: int | None = None
+    last_known_soc: float | None = None
+    immersion_state: dict[str, Any] = field(default_factory=lambda: {
+        "boosts_today": 0,
+        "last_boost_date": None,
+    })
