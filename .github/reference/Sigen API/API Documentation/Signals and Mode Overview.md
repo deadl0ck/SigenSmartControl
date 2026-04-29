@@ -1,1 +1,0 @@
-The Openapi system offers ample flexibility to accommodate various signals, instruction modes, and alarm types. Here are some examples supported by Openapi. Additionally, there are detailed introductions to energy storage operation modes below.

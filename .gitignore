@@ -25,6 +25,9 @@ logs/
 .claude/
 CLAUDE.md
 
+# Local reference docs
+.github/
+
 # Runtime files
 .monitor.pid
 monitor.log
