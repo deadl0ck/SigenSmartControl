@@ -997,6 +997,8 @@ python scripts/test_mode_change_email.py --mode 1 --period "ManualTest" --reason
 
 ## Immersion Heater Control (SwitchBot)
 
+*The poor man's Eddi.*
+
 The scheduler can trigger a timed hot-water boost via a SwitchBot plug switch when solar generation is strong and the battery is well-charged. This consumes surplus renewable energy locally rather than exporting it.
 
 ### How it works
@@ -1008,11 +1010,13 @@ Each scheduler tick (every 5 minutes), the immersion logic checks:
 3. **Active period is allowed** (default: Morn or Aftn) — avoids late-evening triggers.
 4. **Daily boost limit not reached** (default: 1 per day).
 
-If all conditions are met, it turns the switch on. After the configured duration (default 60 minutes) it turns it off automatically — no manual intervention needed.
+If all conditions are met, it sends a single **turn-on** command to the SwitchBot switch. No turn-off command is needed — the immersion heater's built-in boost mode runs for one hour and then cuts out automatically.
 
 The feature is fully simulation-mode aware: when `FULL_SIMULATION_MODE = True` in `config/settings.py`, commands are logged but not sent to the SwitchBot API.
 
 ### Setup
+
+**Hardware required:** a [SwitchBot Bot](https://www.switch-bot.com/products/switchbot-bot) (the button-presser that physically triggers the immersion boost switch). One Bot per immersion heater. No wiring — it clamps onto the existing boost button.
 
 **1. Get your SwitchBot API credentials**
 
