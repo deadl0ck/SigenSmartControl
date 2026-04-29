@@ -20,3 +20,7 @@ data/forecast_comparisons.jsonl
 data/inverter_telemetry.jsonl
 data/forecast_calibration.json
 logs/
+
+# Claude Code
+.claude/
+CLAUDE.md
