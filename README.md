@@ -1062,6 +1062,8 @@ Log output uses the `[IMMERSION]` prefix. A successful boost looks like:
 [IMMERSION] Boost triggered. Response: {'statusCode': 100, ...}
 ```
 
+**Automatic cutoff**
+
 The heater's built-in one-hour timer handles the cutoff — no turn-off command is sent.
 
 ## Forecast Accuracy Report
