@@ -17,8 +17,12 @@ env/
 .coverage
 .vscode/settings.json
 data/forecast_comparisons.jsonl
+data/forecast_solar_readings.jsonl
 data/inverter_telemetry.jsonl
+data/mode_change_events.jsonl
 data/forecast_calibration.json
+data/timed_export_state.json
+data/solar_clipping_last7days.png
 logs/
 
 # Claude Code
