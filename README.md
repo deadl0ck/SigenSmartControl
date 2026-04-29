@@ -324,7 +324,6 @@ Meaning:
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
 - `FORECAST_PROVIDER`: active provider (`esb_api`, `forecast_solar`, or `quartz`)
 - `ESB_FORECAST_COUNTY`: county name used for ESB county API lookup (e.g., `Westmeath`)
-- `ESB_FORECAST_API_URL`: derived ESB endpoint for selected county id
 - `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity

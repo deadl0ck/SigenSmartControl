@@ -111,18 +111,6 @@ ESB_FORECAST_API_SUBSCRIPTION_KEY: Final[str] = os.getenv(
 ).strip()
 
 _county_lookup = {name.lower(): county_id for name, county_id in ESB_COUNTY_ID_MAP.items()}
-ESB_FORECAST_COUNTY_ID: Final[int] = _county_lookup.get(
-    ESB_FORECAST_COUNTY.lower(),
-    ESB_COUNTY_ID_MAP["Westmeath"],
-)
-# URL for the configured ESB forecast county (derived from ESB_COUNTY_ID_MAP).
-ESB_FORECAST_API_URL: Final[str] = (
-    f"{ESB_FORECAST_API_BASE_URL.rstrip('/')}"
-    f"{ESB_FORECAST_API_ENDPOINT}/{ESB_FORECAST_COUNTY_ID}"
-)
-
-# Legacy CSV endpoint (kept for reference/backward compatibility only).
-MET_IE_FORECAST_CUR: Final[str] = "https://www.esbnetworks.ie/docs/default-source/dso/dso-renewableforecast-wind-solar.csv"
 
 # Optional Open Quartz provider settings.
 QUARTZ_FORECAST_API_URL: Final[str] = os.getenv(
@@ -178,7 +166,6 @@ FORECAST_SOLAR_ARCHIVE_PATH: Final[str] = os.getenv(
 ).strip()
 
 # Numeric weights used to score whether the day is considered good for solar.
-RED_VAL: Final[int] = 0
 AMBER_VAL: Final[float] = 0.5
 GREEN_VAL: Final[int] = 1
 GOOD_DAY_THRESHOLD: Final[float] = 1.5

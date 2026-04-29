@@ -125,11 +125,6 @@ QUARTZ_RED_CAPACITY_FRACTION = 0.20
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
 
 # Telemetry clipping heuristics.
-# Telemetry clipping heuristics.
-# Primary clipping trigger when solar power is within this margin of inverter ceiling.
-CLIPPING_PRIMARY_NEAR_CEILING_MARGIN_KW = 0.1
-# Secondary clipping trigger margin requiring corroborating signals.
-CLIPPING_SECONDARY_NEAR_CEILING_MARGIN_KW = 0.3
 # Battery SOC threshold considered "high" for clipping confidence.
 CLIPPING_BATTERY_SOC_HIGH_PERCENT = 95.0
 # Absolute battery power threshold considered near-zero battery absorb/discharge.
@@ -187,9 +182,6 @@ CHEAP_RATE_END_HOUR = 8
 # ==============================
 # Decision Thresholds
 # ==============================
-# Surplus solar capacity that cannot be stored when the inverter is at its AC ceiling.
-# This is the energy that would be clipped if the battery were already full.
-SURPLUS_CAPACITY_KW = SOLAR_PV_KW - INVERTER_KW  # e.g. 8.9 - 5.5 = 3.4 kW
 # Target free battery headroom before a Green period: 50% of total battery capacity.
 HEADROOM_TARGET_KWH = BATTERY_KWH * 0.5  # e.g. 24 × 0.5 = 12.0 kWh
 # Alternative physics-based formula: (SOLAR_PV_KW - INVERTER_KW) * 3 = surplus kW × 3 h reserve.
