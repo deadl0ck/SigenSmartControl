@@ -63,6 +63,11 @@ FULL_SIMULATION_MODE = False
 # Maximum allowed duration for timed grid export override (minutes) — prevents accidental
 # over-discharge or excessive grid arbitrage cycles.
 MAX_TIMED_EXPORT_MINUTES = 240
+# Mode-change retry behaviour.
+# Number of additional attempts after an initial failure (0 = no retries).
+MODE_CHANGE_RETRY_ATTEMPTS = 3
+# Seconds to wait between retry attempts.
+MODE_CHANGE_RETRY_DELAY_SECONDS = 120
 # Minutes to block a new timed export after a restore completes, preventing
 # the inverter from oscillating between self-consumption and grid-export on
 # consecutive ticks immediately after a restore.
