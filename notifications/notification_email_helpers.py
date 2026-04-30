@@ -73,6 +73,8 @@ async def notify_startup_email(
     mode_names: dict[int, str],
     event_time_utc: datetime,
     logger: logging.Logger,
+    zappi_status: dict[str, Any] | None = None,
+    zappi_daily: dict[str, Any] | None = None,
 ) -> None:
     """Send a startup email with current mode, SOC, and recent transition summary.
 
@@ -84,6 +86,8 @@ async def notify_startup_email(
         mode_names: Mapping from mode value to human-readable mode label.
         event_time_utc: Startup timestamp in UTC.
         logger: Logger instance used for status/error output.
+        zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
+        zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
     """
     sender = _get_email_sender_instance()
     if sender is None:
@@ -110,6 +114,7 @@ async def notify_startup_email(
         f"SOC {soc_text} • Solar Today {today_solar_text}"
     )
     forecast_text, forecast_html = _build_today_forecast_email_sections(today_period_forecast)
+    zappi_text, zappi_html = _build_zappi_email_sections(zappi_status, zappi_daily)
 
     now_local = event_time_utc.astimezone(LOCAL_TZ)
     previous_2230 = (now_local - timedelta(days=1)).replace(
@@ -163,7 +168,8 @@ async def notify_startup_email(
         f"Battery SOC: {soc_text}\n\n"
         f"Solar Produced Today: {today_solar_text}\n\n"
         f"{forecast_text}\n"
-        "Transitions Since 10:30 PM\n"
+        + (f"{zappi_text}\n" if zappi_text else "")
+        + "Transitions Since 10:30 PM\n"
         "---------------------------\n"
         f"{timeline_text}\n"
     )
@@ -206,6 +212,7 @@ async def notify_startup_email(
                     </tr>
                 </table>
                 {forecast_html}
+                {zappi_html}
                 {timeline_html}
             </div>
         </div>
