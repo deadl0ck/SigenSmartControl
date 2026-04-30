@@ -98,24 +98,28 @@ class ZappiInteraction:
         """
         records = await self._client.get_daily_history(target_date)
         if not records:
-            return {"total_kwh": 0.0, "diverted_kwh": 0.0, "boosted_kwh": 0.0}
+            return {"total_kwh": 0.0, "diverted_kwh": 0.0, "boosted_kwh": 0.0, "grid_imported_kwh": 0.0}
 
         # myenergi history API returns energy values in joules.
         # Divide by 3,600,000 to convert to kWh.
         # h1d = solar energy diverted to EV; h1b = grid energy boosted to EV.
-        # imp = total site grid import — NOT EV-specific, excluded here.
+        # imp = total site grid import (whole-house, not EV-specific).
         total_div_j = 0
         total_boost_j = 0
+        total_import_j = 0
         for record in records:
             total_div_j += int(record.get("h1d", 0) or 0)
             total_boost_j += int(record.get("h1b", 0) or 0)
+            total_import_j += int(record.get("imp", 0) or 0)
 
         diverted_kwh = total_div_j / 3_600_000.0
         boosted_kwh = total_boost_j / 3_600_000.0
         total_kwh = diverted_kwh + boosted_kwh
+        grid_imported_kwh = total_import_j / 3_600_000.0
 
         return {
             "total_kwh": round(total_kwh, 3),
             "diverted_kwh": round(diverted_kwh, 3),
             "boosted_kwh": round(boosted_kwh, 3),
+            "grid_imported_kwh": round(grid_imported_kwh, 3),
         }

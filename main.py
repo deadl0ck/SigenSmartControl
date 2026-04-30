@@ -171,6 +171,19 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                     exc,
                 )
             startup_mode_raw, startup_soc, startup_solar_today_kwh = await log_current_mode_on_startup(sigen, mode_names)
+            startup_zappi_status = None
+            startup_zappi_daily = None
+            try:
+                from integrations.zappi_auth import get_zappi_interaction
+                from zoneinfo import ZoneInfo
+                from config.settings import LOCAL_TIMEZONE
+                zappi = get_zappi_interaction()
+                if zappi is not None:
+                    startup_zappi_status = await zappi.get_live_status()
+                    local_today = datetime.now(ZoneInfo(LOCAL_TIMEZONE)).date()
+                    startup_zappi_daily = await zappi.get_daily_totals(local_today)
+            except Exception as exc:
+                logger.warning("[SCHEDULER] Could not fetch Zappi data for startup email: %s", exc)
             await notify_startup_email(
                 current_mode_raw=startup_mode_raw,
                 battery_soc=startup_soc,
@@ -179,6 +192,8 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                 mode_names=mode_names,
                 event_time_utc=datetime.now(timezone.utc),
                 logger=logger,
+                zappi_status=startup_zappi_status,
+                zappi_daily=startup_zappi_daily,
             )
             return sigen
         except Exception as e:

@@ -111,7 +111,7 @@ def _build_today_forecast_email_sections(
             '<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;'
             'border:1px solid #e4ebf3;border-radius:10px;">'
             '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;'
-            'color:#5b6b82;margin-bottom:6px;">Today\'s Solar Forecast</div>'
+            'color:#143a52;font-weight:700;margin-bottom:6px;">Today\'s Solar Forecast</div>'
             '<div style="font-size:12px;color:#5b6b82;">Unavailable</div>'
             '</div>'
         )
@@ -164,7 +164,7 @@ def _build_today_forecast_email_sections(
         '<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;'
         'border:1px solid #e4ebf3;border-radius:10px;">'
         '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;'
-        'color:#5b6b82;margin-bottom:6px;">Today\'s Solar Forecast</div>'
+        'color:#143a52;font-weight:700;margin-bottom:6px;">Today\'s Solar Forecast</div>'
         f'<table role="presentation" style="width:100%;border-collapse:collapse;">{rows_html}</table>'
         '</div>'
     )

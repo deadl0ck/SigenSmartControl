@@ -73,6 +73,8 @@ async def notify_startup_email(
     mode_names: dict[int, str],
     event_time_utc: datetime,
     logger: logging.Logger,
+    zappi_status: dict[str, Any] | None = None,
+    zappi_daily: dict[str, Any] | None = None,
 ) -> None:
     """Send a startup email with current mode, SOC, and recent transition summary.
 
@@ -84,6 +86,8 @@ async def notify_startup_email(
         mode_names: Mapping from mode value to human-readable mode label.
         event_time_utc: Startup timestamp in UTC.
         logger: Logger instance used for status/error output.
+        zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
+        zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
     """
     sender = _get_email_sender_instance()
     if sender is None:
@@ -110,6 +114,7 @@ async def notify_startup_email(
         f"SOC {soc_text} • Solar Today {today_solar_text}"
     )
     forecast_text, forecast_html = _build_today_forecast_email_sections(today_period_forecast)
+    zappi_text, zappi_html = _build_zappi_email_sections(zappi_status, zappi_daily)
 
     now_local = event_time_utc.astimezone(LOCAL_TZ)
     previous_2230 = (now_local - timedelta(days=1)).replace(
@@ -143,7 +148,7 @@ async def notify_startup_email(
         timeline_text = "\n".join(timeline_lines)
         timeline_html = (
             f'<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">'
-            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:6px;">Transitions since 10:30 PM</div>'
+            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:6px;">Transitions since 10:30 PM</div>'
             f'<table role="presentation" style="width:100%;border-collapse:collapse;">{timeline_rows}</table>'
             f'</div>'
         )
@@ -163,7 +168,8 @@ async def notify_startup_email(
         f"Battery SOC: {soc_text}\n\n"
         f"Solar Produced Today: {today_solar_text}\n\n"
         f"{forecast_text}\n"
-        "Transitions Since 10:30 PM\n"
+        + (f"{zappi_text}\n" if zappi_text else "")
+        + "Transitions Since 10:30 PM\n"
         "---------------------------\n"
         f"{timeline_text}\n"
     )
@@ -185,13 +191,13 @@ async def notify_startup_email(
                     <tr>
                         <td style="width:50%;padding:0 6px 0 0;vertical-align:top;">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Current Mode</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Current Mode</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(current_mode_label)}</div>
                             </div>
                         </td>
                         <td style="width:50%;padding:0 0 0 6px;vertical-align:top;">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Battery SOC</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Battery SOC</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(soc_text)}</div>
                             </div>
                         </td>
@@ -199,13 +205,14 @@ async def notify_startup_email(
                     <tr>
                         <td style="padding:12px 6px 0 0;vertical-align:top;" colspan="2">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Solar Produced Today</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Solar Produced Today</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(today_solar_text)}</div>
                             </div>
                         </td>
                     </tr>
                 </table>
                 {forecast_html}
+                {zappi_html}
                 {timeline_html}
             </div>
         </div>
@@ -271,10 +278,13 @@ def _build_zappi_email_sections(
         total_kwh = zappi_daily.get("total_kwh", 0.0)
         diverted_kwh = zappi_daily.get("diverted_kwh", 0.0)
         boosted_kwh = zappi_daily.get("boosted_kwh", 0.0)
+        grid_imported_kwh = zappi_daily.get("grid_imported_kwh")
         rows_text += [
             f"Today's Total to EV: {total_kwh:.2f} kWh  "
             f"(Solar: {diverted_kwh:.2f} kWh | Grid: {boosted_kwh:.2f} kWh)",
         ]
+        if grid_imported_kwh is not None:
+            rows_text.append(f"Grid Imported Today: {grid_imported_kwh:.2f} kWh")
         rows_html += (
             f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">Today — Total to EV</td>'
             f'<td style="padding:4px 0;font-size:12px;font-weight:600;color:#172033;">{total_kwh:.2f} kWh</td></tr>'
@@ -283,6 +293,11 @@ def _build_zappi_email_sections(
             f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">&nbsp;&nbsp;Grid boost</td>'
             f'<td style="padding:4px 0;font-size:12px;color:#172033;">{boosted_kwh:.2f} kWh</td></tr>'
         )
+        if grid_imported_kwh is not None:
+            rows_html += (
+                f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">Grid Imported Today</td>'
+                f'<td style="padding:4px 0;font-size:12px;font-weight:600;color:#172033;">{grid_imported_kwh:.2f} kWh</td></tr>'
+            )
 
     plain_text = (
         "EV Charger (Zappi)\n"
@@ -294,7 +309,7 @@ def _build_zappi_email_sections(
         '<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;'
         'border:1px solid #e4ebf3;border-radius:10px;">'
         '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;'
-        'color:#5b6b82;margin-bottom:6px;">EV Charger (Zappi)</div>'
+        'color:#143a52;font-weight:700;margin-bottom:6px;">EV Charger (Zappi)</div>'
         '<table role="presentation" style="width:100%;border-collapse:collapse;">'
         + rows_html
         + '</table>'
@@ -445,7 +460,7 @@ async def notify_mode_change_email(
             )
         timeline_section = (
             f'<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">'
-            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:6px;">'
+            f'<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:6px;">'
             f'Transitions since 10:30 PM</div>'
             f'<table role="presentation" style="width:100%;border-collapse:collapse;">{timeline_rows}</table>'
             f'</div>'
@@ -470,13 +485,13 @@ async def notify_mode_change_email(
                     <tr>
                         <td style="width:50%;padding:0 6px 0 0;vertical-align:top;">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Time</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Time</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(local_time)}</div>
                             </div>
                         </td>
                         <td style="width:50%;padding:0 0 0 6px;vertical-align:top;">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Battery SOC</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Battery SOC</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(soc_text)}</div>
                             </div>
                         </td>
@@ -484,7 +499,7 @@ async def notify_mode_change_email(
                     <tr>
                         <td style="padding:12px 6px 0 0;vertical-align:top;" colspan="2">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
-                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:3px;">Solar Produced Today</div>
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Solar Produced Today</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(today_solar_text)}</div>
                             </div>
                         </td>
@@ -493,7 +508,7 @@ async def notify_mode_change_email(
                 {forecast_html}
                 {zappi_html}
                 <div style="margin-bottom:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;font-size:13px;line-height:1.5;color:#26354d;">
-                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#5b6b82;margin-bottom:4px;">Reason</div>
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:4px;">Reason</div>
                     {escape(reason)}
                 </div>
                 <details style="margin-bottom:0;">
