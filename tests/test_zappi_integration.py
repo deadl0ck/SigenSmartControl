@@ -193,7 +193,7 @@ async def test_get_daily_totals_empty_history() -> None:
     client.get_daily_history = AsyncMock(return_value=[])
     interaction = ZappiInteraction(client)
     result = await interaction.get_daily_totals(date(2026, 4, 15))
-    assert result == {"total_kwh": 0.0, "diverted_kwh": 0.0, "boosted_kwh": 0.0}
+    assert result == {"total_kwh": 0.0, "diverted_kwh": 0.0, "boosted_kwh": 0.0, "grid_imported_kwh": 0.0}
 
 
 # ---------------------------------------------------------------------------

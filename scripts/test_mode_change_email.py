@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
+import logic.mode_change as _mode_change_module
 from logic.mode_change import apply_mode_change
 
 _script_logger = logging.getLogger("test_mode_change_email")
@@ -80,11 +81,11 @@ async def run_test(mode: int, period: str, reason: str, soc: float) -> bool:
         True when simulated apply_mode_change completed successfully.
     """
     mode_names = {value: name for name, value in main.SIGEN_MODES.items()}
-    previous_full_sim = main.FULL_SIMULATION_MODE
+    previous_full_sim = _mode_change_module.FULL_SIMULATION_MODE
 
     try:
         # Force simulation path so the test does not send inverter commands.
-        main.FULL_SIMULATION_MODE = True
+        _mode_change_module.FULL_SIMULATION_MODE = True
         return await apply_mode_change(
             sigen=None,
             mode=mode,
@@ -95,7 +96,7 @@ async def run_test(mode: int, period: str, reason: str, soc: float) -> bool:
             logger=_script_logger,
         )
     finally:
-        main.FULL_SIMULATION_MODE = previous_full_sim
+        _mode_change_module.FULL_SIMULATION_MODE = previous_full_sim
 
 
 def main_cli() -> None:

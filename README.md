@@ -985,6 +985,8 @@ On a good solar day you expect: a tall stacked bar, a Green forecast strip, a lo
 
 ## Email Notifications
 
+![Example mode-change notification email](docs/images/email_example.png)
+
 When the scheduler issues a mode-change command, it sends an email notification with:
 
 - success or failure status
