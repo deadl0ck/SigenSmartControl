@@ -237,7 +237,7 @@ LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.36, 2)  # ~36% of ar
 LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT = 45.0
 # SOC floor for daytime headroom timed exports (pre-period / period-start) where
 # the scheduler proactively exports to create battery room for forecasted solar.
-DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 50.0
+DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 45.0
 # Controlled evening export settings.
 # Enables bounded battery export in evening to create headroom, while preserving
 # enough energy to avoid avoidable grid import before cheap-rate charging.
