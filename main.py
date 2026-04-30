@@ -295,6 +295,8 @@ async def run_scheduler() -> None:
             export_duration_minutes=export_duration_minutes,
             battery_soc=battery_soc,
             today_period_forecast=resolved_forecast,
+            zappi_status=state.latest_zappi_status,
+            zappi_daily=state.latest_zappi_daily,
         )
         if ok:
             state.tick_mode_change_successes += 1

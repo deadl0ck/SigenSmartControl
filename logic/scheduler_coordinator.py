@@ -34,6 +34,8 @@ from telemetry.forecast_calibration import get_period_calibration
 from config.enums import Period
 from config.settings import SWITCHBOT_IMMERSION_ENABLED
 from logic.immersion_control import check_immersion_boost
+from integrations.zappi_auth import get_zappi_interaction
+from telemetry.telemetry_archive import append_zappi_telemetry_snapshot
 from config.settings import (
     POLL_INTERVAL_MINUTES,
     FORECAST_REFRESH_INTERVAL_MINUTES,
@@ -266,6 +268,32 @@ class SchedulerCoordinator:
                 active = period
         return active
 
+    async def _fetch_zappi_status(self, now: datetime) -> None:
+        """Fetch Zappi live status and today's daily totals; archive a snapshot."""
+        zappi = get_zappi_interaction()
+        if zappi is None:
+            return
+        try:
+            status = await zappi.get_live_status()
+            if status is not None:
+                self.state.latest_zappi_status = status
+                append_zappi_telemetry_snapshot(
+                    live_status=status,
+                    scheduler_now_utc=now,
+                )
+        except Exception as exc:
+            self.logger.warning("[ZAPPI] Failed to fetch Zappi live status: %s", exc)
+        try:
+            from datetime import timezone as _tz
+            from zoneinfo import ZoneInfo
+            from config.settings import LOCAL_TIMEZONE
+            local_today = now.astimezone(ZoneInfo(LOCAL_TIMEZONE)).date()
+            daily = await zappi.get_daily_totals(local_today)
+            if daily is not None:
+                self.state.latest_zappi_daily = daily
+        except Exception as exc:
+            self.logger.warning("[ZAPPI] Failed to fetch Zappi daily totals: %s", exc)
+
     async def _check_immersion_boost(self, now: datetime, today: date) -> None:
         """Evaluate immersion heater boost conditions and act if appropriate."""
         if not SWITCHBOT_IMMERSION_ENABLED:
@@ -396,6 +424,7 @@ class SchedulerCoordinator:
 
             self._handle_archive(now)
             await sample_live_solar_power(self.state, now, self.sigen, self.logger)
+            await self._fetch_zappi_status(now)
 
             if await self._check_timed_export_active(now):
                 await self._check_immersion_boost(now, today)

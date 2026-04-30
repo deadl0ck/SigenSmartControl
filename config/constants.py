@@ -165,6 +165,12 @@ FORECAST_SOLAR_ARCHIVE_PATH: Final[str] = os.getenv(
     "data/forecast_solar_readings.jsonl",
 ).strip()
 
+# Local archive file for Zappi EV charger telemetry snapshots.
+ZAPPI_TELEMETRY_ARCHIVE_PATH: Final[str] = os.getenv(
+    "ZAPPI_TELEMETRY_ARCHIVE_PATH",
+    "data/zappi_telemetry.jsonl",
+).strip()
+
 # Numeric weights used to score whether the day is considered good for solar.
 AMBER_VAL: Final[float] = 0.5
 GREEN_VAL: Final[int] = 1

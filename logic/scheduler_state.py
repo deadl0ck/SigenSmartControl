@@ -75,6 +75,10 @@ class SchedulerState:
         sleep_override_seconds: Override sleep duration in seconds, or None for normal polling.
         last_known_soc: Most recent battery SOC percentage fetched this session, or None.
         immersion_state: Daily boost counter for the SwitchBot immersion heater (boosts_today, last_boost_date).
+        latest_zappi_status: Most recent Zappi live-status snapshot, or None when
+            Zappi is not configured or the last fetch failed.
+        latest_zappi_daily: Today's Zappi daily charge totals, or None when
+            Zappi is not configured or the last fetch failed.
     """
 
     current_date: date
@@ -111,3 +115,5 @@ class SchedulerState:
         "boosts_today": 0,
         "last_boost_date": None,
     })
+    latest_zappi_status: dict[str, Any] | None = None
+    latest_zappi_daily: dict[str, Any] | None = None
