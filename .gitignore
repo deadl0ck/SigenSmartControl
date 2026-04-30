@@ -28,6 +28,7 @@ logs/
 # Claude Code
 .claude/
 CLAUDE.md
+docs/session-handoff-auto.md
 
 # Runtime files
 .monitor.pid
