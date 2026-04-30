@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Protocol
 
-from config.settings import SIGEN_MODES
+import asyncio
+
+from config.settings import (
+    MODE_CHANGE_RETRY_ATTEMPTS,
+    MODE_CHANGE_RETRY_DELAY_SECONDS,
+    SIGEN_MODES,
+)
 from integrations.sigen_interaction import SigenPayloadError
 from logic.mode_control import ACTION_DIVIDER, mode_matches_target
 from logic.mode_logging import log_mode_status
@@ -189,87 +195,114 @@ async def apply_mode_change(
     logger.info("Decision reason: %s", reason)
     logger.info(ACTION_DIVIDER)
 
+    max_attempts = 1 + MODE_CHANGE_RETRY_ATTEMPTS
+    last_exc: Exception | None = None
     event_time = datetime.now(timezone.utc)
-    try:
-        if mode == SIGEN_MODES["GRID_EXPORT"] and export_duration_minutes is not None:
-            response = await sigen.export_to_grid(export_duration_minutes)
-        else:
-            response = await sigen.set_operational_mode(mode)
 
-        logger.info("Set mode response for %s: %s", period, response)
-        if should_archive_mode_change_events():
-            append_mode_change_event(
-                scheduler_now_utc=event_time,
+    for attempt in range(1, max_attempts + 1):
+        event_time = datetime.now(timezone.utc)
+        try:
+            if mode == SIGEN_MODES["GRID_EXPORT"] and export_duration_minutes is not None:
+                response = await sigen.export_to_grid(export_duration_minutes)
+            else:
+                response = await sigen.set_operational_mode(mode)
+
+            # The legacy sigen client returns raw API JSON without raising on error codes.
+            # Detect and surface non-zero codes so the failure path below is triggered.
+            if isinstance(response, dict) and "ok" not in response:
+                code = response.get("code")
+                if code is not None and code not in (0, "0"):
+                    raise RuntimeError(
+                        f"Inverter rejected mode change (code {code}): {response.get('msg', response)}"
+                    )
+
+            logger.info("Set mode response for %s: %s", period, response)
+            if should_archive_mode_change_events():
+                append_mode_change_event(
+                    scheduler_now_utc=event_time,
+                    period=period,
+                    requested_mode=mode,
+                    requested_mode_label=str(mode_label),
+                    reason=reason,
+                    simulated=full_simulation_mode,
+                    success=True,
+                    current_mode=current_mode_raw,
+                    response=response,
+                )
+
+            logger.info(
+                "[EMAIL] Queueing mode-change notification: status=SUCCESS period=%s target=%s(%s) "
+                "simulated=%s",
+                period,
+                mode_label,
+                mode,
+                full_simulation_mode,
+            )
+            await notify_mode_change_email(
+                success=True,
                 period=period,
+                reason=reason,
                 requested_mode=mode,
                 requested_mode_label=str(mode_label),
-                reason=reason,
-                simulated=full_simulation_mode,
-                success=True,
-                current_mode=current_mode_raw,
+                current_mode_raw=current_mode_raw,
+                mode_names=mode_names,
+                event_time_utc=event_time,
+                battery_soc=battery_soc,
+                solar_generated_today_kwh=solar_generated_today_kwh,
+                today_period_forecast=today_period_forecast,
                 response=response,
             )
+            return True
 
-        logger.info(
-            "[EMAIL] Queueing mode-change notification: status=SUCCESS period=%s target=%s(%s) "
-            "simulated=%s",
-            period,
-            mode_label,
-            mode,
-            full_simulation_mode,
-        )
-        await notify_mode_change_email(
-            success=True,
-            period=period,
-            reason=reason,
-            requested_mode=mode,
-            requested_mode_label=str(mode_label),
-            current_mode_raw=current_mode_raw,
-            mode_names=mode_names,
-            event_time_utc=event_time,
-            battery_soc=battery_soc,
-            solar_generated_today_kwh=solar_generated_today_kwh,
-            today_period_forecast=today_period_forecast,
-            response=response,
-        )
-        return True
-    except Exception as exc:
-        logger.error("Failed to set mode for %s: %s", period, exc)
-        if should_archive_mode_change_events():
-            append_mode_change_event(
-                scheduler_now_utc=event_time,
-                period=period,
-                requested_mode=mode,
-                requested_mode_label=str(mode_label),
-                reason=reason,
-                simulated=full_simulation_mode,
-                success=False,
-                current_mode=current_mode_raw,
-                error=str(exc),
+        except Exception as exc:
+            last_exc = exc
+            logger.error(
+                "Failed to set mode for %s (attempt %s/%s): %s",
+                period, attempt, max_attempts, exc,
             )
-        logger.info(
-            "[EMAIL] Queueing mode-change notification: status=FAILED period=%s target=%s(%s) "
-            "simulated=%s",
-            period,
-            mode_label,
-            mode,
-            full_simulation_mode,
-        )
-        await notify_mode_change_email(
-            success=False,
+            if attempt < max_attempts:
+                logger.info(
+                    "Retrying mode change for %s in %s seconds (%s attempt(s) remaining).",
+                    period, MODE_CHANGE_RETRY_DELAY_SECONDS, max_attempts - attempt,
+                )
+                await asyncio.sleep(MODE_CHANGE_RETRY_DELAY_SECONDS)
+
+    # All attempts exhausted.
+    if should_archive_mode_change_events():
+        append_mode_change_event(
+            scheduler_now_utc=event_time,
             period=period,
-            reason=reason,
             requested_mode=mode,
             requested_mode_label=str(mode_label),
-            current_mode_raw=current_mode_raw,
-            mode_names=mode_names,
-            event_time_utc=event_time,
-            battery_soc=battery_soc,
-            solar_generated_today_kwh=solar_generated_today_kwh,
-            today_period_forecast=today_period_forecast,
-            error=str(exc),
+            reason=reason,
+            simulated=full_simulation_mode,
+            success=False,
+            current_mode=current_mode_raw,
+            error=str(last_exc),
         )
-        return False
+    logger.info(
+        "[EMAIL] Queueing mode-change notification: status=FAILED period=%s target=%s(%s) "
+        "simulated=%s",
+        period,
+        mode_label,
+        mode,
+        full_simulation_mode,
+    )
+    await notify_mode_change_email(
+        success=False,
+        period=period,
+        reason=reason,
+        requested_mode=mode,
+        requested_mode_label=str(mode_label),
+        current_mode_raw=current_mode_raw,
+        mode_names=mode_names,
+        event_time_utc=event_time,
+        battery_soc=battery_soc,
+        solar_generated_today_kwh=solar_generated_today_kwh,
+        today_period_forecast=today_period_forecast,
+        error=str(last_exc),
+    )
+    return False
 
 
 async def sample_live_solar_power(

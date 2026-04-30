@@ -341,6 +341,8 @@ Meaning:
 - `ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`: enables optional pre-sunrise discharge window in selected months
 - `PRE_SUNRISE_DISCHARGE_MONTHS`: local months where pre-sunrise discharge can run (for example Apr-Sep)
 - `PRE_SUNRISE_DISCHARGE_LEAD_MINUTES`: minutes before sunrise where night mode can switch to self-powered to create headroom
+- `MODE_CHANGE_RETRY_ATTEMPTS`: number of additional attempts after an initial mode-change failure (`3` = up to 4 total tries). Set to `0` to disable retries.
+- `MODE_CHANGE_RETRY_DELAY_SECONDS`: seconds to wait between retry attempts (`120` = 2 minutes). With the defaults, a failure at 23:00 retries at 23:02, 23:04, and 23:06 before giving up — well within the cheap-rate window.
 
 ### Tariff schedule windows
 
@@ -1003,6 +1005,17 @@ Notes:
 	follow-up change-back transitions are detected consistently and can generate their own
 	simulated command log entries and notification emails.
 - If required email env vars are missing, notifications are skipped and scheduler continues.
+
+### Mode-change failure and retry
+
+If the inverter rejects a mode-change command (API error or non-zero response code), the scheduler retries automatically before reporting failure:
+
+1. Each failed attempt is logged with `attempt N/M`.
+2. Between attempts it waits `MODE_CHANGE_RETRY_DELAY_SECONDS` (default 2 minutes).
+3. A failure email is sent **only after all attempts are exhausted** — so you receive one notification, not one per retry.
+4. The failure is also written to `data/mode_change_events.jsonl` with `"success": false`.
+
+The retry count and delay are both configurable in `config/settings.py` via `MODE_CHANGE_RETRY_ATTEMPTS` and `MODE_CHANGE_RETRY_DELAY_SECONDS`.
 
 ### Test email notifications
 
