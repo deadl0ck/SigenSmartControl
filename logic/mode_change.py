@@ -55,6 +55,8 @@ async def apply_mode_change(
     export_duration_minutes: int | None = None,
     battery_soc: float | None = None,
     today_period_forecast: dict[str, tuple[int, str]] | None = None,
+    zappi_status: dict[str, Any] | None = None,
+    zappi_daily: dict[str, Any] | None = None,
 ) -> bool:
     """Attempt to change the inverter operational mode with idempotency checks.
 
@@ -76,6 +78,8 @@ async def apply_mode_change(
         export_duration_minutes: Optional override window when forcing GRID_EXPORT.
         battery_soc: Battery state of charge at the time of the command, when known.
         today_period_forecast: Daytime period forecast snapshot for today.
+        zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
+        zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
 
     Returns:
         True if mode was set or already at target, False if set operation failed.
@@ -101,4 +105,6 @@ async def apply_mode_change(
         export_duration_minutes=export_duration_minutes,
         battery_soc=battery_soc,
         today_period_forecast=today_period_forecast,
+        zappi_status=zappi_status,
+        zappi_daily=zappi_daily,
     )

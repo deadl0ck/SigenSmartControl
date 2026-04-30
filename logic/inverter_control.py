@@ -45,6 +45,8 @@ class ModeChangeNotifier(Protocol):
         battery_soc: float | None,
         solar_generated_today_kwh: float | None,
         today_period_forecast: dict[str, tuple[int, str]] | None,
+        zappi_status: dict[str, Any] | None = None,
+        zappi_daily: dict[str, Any] | None = None,
         response: Any | None = None,
         error: str | None = None,
     ) -> None: ...
@@ -69,6 +71,8 @@ async def apply_mode_change(
     export_duration_minutes: int | None = None,
     battery_soc: float | None = None,
     today_period_forecast: dict[str, tuple[int, str]] | None = None,
+    zappi_status: dict[str, Any] | None = None,
+    zappi_daily: dict[str, Any] | None = None,
 ) -> bool:
     """Attempt to change inverter mode with idempotency and side effects.
 
@@ -89,6 +93,8 @@ async def apply_mode_change(
         export_duration_minutes: Optional override duration for GRID_EXPORT mode.
         battery_soc: Battery state of charge at command time, when known.
         today_period_forecast: Daytime period forecast snapshot for today.
+        zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
+        zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
 
     Returns:
         True if mode was set or already at target, False otherwise.
@@ -140,6 +146,8 @@ async def apply_mode_change(
                 battery_soc=battery_soc,
                 solar_generated_today_kwh=solar_generated_today_kwh,
                 today_period_forecast=today_period_forecast,
+                zappi_status=zappi_status,
+                zappi_daily=zappi_daily,
                 response=simulated_response,
             )
             return True
@@ -250,6 +258,8 @@ async def apply_mode_change(
                 battery_soc=battery_soc,
                 solar_generated_today_kwh=solar_generated_today_kwh,
                 today_period_forecast=today_period_forecast,
+                zappi_status=zappi_status,
+                zappi_daily=zappi_daily,
                 response=response,
             )
             return True
@@ -300,6 +310,8 @@ async def apply_mode_change(
         battery_soc=battery_soc,
         solar_generated_today_kwh=solar_generated_today_kwh,
         today_period_forecast=today_period_forecast,
+        zappi_status=zappi_status,
+        zappi_daily=zappi_daily,
         error=str(last_exc),
     )
     return False

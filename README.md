@@ -34,12 +34,13 @@
 15. [Immersion Heater Control (SwitchBot)](#immersion-heater-control-switchbot) *(optional)*
     - [How it works](#how-it-works-1)
     - [Setup](#setup-1)
-16. [Forecast Accuracy Report](#forecast-accuracy-report)
-17. [Adding a Forecast Provider](#adding-a-forecast-provider)
-18. [Tests](#tests)
-19. [Session Handoff Recovery](#session-handoff-recovery)
-20. [Recent Updates](#recent-updates)
-21. [Notes](#notes)
+16. [Zappi EV Charger Integration](#zappi-ev-charger-integration) *(optional)*
+17. [Forecast Accuracy Report](#forecast-accuracy-report)
+18. [Adding a Forecast Provider](#adding-a-forecast-provider)
+19. [Tests](#tests)
+20. [Session Handoff Recovery](#session-handoff-recovery)
+21. [Recent Updates](#recent-updates)
+22. [Notes](#notes)
 
 ## Overview
 
@@ -160,6 +161,9 @@ see exactly what values were used and why each decision was made.
 │   ├── sigen_auth.py                    # Lazy-loaded singleton Sigen client from .env credentials
 │   ├── sigen_official.py               # Official OpenAPI client (app key/secret auth)
 │   ├── switchbot_interaction.py         # SwitchBot API client (immersion heater control)
+│   ├── zappi_client.py                  # myenergi Zappi HTTP client with director-based discovery
+│   ├── zappi_interaction.py             # Higher-level Zappi wrapper (live status, daily totals)
+│   ├── zappi_auth.py                    # Singleton accessor — returns None when credentials absent
 │   └── tools/
 │       ├── check_api_config.py          # Diagnostic: query current Sigen API mode configuration
 │       └── check_modes.py               # Print all available inverter operational modes
@@ -218,9 +222,13 @@ EMAIL_RECEIVER=your_receiver@gmail.com
 GMAIL_APP_PASSWORD=your_gmail_app_password
 
 # Optional — SwitchBot immersion heater (see Immersion Heater section below)
-SWITCHBOT_TOKEN=your_switchbot_token
-SWITCHBOT_SECRET=your_switchbot_secret
-SWITCHBOT_IMMERSION_DEVICE_ID=your_device_id
+#SWITCHBOT_TOKEN=your_switchbot_token
+#SWITCHBOT_SECRET=your_switchbot_secret
+#SWITCHBOT_IMMERSION_DEVICE_ID=your_device_id
+
+# Optional — myenergi Zappi EV charger (see Zappi section below)
+#MYENERGI_HUB_SERIAL=your_hub_serial
+#MYENERGI_API_KEY=your_api_key
 ```
 
 4. Edit `config/settings.py` for your hardware and scheduler settings.
@@ -1101,6 +1109,57 @@ Log output uses the `[IMMERSION]` prefix. A successful boost looks like:
 **Automatic cutoff**
 
 The heater's built-in one-hour timer handles the cutoff — no turn-off command is sent.
+
+## Zappi EV Charger Integration
+
+*(optional)*
+
+The scheduler can read live status and session energy from a myenergi Zappi EV charger. This is read-only — the integration never controls or commands the Zappi.
+
+### Why this exists
+
+The Zappi sits between the main consumer unit and the Sigen inverter. Because the inverter sits downstream of the Zappi, the inverter's energy flow data (`get_energy_flow()`) does not include the power the Zappi is consuming to charge the EV. Adding Zappi telemetry alongside the inverter data gives a complete picture of whole-home power consumption and makes mode-change email notifications more informative.
+
+### What it reports
+
+Each scheduler tick, when credentials are configured:
+
+- **Live status** — charging state, charge power (W), diverted solar power (W), mode (Fast / Eco / Eco+), and cumulative session energy (kWh)
+- **Daily totals** — today's total energy delivered to the EV, broken down into solar-diverted kWh and grid-boosted kWh (fetched once per tick from the myenergi history API)
+- **Telemetry archive** — one snapshot per tick appended to `data/zappi_telemetry.jsonl`
+- **Email inclusion** — mode-change notification emails include an "EV Charger (Zappi)" section with:
+  - Live: charging status, mode, current charge power, and session energy
+  - Daily: total kWh to EV today, with solar-diverted and grid-boost breakdown
+
+### Setup
+
+**1. Find your credentials**
+
+Log in to [myaccount.myenergi.com](https://myaccount.myenergi.com) and note your hub serial number (printed on the hub) and generate an API key in the account settings. The Zappi serial is also on the device label.
+
+**2. Add to `.env`**
+
+```ini
+MYENERGI_HUB_SERIAL=your_hub_serial
+MYENERGI_API_KEY=your_api_key
+```
+
+**3. Restart the monitor**
+
+```bash
+./restart_monitor.sh
+```
+
+Log output uses the `[ZAPPI]` prefix. A successful tick looks like:
+
+```
+[ZAPPI] Zappi integration enabled.
+[TELEMETRY] Saved Zappi snapshot to data/zappi_telemetry.jsonl
+```
+
+### Fully optional
+
+If `MYENERGI_HUB_SERIAL` is not set, the integration is a complete no-op — the scheduler runs unchanged and no Zappi-related code executes. No error is logged for absent credentials other than a single info-level message at startup.
 
 ## Forecast Accuracy Report
 
