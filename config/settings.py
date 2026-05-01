@@ -208,8 +208,10 @@ ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
 PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
 # Conservative assumed net battery discharge power used to size the export window.
 PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
-# High-SOC protection: force GRID_EXPORT for Amber/Green periods when battery is very
+# High-SOC protection: force GRID_EXPORT for Green periods when battery is very
 # full and headroom is below target, preventing wasted solar due to a full battery.
+# Amber is excluded: moderate solar is unlikely to cause significant clipping, and
+# exporting stored energy overnight on an Amber day wastes more than it saves.
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 # SOC threshold for the mid-period high-SOC safety export check (combined with solar).
 # When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.

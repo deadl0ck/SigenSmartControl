@@ -101,7 +101,9 @@ def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
     assert "Forecast is Red" in reason
 
 
-def test_morning_high_soc_protection_exports_for_amber_when_headroom_is_low():
+def test_morning_high_soc_protection_does_not_export_for_amber_when_headroom_is_low():
+    # Amber forecast: high SOC should not trigger protective export — moderate solar
+    # is unlikely to cause significant clipping, and exporting stored energy wastes more.
     mode, reason = decide_operational_mode(
         DecisionContext(
             period="Morn",
@@ -117,8 +119,8 @@ def test_morning_high_soc_protection_exports_for_amber_when_headroom_is_low():
         )
     )
 
-    assert mode == SIGEN_MODES["GRID_EXPORT"]
-    assert "Battery is high" in reason
+    assert mode == SIGEN_MODES["SELF_POWERED"]
+    assert "Forecast is Amber" in reason
 
 
 def test_morning_high_soc_protection_does_not_trigger_below_threshold():

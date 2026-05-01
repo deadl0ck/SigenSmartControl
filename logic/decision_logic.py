@@ -141,7 +141,7 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and status_key in {ForecastStatus.AMBER, ForecastStatus.GREEN}
+        and status_key == ForecastStatus.GREEN
         and ctx.soc is not None
         and ctx.soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
         and ctx.headroom_kwh is not None
