@@ -168,11 +168,15 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                     mode=SIGEN_MODES["GRID_EXPORT"], reason=mid_period_reason,
                     outcome="mid-period high-SOC safety export triggered",
                 )
+                mid_period_headroom_target_soc = max(
+                    DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                    100.0 - mid_period_headroom_target_kwh / BATTERY_KWH * 100.0,
+                )
                 mid_period_override_started = await start_timed_grid_export(
                     period=PERIOD, reason=mid_period_reason,
                     duration_minutes=mid_period_duration_minutes,
                     now_utc=now_utc, battery_soc=mid_period_soc, is_clipping_export=True,
-                    export_soc_floor=DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                    export_soc_floor=mid_period_headroom_target_soc,
                 )
                 if mid_period_override_started:
                     return True
@@ -227,10 +231,14 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                         mode=mode, reason=reason,
                         outcome="pre-period export triggered",
                     )
+                    headroom_target_soc = max(
+                        DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                        100.0 - headroom_target_kwh / BATTERY_KWH * 100.0,
+                    )
                     override_started = await start_timed_grid_export(
                         period=PERIOD, reason=reason, duration_minutes=duration_minutes,
                         now_utc=now_utc, battery_soc=soc,
-                        export_soc_floor=DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                        export_soc_floor=headroom_target_soc,
                     )
                     if not override_started:
                         logger.warning(
@@ -327,10 +335,14 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                     mode=mode, reason=reason,
                     outcome="period-start timed export started",
                 )
+                headroom_target_soc = max(
+                    DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                    100.0 - headroom_target_kwh / BATTERY_KWH * 100.0,
+                )
                 override_started = await start_timed_grid_export(
                     period=PERIOD, reason=reason, duration_minutes=duration_minutes,
                     now_utc=now_utc, battery_soc=soc, is_clipping_export=is_clipping_export,
-                    export_soc_floor=DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
+                    export_soc_floor=headroom_target_soc,
                 )
                 if override_started:
                     s["start_set"] = True
