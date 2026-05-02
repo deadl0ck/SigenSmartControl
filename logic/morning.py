@@ -12,6 +12,7 @@ import math
 from datetime import timedelta
 
 from config.settings import (
+    AMBER_HEADROOM_TARGET_KWH,
     BATTERY_KWH,
     DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
     HEADROOM_TARGET_KWH,
@@ -137,7 +138,9 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
             and mid_period_solar_kw >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW
         ):
             mid_period_headroom_kwh = calc_headroom_kwh(BATTERY_KWH, mid_period_soc)
-            mid_period_headroom_target_kwh = HEADROOM_TARGET_KWH
+            mid_period_headroom_target_kwh = (
+                AMBER_HEADROOM_TARGET_KWH if status.upper() == "AMBER" else HEADROOM_TARGET_KWH
+            )
             mid_period_headroom_deficit = max(0.0, mid_period_headroom_target_kwh - mid_period_headroom_kwh)
             if mid_period_headroom_deficit > 0:
                 mid_period_effective_battery_export_kw = get_effective_battery_export_kw(
