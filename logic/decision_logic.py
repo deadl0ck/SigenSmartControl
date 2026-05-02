@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from config.enums import ForecastStatus, Period
 from config.settings import (
+    AMBER_HEADROOM_TARGET_KWH,
     BATTERY_KWH,
     ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE,
     FORECAST_TO_MODE,
@@ -128,7 +129,7 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
 
     if (
         ctx.soc is not None
-        and status_key == ForecastStatus.GREEN
+        and status_key in (ForecastStatus.GREEN, ForecastStatus.AMBER)
         and ctx.headroom_kwh is not None
         and ctx.headroom_kwh < ctx.headroom_target_kwh
     ):
@@ -141,18 +142,13 @@ def decide_operational_mode(ctx: DecisionContext) -> tuple[int, str]:
 
     if (
         MORNING_HIGH_SOC_PROTECTION_ENABLED
-        and status_key == ForecastStatus.GREEN
+        and status_key in (ForecastStatus.GREEN, ForecastStatus.AMBER)
         and ctx.soc is not None
         and ctx.soc >= MORNING_HIGH_SOC_THRESHOLD_PERCENT
         and ctx.headroom_kwh is not None
         and ctx.headroom_kwh < ctx.headroom_target_kwh
     ):
         mode = SIGEN_MODES["GRID_EXPORT"]
-        period_label = {
-            Period.MORN: "Morning",
-            Period.AFTN: "Afternoon",
-            Period.EVE: "Evening",
-        }.get(period_key, ctx.period)
         reason = (
             f"Battery is high ({ctx.soc:.1f}%) with only {ctx.headroom_kwh:.2f} kWh headroom "
             f"(needs {ctx.headroom_target_kwh:.2f} kWh) — exporting to make room for incoming solar."

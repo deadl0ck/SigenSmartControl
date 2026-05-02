@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any
 
 from config.settings import (
+    AMBER_HEADROOM_TARGET_KWH,
     BATTERY_KWH,
     BRIDGE_BATTERY_RESERVE_KWH,
     ESTIMATED_HOME_LOAD_KW,
@@ -152,7 +153,11 @@ def _evaluate_period_mode_decision(
         period, status, soc, solar_avg_kw_3
     )
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
-    headroom_target_kwh = HEADROOM_TARGET_KWH
+    headroom_target_kwh = (
+        AMBER_HEADROOM_TARGET_KWH
+        if decision_status.upper() == "AMBER"
+        else HEADROOM_TARGET_KWH
+    )
     headroom_deficit_kwh = max(0.0, headroom_target_kwh - headroom_kwh)
     mode, reason = decide_operational_mode(
         DecisionContext(
@@ -160,7 +165,7 @@ def _evaluate_period_mode_decision(
             status=decision_status,
             soc=soc,
             headroom_kwh=headroom_kwh,
-            headroom_target_kwh=HEADROOM_TARGET_KWH,
+            headroom_target_kwh=headroom_target_kwh,
             live_solar_kw=solar_avg_kw_3,
             hours_until_cheap_rate=get_hours_until_cheap_rate(now_utc),
             estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
