@@ -104,6 +104,7 @@ see exactly what values were used and why each decision was made.
    | `CHEAP_RATE_END_HOUR` | `8` | Hour your cheap-rate electricity ends (local time) |
    | `ESTIMATED_HOME_LOAD_KW` | `0.8` | Your average household draw in kW when solar is low |
    | `HEADROOM_TARGET_KWH` | `BATTERY_KWH * 0.5` | Free battery space to maintain before a Green forecast. The alternative physics formula is `(SOLAR_PV_KW - INVERTER_KW) * 3`; use whichever fits your clipping risk tolerance |
+   | `AMBER_HEADROOM_FRACTION` | `0.25` | Fraction of battery capacity to keep free before an Amber forecast (e.g. `0.25` = 25%). Set to `0.0` to disable Amber headroom entirely |
 
    All solar trigger thresholds (`MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW`, `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`) and discharge rate estimates (`PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW`, `EVENING_EXPORT_ASSUMED_DISCHARGE_KW`) are automatically derived from your hardware specs — you do not need to touch them.
 
@@ -286,6 +287,7 @@ These settings are **not** derived from hardware and need manual review:
 | `CHEAP_RATE_START_HOUR` / `CHEAP_RATE_END_HOUR` | Varies by energy provider and tariff plan |
 | `ESTIMATED_HOME_LOAD_KW` | Household draw varies; affects the evening battery-bridge rule |
 | `HEADROOM_TARGET_KWH` | Currently `BATTERY_KWH * 0.5`. The physics alternative is `(SOLAR_PV_KW - INVERTER_KW) * 3` (surplus kW × 3 h reserve). For systems with a large battery relative to array surplus, the physics formula is more appropriate |
+| `AMBER_HEADROOM_FRACTION` | Fraction of battery capacity to maintain as free headroom before an Amber period. Default `0.25` (25% of battery). Set to `0.0` to disable Amber pre-period exports entirely |
 | `PRE_SUNRISE_DISCHARGE_MONTHS` | Months where pre-sunrise discharge is useful — adjust for your latitude and climate |
 
 ### Scheduler and decision thresholds
@@ -305,6 +307,7 @@ FORECAST_SOLAR_POWER_MULTIPLIER = 1.53
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
 HEADROOM_TARGET_KWH = 10.2
+AMBER_HEADROOM_FRACTION = 0.25
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
@@ -337,7 +340,8 @@ Meaning:
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 - `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
-- `HEADROOM_TARGET_KWH`: fixed battery headroom target (10.2 kWh = surplus capacity × 3 hours)
+- `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (10.2 kWh = surplus capacity × 3 hours)
+- `AMBER_HEADROOM_FRACTION`: fraction of battery capacity to maintain as free headroom before Amber periods (default `0.25`); `AMBER_HEADROOM_TARGET_KWH` is derived as `BATTERY_KWH * AMBER_HEADROOM_FRACTION`. Set to `0.0` to disable Amber headroom
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
@@ -650,19 +654,27 @@ $$
 
 The system exports to grid under these conditions.
 
-#### Rule 1: Insufficient headroom before a Green period
+#### Rule 1: Insufficient headroom before a Green or Amber period
 
-The target free headroom is derived from hardware surplus capacity multiplied by a 3-hour reserve window:
+The headroom target varies by forecast status:
+
+| Forecast | Target | Setting |
+|---|---|---|
+| Green | `BATTERY_KWH × 0.5` (e.g. 12 kWh) | `HEADROOM_TARGET_KWH` |
+| Amber | `BATTERY_KWH × 0.25` (e.g. 6 kWh) | `AMBER_HEADROOM_TARGET_KWH` (derived from `AMBER_HEADROOM_FRACTION`) |
+| Red | — (no headroom export) | — |
+
+The Green target is derived from hardware surplus capacity multiplied by a 3-hour reserve window:
 
 $$
-	ext{headroom target} = (\text{solar PV kW} - \text{inverter kW}) \times 3.0 = (8.9 - 5.5) \times 3.0 = 10.2 \text{ kWh}
+\text{headroom target (Green)} = (\text{solar PV kW} - \text{inverter kW}) \times 3.0 = (8.9 - 5.5) \times 3.0 = 10.2 \text{ kWh}
 $$
 
-This fixed target ensures the battery can absorb 3 hours of maximum surplus generation (3.4 kW) without clipping, independent of forecast quality or period.
+The Amber target is a reduced fraction of the battery, reflecting that Amber days carry real but moderate solar risk — enough to warrant partial headroom, but not the full Green reserve. Setting `AMBER_HEADROOM_FRACTION = 0.0` disables Amber headroom entirely.
 
 If:
 $$
-	ext{headroom} < \text{headroom target}
+\text{headroom} < \text{headroom target}
 $$
 
 then the system selects `GRID_EXPORT` to create battery space ahead of the solar period.

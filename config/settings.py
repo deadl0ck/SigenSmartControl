@@ -193,6 +193,11 @@ CHEAP_RATE_END_HOUR = 8
 HEADROOM_TARGET_KWH = BATTERY_KWH * 0.5  # e.g. 24 × 0.5 = 12.0 kWh
 # Alternative physics-based formula: (SOLAR_PV_KW - INVERTER_KW) * 3 = surplus kW × 3 h reserve.
 # For this system that gives 10.2 kWh. BATTERY_KWH * 0.5 adds extra margin; adjust to taste.
+# Target free battery headroom before an Amber period: 25% of total battery capacity.
+# Amber days carry moderate solar risk — less than Green but enough to warrant partial headroom.
+# Set to 0.0 to disable Amber headroom entirely (reverts to pre-2026-05 behaviour).
+AMBER_HEADROOM_FRACTION = 0.25
+AMBER_HEADROOM_TARGET_KWH = BATTERY_KWH * AMBER_HEADROOM_FRACTION  # e.g. 24 × 0.25 = 6.0 kWh
 # Enable bridge-to-cheap-rate rule: before cheap-rate starts, prefer self-powered
 # if current battery energy is sufficient to cover expected household demand.
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
@@ -208,10 +213,9 @@ ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
 PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
 # Conservative assumed net battery discharge power used to size the export window.
 PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2)  # ~36% of inverter capacity
-# High-SOC protection: force GRID_EXPORT for Green periods when battery is very
-# full and headroom is below target, preventing wasted solar due to a full battery.
-# Amber is excluded: moderate solar is unlikely to cause significant clipping, and
-# exporting stored energy overnight on an Amber day wastes more than it saves.
+# High-SOC protection: force GRID_EXPORT for Green or Amber periods when battery is very
+# full and headroom is below the status-appropriate target, preventing wasted solar.
+# Green uses HEADROOM_TARGET_KWH (50%); Amber uses AMBER_HEADROOM_TARGET_KWH (25%).
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 # SOC threshold for the mid-period high-SOC safety export check (combined with solar).
 # When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.

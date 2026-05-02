@@ -22,13 +22,15 @@ def test_cheap_rate_window_is_false_during_evening_shoulder_hours():
 
 
 def test_peak_tariff_overrides_default_forecast_mode_to_self_powered():
+    # headroom_target_kwh=6.0 reflects the Amber target; headroom=8.0 is sufficient
+    # so the headroom export rule does not fire and peak tariff override takes effect.
     mode, reason = decide_operational_mode(
         DecisionContext(
             period="Aftn",
             status="Amber",
             soc=45,
             headroom_kwh=8.0,
-            headroom_target_kwh=10.2,
+            headroom_target_kwh=6.0,
             live_solar_kw=None,
             hours_until_cheap_rate=None,
             estimated_home_load_kw=None,
@@ -101,16 +103,16 @@ def test_evening_red_falls_back_to_ai_when_bridge_energy_is_insufficient():
     assert "Forecast is Red" in reason
 
 
-def test_morning_high_soc_protection_does_not_export_for_amber_when_headroom_is_low():
-    # Amber forecast: high SOC should not trigger protective export — moderate solar
-    # is unlikely to cause significant clipping, and exporting stored energy wastes more.
+def test_amber_exports_when_headroom_below_amber_target():
+    # Amber forecast with high SOC: headroom (0.6 kWh) is below the Amber target
+    # (6.0 kWh), so protective export should trigger to make room for solar.
     mode, reason = decide_operational_mode(
         DecisionContext(
             period="Morn",
             status="Amber",
             soc=97.0,
             headroom_kwh=0.6,
-            headroom_target_kwh=10.2,
+            headroom_target_kwh=6.0,
             live_solar_kw=None,
             hours_until_cheap_rate=None,
             estimated_home_load_kw=None,
@@ -119,18 +121,20 @@ def test_morning_high_soc_protection_does_not_export_for_amber_when_headroom_is_
         )
     )
 
-    assert mode == SIGEN_MODES["SELF_POWERED"]
-    assert "Forecast is Amber" in reason
+    assert mode == SIGEN_MODES["GRID_EXPORT"]
+    assert "headroom" in reason.lower()
 
 
-def test_morning_high_soc_protection_does_not_trigger_below_threshold():
+def test_amber_does_not_export_when_headroom_meets_amber_target():
+    # Amber forecast: headroom (8.0 kWh) already exceeds the Amber target (6.0 kWh),
+    # so no export is needed regardless of SOC.
     mode, reason = decide_operational_mode(
         DecisionContext(
             period="Morn",
             status="Amber",
-            soc=45.0,
-            headroom_kwh=0.6,
-            headroom_target_kwh=10.2,
+            soc=75.0,
+            headroom_kwh=8.0,
+            headroom_target_kwh=6.0,
             live_solar_kw=None,
             hours_until_cheap_rate=None,
             estimated_home_load_kw=None,
