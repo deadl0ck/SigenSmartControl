@@ -244,11 +244,25 @@ class SigenInteraction:
 
     async def get_operational_modes(self) -> list[dict[str, Any]]:
         """Get the list of supported operational modes.
-        
+
+        Normalises the sigen 3.x response (a dict with ``defaultWorkingModes``
+        and ``energyProfileItems`` keys) into the flat list format expected by
+        the rest of the project.
+
         Returns:
-            List of mode dictionaries available on the inverter.
+            List of mode dictionaries with ``value`` and ``label`` keys.
         """
-        return await self._call_with_reauth_once(
+        raw = await self._call_with_reauth_once(
             lambda client: client.get_operational_modes(),
             "get_operational_modes",
         )
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, dict):
+            modes: list[dict[str, Any]] = []
+            for entry in raw.get("defaultWorkingModes") or []:
+                modes.append({"value": entry.get("value"), "label": entry.get("label")})
+            for entry in raw.get("energyProfileItems") or []:
+                modes.append({"value": entry.get("profileId"), "label": entry.get("name")})
+            return modes
+        return []
