@@ -301,19 +301,22 @@ async def start_timed_grid_export(
                     current_mode_raw,
                 )
                 return False
-            # TOU is a night-only charging mode and should never be the restore
-            # target after a timed export:
-            #   - During cheap-rate: restoring to TOU would let the inverter
-            #     recharge from the grid, immediately undoing any headroom just
-            #     created by the export.
-            #   - After cheap-rate: TOU left over from an overnight schedule
-            #     would leave the inverter in the wrong mode for the rest of
-            #     the day.
-            # In both cases, restore to SELF_POWERED instead.
-            if restore_mode == SIGEN_MODES["TOU"]:
+            # Neither TOU nor GRID_EXPORT should ever be the restore target:
+            #   - TOU is a night-only charging mode; restoring to it during or
+            #     after cheap-rate would either recharge the battery from the
+            #     grid (undoing headroom) or leave the inverter in the wrong
+            #     daytime mode.
+            #   - GRID_EXPORT as a restore target means the inverter was already
+            #     in export mode when this export started (e.g. a stale state or
+            #     duplicate scheduler instance). Restoring to GRID_EXPORT would
+            #     leave the inverter exporting indefinitely with no SOC floor
+            #     protection once the timed window ends.
+            # In both cases, fall back to SELF_POWERED.
+            if restore_mode in (SIGEN_MODES["TOU"], SIGEN_MODES["GRID_EXPORT"]):
                 logger.info(
-                    "[TIMED EXPORT] Current mode is TOU — "
-                    "will restore to SELF_POWERED instead to preserve headroom."
+                    "[TIMED EXPORT] Current mode is %s — "
+                    "will restore to SELF_POWERED instead.",
+                    restore_label,
                 )
                 restore_mode = SIGEN_MODES["SELF_POWERED"]
             restore_label = str(mode_names.get(restore_mode, restore_mode))
