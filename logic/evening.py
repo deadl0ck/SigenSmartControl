@@ -37,6 +37,7 @@ from logic.decision_logic import (
 from logic.decision_logging import log_decision_checkpoint
 from logic.period_handler_shared import PeriodHandlerContext, _evaluate_period_mode_decision
 from logic.schedule_utils import (
+    get_cheap_rate_end_utc,
     get_hours_until_cheap_rate,
     get_schedule_period_for_time,
     is_cheap_rate_window,
@@ -249,7 +250,13 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                     return True
 
     # --- Pre-period export check ---
-    if not s["pre_set"] and period_start - timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES) <= now_utc < period_start:
+    _cheap_rate_end = get_cheap_rate_end_utc(now_utc)
+    _pre_period_target = (
+        max(period_start, _cheap_rate_end)
+        if _cheap_rate_end is not None and _cheap_rate_end > period_start
+        else period_start
+    )
+    if not s["pre_set"] and _pre_period_target - timedelta(minutes=MAX_PRE_PERIOD_WINDOW_MINUTES) <= now_utc < _pre_period_target:
         soc = await fetch_soc(PERIOD)
         if soc is not None:
             solar_avg_kw_3 = get_live_solar_average_kw()
@@ -274,15 +281,15 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                 lead_time_hours_adjusted = (
                     headroom_deficit * period_calibration["export_lead_buffer_multiplier"]
                 ) / effective_battery_export_kw
-                export_by = period_start - timedelta(hours=lead_time_hours_adjusted)
+                export_by = _pre_period_target - timedelta(hours=lead_time_hours_adjusted)
             else:
-                export_by = period_start
+                export_by = _pre_period_target
 
             if now_utc >= export_by:
                 pre_check_complete = False
                 if mode == SIGEN_MODES["GRID_EXPORT"]:
                     duration_minutes = max(
-                        1, math.ceil((period_start - now_utc).total_seconds() / 60)
+                        1, math.ceil((_pre_period_target - now_utc).total_seconds() / 60)
                     )
                     log_decision_checkpoint(
                         PERIOD, "PRE-PERIOD",
@@ -354,6 +361,8 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                     mode=mode, reason=reason,
                     outcome="waiting until export window opens",
                 )
+                if now_utc >= period_start:
+                    return True
 
     # --- Period-start: set the definitive mode ---
     if not s["start_set"] and now_utc >= period_start:
