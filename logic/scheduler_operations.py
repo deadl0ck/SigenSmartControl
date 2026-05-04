@@ -104,13 +104,13 @@ async def refresh_daily_data(
 
     if reset_day_state:
         state.day_state = {
-            p: {"pre_set": False, "start_set": False, "clipping_export_set": False}
+            p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
             for p in daytime_periods
         }
     else:
         for period in daytime_periods:
             state.day_state.setdefault(
-                period, {"pre_set": False, "start_set": False, "clipping_export_set": False}
+                period, {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
             )
 
     state.last_forecast_refresh_utc = datetime.now(timezone.utc)

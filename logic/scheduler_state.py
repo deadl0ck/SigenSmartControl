@@ -20,11 +20,15 @@ class DayStateEntry(TypedDict):
         pre_set: True once the pre-period headroom/export check has been applied.
         start_set: True once the period-start mode decision has been applied.
         clipping_export_set: True once a live clipping-risk export has been started.
+        high_soc_export_set: True once a mid-period high-SOC safety export has fired.
+            Prevents repeated exports within the same period after solar recharges
+            the battery above the trigger threshold.
     """
 
     pre_set: bool
     start_set: bool
     clipping_export_set: bool
+    high_soc_export_set: bool
 
 
 class NightState(TypedDict):
