@@ -130,6 +130,34 @@ def is_cheap_rate_window(now_utc: datetime) -> bool:
     return local_hour >= CHEAP_RATE_START_HOUR or local_hour < CHEAP_RATE_END_HOUR
 
 
+def get_cheap_rate_end_utc(now_utc: datetime) -> datetime | None:
+    """Return the UTC time when the current cheap-rate window ends.
+
+    Args:
+        now_utc: Current time in UTC.
+
+    Returns:
+        The UTC datetime at which the current cheap-rate window ends, or None
+        if we are not currently inside a cheap-rate window.
+    """
+    if not is_cheap_rate_window(now_utc):
+        return None
+    local_now = now_utc.astimezone(LOCAL_TZ)
+    cheap_end_local = local_now.replace(
+        hour=CHEAP_RATE_END_HOUR,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    # Wrap-around window (e.g. 23:00–08:00): if we are in the "after-midnight"
+    # portion (local hour < CHEAP_RATE_END_HOUR) the end is today; if in the
+    # "before-midnight" portion (local hour >= CHEAP_RATE_START_HOUR) the end
+    # is tomorrow.
+    if CHEAP_RATE_START_HOUR >= CHEAP_RATE_END_HOUR and local_now.hour >= CHEAP_RATE_START_HOUR:
+        cheap_end_local += timedelta(days=1)
+    return cheap_end_local.astimezone(timezone.utc)
+
+
 def get_hours_until_cheap_rate(now_utc: datetime) -> float:
     """Calculate hours until the next cheap-rate window opens in local timezone.
 

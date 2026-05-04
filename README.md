@@ -156,7 +156,7 @@ see exactly what values were used and why each decision was made.
 │   ├── inverter_control.py              # Command/write helpers and live-solar sampling
 │   ├── immersion_control.py             # SwitchBot immersion heater boost control
 │   ├── scenario_simulation.py           # Deterministic multi-day scenario generation and evaluation
-│   └── schedule_utils.py               # Period detection and cheap-rate window calculations
+│   └── schedule_utils.py               # Period detection, cheap-rate window calculations, and cheap-rate end time helper
 ├── integrations/
 │   ├── sigen_interaction.py             # All Sigen API calls — centralizes mode get/set
 │   ├── sigen_auth.py                    # Lazy-loaded singleton Sigen client from .env credentials
@@ -705,21 +705,21 @@ If more battery headroom is needed before the upcoming period, the scheduler est
 Headroom deficit:
 
 $$
-	ext{headroom deficit} = \max(0, \text{headroom target} - \text{headroom})
+\text{headroom deficit} = \max(0, \text{headroom target} - \text{headroom})
 $$
 
 Lead time before the period:
 
 $$
-	ext{solar avg kW (latest 3)} = \text{average of latest 3 live solar readings}
+\text{solar avg kW (latest 3)} = \text{average of latest 3 live solar readings}
 $$
 
 $$
-	ext{effective battery export kW} = \max(0.2, \text{inverter kW} - \text{solar avg kW (latest 3)})
+\text{effective battery export kW} = \max(0.2, \text{inverter kW} - \text{solar avg kW (latest 3)})
 $$
 
 $$
-	ext{lead time hours} = \frac{\text{headroom deficit} \times \text{export lead buffer multiplier}}{\text{effective battery export kW}}
+\text{lead time hours} = \frac{\text{headroom deficit} \times \text{export lead buffer multiplier}}{\text{effective battery export kW}}
 $$
 
 This causes earlier export start when live solar is already high (because less inverter headroom remains for battery discharge).
@@ -727,10 +727,17 @@ This causes earlier export start when live solar is already high (because less i
 The scheduler then calculates:
 
 $$
-	ext{export by} = \text{period start} - \text{lead time}
+\text{export target} = \max(\text{period start},\ \text{cheap-rate end})
 $$
 
-When current time is at or after `export_by`, it can trigger the pre-period export decision.
+$$
+\text{export by} = \text{export target} - \text{lead time}
+$$
+
+When current time is at or after `export_by`, it triggers the pre-period export decision.
+
+**Why anchor to cheap-rate end rather than period start?**
+In summer the morning solar period starts at sunrise (e.g. 05:20 BST) but cheap-rate TOU charging continues until 08:00 BST. Exporting early to create headroom would be immediately undone by TOU refilling the battery from the grid. By anchoring the target to `max(period_start, cheap_rate_end)`, the export is timed to complete just as TOU stops — so headroom is created at the moment it can actually be preserved. The pre-period window and export duration are both extended to match this later target.
 
 ### Night behavior
 
