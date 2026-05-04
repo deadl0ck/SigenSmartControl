@@ -219,8 +219,9 @@ PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW = round(INVERTER_KW * 0.36, 2) 
 MORNING_HIGH_SOC_PROTECTION_ENABLED = True
 # SOC threshold for the mid-period high-SOC safety export check (combined with solar).
 # When SOC >= this AND solar >= MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW, export is triggered.
-# 50% (12 kWh) matches HEADROOM_TARGET_KWH: above this the battery cannot absorb a full-day Green surplus without clipping.
-MORNING_HIGH_SOC_THRESHOLD_PERCENT = 50.0
+# 55% gives a 10% gap above the 45% SOC floor (DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT),
+# ensuring each export creates meaningful headroom before stopping.
+MORNING_HIGH_SOC_THRESHOLD_PERCENT = 55.0
 # Solar generation threshold (kW) for mid-period high-SOC safety export.
 # Only triggers when live solar is this strong and SOC >= MORNING_HIGH_SOC_THRESHOLD_PERCENT.
 MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.39, 2)  # ~39% of array capacity

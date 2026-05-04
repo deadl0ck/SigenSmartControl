@@ -40,12 +40,14 @@ def _make_period_state(
     pre_set: bool = False,
     start_set: bool = False,
     clipping_export_set: bool = False,
+    high_soc_export_set: bool = False,
 ) -> DayStateEntry:
     """Return a fresh DayStateEntry with the given flag values."""
     return DayStateEntry(
         pre_set=pre_set,
         start_set=start_set,
         clipping_export_set=clipping_export_set,
+        high_soc_export_set=high_soc_export_set,
     )
 
 
@@ -166,6 +168,11 @@ class TestDayStateInitialValues:
         """A freshly created DayStateEntry has clipping_export_set=False."""
         entry = _make_period_state()
         assert entry["clipping_export_set"] is False
+
+    def test_high_soc_export_set_false_initially(self):
+        """A freshly created DayStateEntry has high_soc_export_set=False."""
+        entry = _make_period_state()
+        assert entry["high_soc_export_set"] is False
 
 
 # ---------------------------------------------------------------------------

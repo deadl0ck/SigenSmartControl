@@ -124,6 +124,7 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
     # --- Mid-period high-SOC safety export check ---
     if (
         s["start_set"]
+        and not s["high_soc_export_set"]
         and not timed_export_override["active"]
         and now_utc >= period_start
         and (period_end_utc is None or now_utc < period_end_utc)
@@ -168,17 +169,14 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
                     mode=SIGEN_MODES["GRID_EXPORT"], reason=mid_period_reason,
                     outcome="mid-period high-SOC safety export triggered",
                 )
-                mid_period_headroom_target_soc = max(
-                    DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
-                    100.0 - mid_period_headroom_target_kwh / BATTERY_KWH * 100.0,
-                )
                 mid_period_override_started = await start_timed_grid_export(
                     period=PERIOD, reason=mid_period_reason,
                     duration_minutes=mid_period_duration_minutes,
                     now_utc=now_utc, battery_soc=mid_period_soc, is_clipping_export=True,
-                    export_soc_floor=mid_period_headroom_target_soc,
+                    export_soc_floor=DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
                 )
                 if mid_period_override_started:
+                    s["high_soc_export_set"] = True
                     return True
 
     # --- Pre-period export check ---
