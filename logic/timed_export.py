@@ -301,13 +301,19 @@ async def start_timed_grid_export(
                     current_mode_raw,
                 )
                 return False
-            # TOU is a night-only mode. If the inverter is in TOU outside the cheap-rate
-            # window (e.g. left over from an overnight Sigen schedule), restoring to it
-            # after a daytime export would leave it in the wrong mode all day.
-            if restore_mode == SIGEN_MODES["TOU"] and not is_cheap_rate_window(now_utc):
+            # TOU is a night-only charging mode and should never be the restore
+            # target after a timed export:
+            #   - During cheap-rate: restoring to TOU would let the inverter
+            #     recharge from the grid, immediately undoing any headroom just
+            #     created by the export.
+            #   - After cheap-rate: TOU left over from an overnight schedule
+            #     would leave the inverter in the wrong mode for the rest of
+            #     the day.
+            # In both cases, restore to SELF_POWERED instead.
+            if restore_mode == SIGEN_MODES["TOU"]:
                 logger.info(
-                    "[TIMED EXPORT] Current mode is TOU outside cheap-rate window — "
-                    "will restore to SELF_POWERED instead."
+                    "[TIMED EXPORT] Current mode is TOU — "
+                    "will restore to SELF_POWERED instead to preserve headroom."
                 )
                 restore_mode = SIGEN_MODES["SELF_POWERED"]
             restore_label = str(mode_names.get(restore_mode, restore_mode))
