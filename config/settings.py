@@ -235,9 +235,9 @@ LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 # Lowered to trigger protective export before the battery is almost full.
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 # Rolling live-solar kW threshold for live clipping-risk promotion.
-# Lowered so underforecast high-irradiance ramps are caught earlier.
-# 3.2 kW ≈ 36% of array capacity; at this level surplus already exceeds typical home load, so battery fill risk is real if headroom is low.
-LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = round(SOLAR_PV_KW * 0.36, 2)  # ~36% of array capacity
+# Raised to require a sustained high-irradiance run before promoting Amber→Green.
+# 4.5 kW ≈ 51% of array capacity; avoids triggering on brief cloud-break spikes on Amber days.
+LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.5
 # SOC floor for mid-period clipping export: if timed export started by clipping-risk
 # promotion drops SOC to this floor, cancel the export and restore prior mode.
 # Set to 5% below the promotion threshold to avoid yo-yo behavior.
