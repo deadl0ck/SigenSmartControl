@@ -379,7 +379,7 @@ Forecast ingestion is abstracted behind a stable provider interface in `weather/
 - Default runtime mode (`FORECAST_PROVIDER=esb_api`) uses ESB county API data for decisions.
 - In ESB mode, the app pulls Forecast.Solar first and Quartz second and logs a period-by-period comparison summary each refresh.
 - Forecast.Solar and Quartz are comparison-only in this mode; inverter decisions still follow ESB-derived statuses.
-- For numeric watts used in headroom/clipping calculations, backup priority is Forecast.Solar first, then Quartz.
+- Secondary and tertiary providers are comparison-only — they are logged but do not influence decisions or headroom calculations.
 - If you set `FORECAST_PROVIDER=forecast_solar`, Forecast.Solar becomes the decision source.
 - If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
 - If you set `FORECAST_PROVIDER=solcast`, Solcast becomes the decision source (see Solcast section below).

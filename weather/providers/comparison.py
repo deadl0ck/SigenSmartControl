@@ -296,16 +296,7 @@ class ForecastComparisonProvider:
 
         self.logger.info(
             f"[FORECAST-COMPARE] Decision provider is {self._primary_name}. "
-            f"{self._secondary_name} is comparison-only and does not drive inverter decisions."
-        )
-        if self._tertiary_name is not None:
-            self.logger.info(
-                f"[FORECAST-COMPARE] Backup order for numeric watts: "
-                f"{self._secondary_name} first, {self._tertiary_name} second."
-            )
-        self.logger.info(
-            f"[FORECAST-COMPARE] Scheduler calculations keep {self._primary_name} statuses "
-            f"but use {self._secondary_name} site-level watts when available to estimate clipping risk."
+            f"All other providers are comparison-only and do not influence decisions or headroom calculations."
         )
         self.logger.info(
             "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
@@ -336,18 +327,10 @@ class ForecastComparisonProvider:
         )
 
     def get_todays_period_forecast(self) -> PeriodForecast:
-        return self._merge_primary_status_with_secondary_values(
-            self._primary.get_todays_period_forecast(),
-            self._secondary.get_todays_period_forecast(),
-            self._tertiary.get_todays_period_forecast() if self._tertiary is not None else None,
-        )
+        return self._primary.get_todays_period_forecast()
 
     def get_tomorrows_period_forecast(self) -> PeriodForecast:
-        return self._merge_primary_status_with_secondary_values(
-            self._primary.get_tomorrows_period_forecast(),
-            self._secondary.get_tomorrows_period_forecast(),
-            self._tertiary.get_tomorrows_period_forecast() if self._tertiary is not None else None,
-        )
+        return self._primary.get_tomorrows_period_forecast()
 
     def get_todays_solar_values(self) -> list[str]:
         return self._primary.get_todays_solar_values()
