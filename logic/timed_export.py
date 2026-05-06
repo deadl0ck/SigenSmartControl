@@ -21,13 +21,16 @@ The timed export override follows a three-state lifecycle:
     is True and ``now_utc < restore_at``.  The scheduler skips all normal mode
     decisions until the window ends or an SOC floor fires.
 
-**extended**: ``restore_at`` was reached but SOC is still above ``export_soc_floor``,
-    meaning solar kept refilling the battery faster than the export drained it.
+**extended**: ``restore_at`` was reached but export conditions are still active.
     ``restore_at`` is bumped forward by the original ``duration_minutes`` (capped at
     the ``MAX_TIMED_EXPORT_MINUTES`` wall from ``started_at``) and the state remains
     *active*.  This prevents the stop/cooldown/restart cycle that would otherwise
-    add a 15-minute gap before export resumes.  Only applies when ``export_soc_floor``
-    is set (headroom-based exports); clipping exports are not extended.
+    add a 15-minute gap before export resumes.
+
+    For headroom-based exports: extends when SOC is still above ``export_soc_floor``.
+    For clipping exports: extends when SOC is still above
+    ``LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`` (the same threshold that triggered
+    the export), indicating solar is still filling the battery.
 
 **restored**: The export window ended (or an SOC floor fired) and the previous
     mode was reinstated this tick.  ``maybe_restore_timed_grid_export`` returns
@@ -40,9 +43,11 @@ The timed export override follows a three-state lifecycle:
 * **inactive → active**: ``start_timed_grid_export()`` succeeds — the inverter
   accepted the GRID_EXPORT command and state is written to disk.
 
-* **active → active** (extended): ``restore_at`` is reached, ``export_soc_floor``
-  is set, and current SOC is still above that floor.  ``restore_at`` is advanced
-  and the override remains active.  Capped at ``started_at + MAX_TIMED_EXPORT_MINUTES``.
+* **active → active** (extended): ``restore_at`` is reached and export conditions
+  are still active.  ``restore_at`` is advanced and the override remains active.
+  Capped at ``started_at + MAX_TIMED_EXPORT_MINUTES``.  For headroom exports this
+  requires SOC still above ``export_soc_floor``; for clipping exports it requires
+  SOC still above ``LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT``.
 
 * **active → restored** (normal): ``restore_at`` is reached and either no
   ``export_soc_floor`` is configured, the cap has been reached, or SOC has
@@ -78,6 +83,7 @@ from zoneinfo import ZoneInfo
 from config.constants import TIMED_EXPORT_STATE_PATH
 from config.settings import (
     LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT,
+    LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
     LOCAL_TIMEZONE,
     MAX_TIMED_EXPORT_MINUTES,
     SIGEN_MODES,
@@ -490,18 +496,16 @@ async def maybe_restore_timed_grid_export(
     if now_utc < restore_at:
         return "active"
 
-    # Auto-extension: before restoring, check whether headroom has actually been
-    # recovered. When solar keeps refilling the battery faster than the export drains
-    # it, SOC stays above the floor even after the planned window. In that case, bump
-    # restore_at forward by the original duration (capped at the MAX_TIMED_EXPORT_MINUTES
-    # wall from started_at) and stay active — this avoids the stop/cooldown/restart gap.
-    # Only headroom-based exports set export_soc_floor; clipping exports are not extended.
-    if export_soc_floor is not None:
-        started_at = timed_export_override.get("started_at")
-        original_duration = timed_export_override.get("duration_minutes") or 0
-        if started_at is not None:
-            max_end_utc = started_at + timedelta(minutes=MAX_TIMED_EXPORT_MINUTES)
-            if now_utc < max_end_utc:
+    # Auto-extension: before restoring, check whether export conditions are still
+    # active. When solar keeps refilling the battery faster than the export drains it,
+    # SOC stays above the threshold even after the planned window. Bump restore_at
+    # forward rather than stopping and restarting after the cooldown gap.
+    started_at = timed_export_override.get("started_at")
+    original_duration = timed_export_override.get("duration_minutes") or 0
+    if started_at is not None:
+        max_end_utc = started_at + timedelta(minutes=MAX_TIMED_EXPORT_MINUTES)
+        if now_utc < max_end_utc:
+            if export_soc_floor is not None:
                 extend_soc = await fetch_soc("timed-export-extend-check")
                 if extend_soc is not None and extend_soc > export_soc_floor:
                     extension_end = now_utc + timedelta(minutes=max(original_duration, 1))
@@ -513,6 +517,27 @@ async def maybe_restore_timed_grid_export(
                         "(until %s, cap %s).",
                         extend_soc,
                         export_soc_floor,
+                        ext_minutes,
+                        new_restore_at.isoformat(),
+                        max_end_utc.isoformat(),
+                    )
+                    extended_state = dict(timed_export_override)
+                    extended_state["restore_at"] = new_restore_at
+                    set_timed_export_override(extended_state)
+                    return "active"
+
+            elif is_clipping:
+                extend_soc = await fetch_soc("clipping-export-extend-check")
+                if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
+                    extension_end = now_utc + timedelta(minutes=max(original_duration, 1))
+                    new_restore_at = min(extension_end, max_end_utc)
+                    ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
+                    logger.info(
+                        "[TIMED EXPORT] Clipping window expired but SOC (%.1f%%) is still above the "
+                        "%.1f%% trigger threshold — extending export by %s minute(s) "
+                        "(until %s, cap %s).",
+                        extend_soc,
+                        LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
                         ext_minutes,
                         new_restore_at.isoformat(),
                         max_end_utc.isoformat(),

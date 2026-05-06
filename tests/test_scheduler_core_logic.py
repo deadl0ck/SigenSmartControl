@@ -194,11 +194,102 @@ class TestTimedExportStateMachine:
         is_clipping_export = True
         clipping_soc_floor = 30.0
         current_soc = 28.0
-        
+
         should_restore = current_soc <= clipping_soc_floor and is_clipping_export
-        
+
         assert should_restore is True
         logger.info(f"[TEST] Clipping export: SOC {current_soc}% <= clipping floor {clipping_soc_floor}%, restore")
+
+    @pytest.mark.asyncio
+    async def test_clipping_export_extends_when_soc_above_trigger(self):
+        """Clipping export at restore_at with SOC still above trigger threshold should extend."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+        from config.settings import LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT
+
+        started_at = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 5, 6, 12, 15, tzinfo=timezone.utc)
+        now_utc = restore_at + timedelta(seconds=1)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Morn",
+            "duration_minutes": 15,
+            "is_clipping_export": True,
+            "clipping_soc_floor": 45.0,
+            "export_soc_floor": None,
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT + 10)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+        )
+
+        assert result == "active", "Should extend, not restore"
+        assert saved_state.get("restore_at") > restore_at, "restore_at should be bumped"
+        apply_mode_change.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_clipping_export_restores_when_soc_at_trigger_threshold(self):
+        """Clipping export at restore_at with SOC at or below trigger threshold should restore."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+        from config.settings import LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT
+
+        started_at = datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 5, 6, 12, 15, tzinfo=timezone.utc)
+        now_utc = restore_at + timedelta(seconds=1)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Morn",
+            "duration_minutes": 15,
+            "is_clipping_export": True,
+            "clipping_soc_floor": 45.0,
+            "export_soc_floor": None,
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+        )
+
+        assert result == "restored", "Should restore when SOC is at trigger threshold"
+        apply_mode_change.assert_called_once()
 
     def test_timed_export_persistence_structure(self):
         """Persisted timed export state should include all required fields."""
