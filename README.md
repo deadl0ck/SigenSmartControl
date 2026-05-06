@@ -516,7 +516,7 @@ stateDiagram-v2
     TimedExportCheck --> NightCheck: No active timed export
 
     TimedExportActive --> RestoreCheck: Restore time reached OR SOC floor hit?
-    RestoreCheck --> AutoExtend: Window expired but SOC still above floor?
+    RestoreCheck --> AutoExtend: Window expired but SOC still above threshold?
     AutoExtend --> BumpRestoreAt: YES - extend window (bump restore_at forward)
     BumpRestoreAt --> SkipNormalDecisions
     AutoExtend --> Restore: NO - restore to pre-export mode (saved at export start)
@@ -589,7 +589,7 @@ stateDiagram-v2
 **Key state flows:**
 
 - **Timed Export Override**: Once active (from pre-export, clipping, or high-SOC), all normal scheduler decisions are skipped until the export window expires or SOC floor is reached (early exit). The restore target mode is saved at export start, not at restore time.
-- **Auto-Extension**: If the export window expires but SOC is still above the floor, the restore timestamp is bumped forward rather than restoring — this avoids immediately re-triggering the same export on the next tick.
+- **Auto-Extension**: If the export window expires but export conditions are still active, the restore timestamp is bumped forward rather than restoring — this avoids the stop/cooldown/restart gap. For headroom-based exports, "still active" means SOC is still above `export_soc_floor`. For clipping exports, it means SOC is still above `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT` (the same threshold that triggered the export), indicating solar is still filling the battery.
 - **Day Boundary**: Triggers forecast and sunrise/sunset refresh; resets per-period action flags (pre-set, start-set, clipping-export-set, high-soc-export-set)
 - **Night Branching**: If night mode is enabled, either handles summer pre-sunrise discharge (PRE-DAWN) or pre-cheap-rate export (EVENING-NIGHT)
 - **Daytime Evaluation**: For each period in order:
