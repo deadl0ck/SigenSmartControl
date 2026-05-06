@@ -28,6 +28,7 @@ from weather.providers.comparison import ComparisonConfig, ForecastComparisonPro
 from weather.providers.esb import EsbSolarForecast
 from weather.providers.forecast_solar import ForecastSolarForecast as _ForecastSolarForecast
 from weather.providers.quartz import QuartzSolarForecast as _QuartzSolarForecast
+from weather.providers.solcast import SolcastForecast as _SolcastForecast
 
 
 SolarForecast = EsbSolarForecast
@@ -49,6 +50,7 @@ class QuartzSolarForecast(_QuartzSolarForecast):
 
 
 ForecastSolarForecast = _ForecastSolarForecast
+SolcastForecast = _SolcastForecast
 
 
 class ComparingSolarForecastProvider(ForecastComparisonProvider):
@@ -88,6 +90,39 @@ class ComparingSolarForecastProvider(ForecastComparisonProvider):
         )
 
 
+def _log_solcast_comparison(
+    logger: logging.Logger,
+    esb_primary: SolarForecastProvider,
+) -> None:
+    """Instantiate Solcast, archive its forecast, and log a period-by-period comparison against ESB."""
+    try:
+        solcast = SolcastForecast(logger)
+    except Exception as exc:
+        logger.warning("[SOLCAST] Unavailable for comparison logging: %s", exc)
+        return
+
+    period_order = {"Morn": 0, "Aftn": 1, "Eve": 2, "Night": 3}
+    for day_label, esb_forecast, solcast_forecast in (
+        ("Today", esb_primary.get_todays_period_forecast(), solcast.get_todays_period_forecast()),
+        ("Tomorrow", esb_primary.get_tomorrows_period_forecast(), solcast.get_tomorrows_period_forecast()),
+    ):
+        periods = sorted(set(esb_forecast) | set(solcast_forecast), key=lambda p: period_order.get(p, 99))
+        logger.info("[SOLCAST-COMPARE] %s: ESB (decision source) vs Solcast (comparison only)", day_label)
+        for period in periods:
+            if period == "Night":
+                continue
+            esb_val = esb_forecast.get(period)
+            sol_val = solcast_forecast.get(period)
+            if esb_val is None or sol_val is None:
+                logger.info("[SOLCAST-COMPARE]   %s: incomplete data | esb=%s | solcast=%s", period, esb_val, sol_val)
+                continue
+            verdict = "MATCH" if esb_val[1] == sol_val[1] else "DIFF"
+            logger.info(
+                "[SOLCAST-COMPARE]   %s: %s | esb=%s (synthetic) | solcast=%s (%dW)",
+                period, verdict, esb_val[1], sol_val[1], sol_val[0],
+            )
+
+
 def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvider:
     """Create the active forecast provider based on constants configuration."""
     if FORECAST_PROVIDER == "esb_api":
@@ -110,6 +145,8 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
         quartz_provider = next(
             (p for p in providers if isinstance(p, QuartzSolarForecast)), None
         )
+
+        _log_solcast_comparison(logger, primary)
 
         if forecast_solar_provider is not None:
             return ComparingSolarForecastProvider(
@@ -142,9 +179,12 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
     if FORECAST_PROVIDER == "quartz":
         return QuartzSolarForecast(logger)
 
+    if FORECAST_PROVIDER == "solcast":
+        return SolcastForecast(logger)
+
     raise ValueError(
         f"Unsupported FORECAST_PROVIDER='{FORECAST_PROVIDER}'. "
-        "Use 'esb_api', 'forecast_solar' or 'quartz'."
+        "Use 'esb_api', 'forecast_solar', 'quartz' or 'solcast'."
     )
 
 

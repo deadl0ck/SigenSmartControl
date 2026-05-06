@@ -56,6 +56,7 @@ LONGITUDE: Final[float] = _get_env_float_required("SIGEN_LONGITUDE")
 # - "esb_api": ESB Networks county forecast API (default)
 # - "quartz": Open Quartz site-level forecast API (optional provider)
 # - "forecast_solar": Forecast.Solar site-level forecast API (optional provider)
+# - "solcast": Solcast rooftop-site forecast API (optional provider)
 FORECAST_PROVIDER: Final[str] = os.getenv("FORECAST_PROVIDER", "esb_api").strip().lower()
 
 # County used for the ESB county-level forecast API.
@@ -163,6 +164,17 @@ FORECAST_CALIBRATION_PATH: Final[str] = os.getenv(
 FORECAST_SOLAR_ARCHIVE_PATH: Final[str] = os.getenv(
     "FORECAST_SOLAR_ARCHIVE_PATH",
     "data/forecast_solar_readings.jsonl",
+).strip()
+
+# Solcast rooftop forecast provider settings.
+SOLCAST_API_KEY: Final[str] = os.getenv("SOLCAST_API_KEY", "").strip()
+SOLCAST_ROOFTOP_URL: Final[str] = os.getenv(
+    "SOLCAST_ROOFTOP_URL",
+    "https://api.solcast.com.au/rooftop_sites/07bb-8729-7163-dfe9/forecasts?format=json",
+).strip()
+SOLCAST_ARCHIVE_PATH: Final[str] = os.getenv(
+    "SOLCAST_ARCHIVE_PATH",
+    "data/solcast_readings.jsonl",
 ).strip()
 
 # Local archive file for Zappi EV charger telemetry snapshots.
