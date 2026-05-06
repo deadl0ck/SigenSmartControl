@@ -12,7 +12,7 @@
    - [Portability](#portability)
    - [Scheduler and decision thresholds](#scheduler-and-decision-thresholds)
    - [Tariff schedule windows](#tariff-schedule-windows)
-   - [Forecast providers](#forecast-providers-esb-primary-forecastsolar-backup-quartz-fallback)
+   - [Forecast providers](#forecast-providers-esb-primary-forecastsolar-backup-quartz-fallback-solcast-optional)
    - [Mode mappings](#mode-mappings)
    - [Decision order](#final-decision-order-very-important)
 7. [How It Works](#how-it-works)
@@ -108,7 +108,7 @@ see exactly what values were used and why each decision was made.
 
    All solar trigger thresholds (`MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW`, `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`) and discharge rate estimates (`PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW`, `EVENING_EXPORT_ASSUMED_DISCHARGE_KW`) are automatically derived from your hardware specs — you do not need to touch them.
 
-5. **Note for non-Irish users:** The default forecast provider is the **ESB county API**, which is an Irish electricity grid service and only works in Ireland. It divides the day into four periods — `Morn`, `Aftn`, `Eve`, and `Night` — aligned to local Irish time. If you are outside Ireland, set `FORECAST_PROVIDER` in `config/settings.py` to `"forecast_solar"` or `"quartz"` instead, and configure the corresponding API credentials. The period structure and decision logic work the same regardless of provider.
+5. **Note for non-Irish users:** The default forecast provider is the **ESB county API**, which is an Irish electricity grid service and only works in Ireland. It divides the day into four periods — `Morn`, `Aftn`, `Eve`, and `Night` — aligned to local Irish time. If you are outside Ireland, set `FORECAST_PROVIDER` in `config/settings.py` to `"forecast_solar"`, `"quartz"`, or `"solcast"` instead, and configure the corresponding API credentials. The period structure and decision logic work the same regardless of provider.
 
 6. Run in simulation mode first (default). `FULL_SIMULATION_MODE = True` in `config/settings.py` means no commands are sent to the inverter — you can watch the decisions in the log safely.
 
@@ -176,6 +176,7 @@ see exactly what values were used and why each decision was made.
 │   │   ├── esb.py                       # ESB county API provider (primary decision source)
 │   │   ├── forecast_solar.py            # Forecast.Solar provider (comparison)
 │   │   ├── quartz.py                    # Quartz provider (comparison)
+│   │   ├── solcast.py                   # Solcast rooftop provider with rate-limit-safe disk cache
 │   │   ├── comparison.py                # Side-by-side provider comparison and archiving
 │   │   └── common.py                    # Shared provider interfaces and base behaviour
 │   └── sunrise_sunset.py               # Sunrise/sunset lookup for period window derivation
@@ -230,6 +231,9 @@ GMAIL_APP_PASSWORD=your_gmail_app_password
 # Optional — myenergi Zappi EV charger (see Zappi section below)
 #MYENERGI_HUB_SERIAL=your_hub_serial
 #MYENERGI_API_KEY=your_api_key
+
+# Optional — Solcast rooftop forecast (see Forecast providers section below)
+#SOLCAST_API_KEY=your_solcast_api_key
 ```
 
 4. Edit `config/settings.py` for your hardware and scheduler settings.
@@ -333,13 +337,14 @@ Meaning:
 - `LOCAL_TIMEZONE`: timezone used when evaluating tariff windows
 - `CHEAP_RATE_START_HOUR`: local-hour start of cheap night rates
 - `CHEAP_RATE_END_HOUR`: local-hour end of cheap night rates
-- `FORECAST_PROVIDER`: active provider (`esb_api`, `forecast_solar`, or `quartz`)
+- `FORECAST_PROVIDER`: active provider (`esb_api`, `forecast_solar`, `quartz`, or `solcast`)
 - `ESB_FORECAST_COUNTY`: county name used for ESB county API lookup (e.g., `Westmeath`)
 - `QUARTZ_FORECAST_API_URL`: Open Quartz endpoint (used for comparison or as active provider)
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 - `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
+- `SOLCAST_MIN_FETCH_INTERVAL_MINUTES`: minimum minutes between live Solcast API calls (default `180`); cached response from `data/solcast_readings.jsonl` is used in between to stay within the free-tier 10-calls/day limit
 - `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (12.0 kWh = BATTERY_KWH × 0.5)
 - `AMBER_HEADROOM_FRACTION`: fraction of battery capacity to maintain as free headroom before Amber periods (default `0.25`); `AMBER_HEADROOM_TARGET_KWH` is derived as `BATTERY_KWH * AMBER_HEADROOM_FRACTION`. Set to `0.0` to disable Amber headroom
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
@@ -367,7 +372,7 @@ The tariff time windows in `config/settings.py` define when each tariff period i
 
 The scheduler uses these windows to determine whether to use self-powered or TOU modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions from forecast quality, SOC/headroom, and tariff period.
 
-### Forecast providers (ESB primary, Forecast.Solar backup, Quartz fallback)
+### Forecast providers (ESB primary, Forecast.Solar backup, Quartz fallback, Solcast optional)
 
 Forecast ingestion is abstracted behind a stable provider interface in `weather/forecast.py`.
 
@@ -377,6 +382,7 @@ Forecast ingestion is abstracted behind a stable provider interface in `weather/
 - For numeric watts used in headroom/clipping calculations, backup priority is Forecast.Solar first, then Quartz.
 - If you set `FORECAST_PROVIDER=forecast_solar`, Forecast.Solar becomes the decision source.
 - If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
+- If you set `FORECAST_PROVIDER=solcast`, Solcast becomes the decision source (see Solcast section below).
 
 Why keep Forecast.Solar/Quartz as secondary sources while ESB is primary:
 
@@ -408,6 +414,39 @@ Actual inverter telemetry is also archived locally for later analysis:
 - When night sleep mode is active, the scheduler also writes a dedicated `night_sleep_start` snapshot before entering the long evening sleep window so the latest daily totals (including `pvDayNrg`) are preserved.
 - Each record also includes derived clipping heuristics. A sample is flagged as likely clipping only when inverter-side solar equals the `5.5 kW` ceiling.
 - This file is intended for post-run analysis so you can compare forecasted periods against what the inverter and battery actually did.
+
+#### Solcast rooftop forecast provider
+
+[Solcast](https://toolkit.solcast.com.au) offers a site-specific rooftop PV forecast based on satellite irradiance data. The free Hobbyist tier allows **10 API calls per day**.
+
+**Setup**
+
+1. Register at [toolkit.solcast.com.au](https://toolkit.solcast.com.au) and create a rooftop site with your location, tilt, and azimuth.
+
+2. **Azimuth convention**: Solcast uses **North = 0°, East = negative, West = positive** (not Forecast.Solar's South = 0°). For a panel facing 40° east of south (compass bearing 140°), enter **-140** in Solcast.
+
+3. **Inverter size**: Set the "inverter size" field in Solcast to your **array DC capacity** (e.g. 8.9 kW), not your actual inverter AC limit. If you enter the AC limit, Solcast caps every forecast period at that value, which removes the shape of the curve and makes it less useful for clipping-risk decisions. Setting it to the array capacity lets the forecast reflect what the panels can actually produce.
+
+4. Find your **API key** in the Solcast Toolkit under Account → API Key.
+
+5. Find your **rooftop resource URL** in the Toolkit — it looks like:
+   ```
+   https://api.solcast.com.au/rooftop_sites/<site-id>/forecasts?format=json
+   ```
+
+6. Add to `.env`:
+   ```ini
+   SOLCAST_API_KEY=your_api_key
+   ```
+   The rooftop URL is hardcoded in `config/constants.py` as `SOLCAST_ROOFTOP_URL`; override it with `SOLCAST_ROOFTOP_URL=...` in `.env` if needed.
+
+7. Set `FORECAST_PROVIDER=solcast` in `.env` (or leave as `esb_api` to keep using ESB for decisions while evaluating Solcast separately).
+
+**Rate-limit caching**
+
+To stay within the 10-calls/day limit, the provider caches each raw API response to `data/solcast_readings.jsonl` and reuses it until `SOLCAST_MIN_FETCH_INTERVAL_MINUTES` elapses (default **180 minutes**, giving at most 8 fetches/day). The scheduler can run freely without touching the quota between fetches.
+
+Reduce the interval in `config/settings.py` if you want more frequent refreshes — 150 minutes gives ~9 fetches/day, still within the limit.
 
 Daily bounded calibration is also applied from that telemetry:
 

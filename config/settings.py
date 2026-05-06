@@ -116,6 +116,11 @@ ESB_API_TIMEOUT_SECONDS = 30
 QUARTZ_API_TIMEOUT_SECONDS = 30
 # HTTP timeout for Forecast.Solar API requests.
 FORECAST_SOLAR_API_TIMEOUT_SECONDS = 30
+# HTTP timeout for Solcast API requests.
+SOLCAST_API_TIMEOUT_SECONDS = 30
+# Minimum minutes between live Solcast API fetches (free tier: 10 calls/day).
+# 180 minutes = at most 8 fetches/day; cached response is used in between.
+SOLCAST_MIN_FETCH_INTERVAL_MINUTES = 180
 # HTTP timeout for sunrise/sunset API requests.
 SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
 # SMTP connection timeout for outbound email notifications.
