@@ -247,6 +247,143 @@ class TestTimedExportStateMachine:
         apply_mode_change.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_export_extends_past_initial_duration_when_soc_above_floor(self):
+        """Export should extend based on SOC floor even after MAX_TIMED_EXPORT_MINUTES elapsed."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+        from config.settings import MAX_TIMED_EXPORT_MINUTES
+
+        started_at = datetime(2026, 5, 9, 5, 42, tzinfo=timezone.utc)
+        restore_at = started_at + timedelta(minutes=MAX_TIMED_EXPORT_MINUTES)
+        now_utc = restore_at + timedelta(seconds=1)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Morn",
+            "duration_minutes": MAX_TIMED_EXPORT_MINUTES,
+            "is_clipping_export": True,
+            "clipping_soc_floor": 45.0,
+            "export_soc_floor": 45.0,
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=52.0)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+        )
+
+        assert result == "active", "Should extend when SOC above floor, regardless of elapsed time"
+        assert saved_state.get("restore_at") > restore_at, "restore_at should be bumped"
+        apply_mode_change.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_export_restores_when_current_period_floor_higher_than_stored(self):
+        """Green export extending into Amber period should stop at Amber floor, not Green floor."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+
+        started_at = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 5, 9, 14, 30, tzinfo=timezone.utc)
+        now_utc = restore_at + timedelta(seconds=1)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Aftn",
+            "duration_minutes": 30,
+            "is_clipping_export": False,
+            "clipping_soc_floor": None,
+            "export_soc_floor": 50.0,  # Green period floor stored at export start
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=60.0)  # 60% > Green floor (50%), but < Amber floor (75%)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+            current_export_soc_floor=75.0,  # Amber period is now active
+        )
+
+        assert result == "restored", "Should restore when SOC is below Amber floor even if above stored Green floor"
+        apply_mode_change.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_export_extends_when_soc_above_current_period_floor(self):
+        """Export at restore_at should extend when SOC is above the current period's floor."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+
+        started_at = datetime(2026, 5, 9, 14, 0, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 5, 9, 14, 30, tzinfo=timezone.utc)
+        now_utc = restore_at + timedelta(seconds=1)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Aftn",
+            "duration_minutes": 30,
+            "is_clipping_export": False,
+            "clipping_soc_floor": None,
+            "export_soc_floor": 50.0,
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=80.0)  # 80% > Amber floor (75%)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+            current_export_soc_floor=75.0,  # Amber period is now active
+        )
+
+        assert result == "active", "Should extend when SOC is above current period floor"
+        assert saved_state.get("restore_at") > restore_at
+        apply_mode_change.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_clipping_export_restores_when_soc_at_trigger_threshold(self):
         """Clipping export at restore_at with SOC at or below trigger threshold should restore."""
         from logic.timed_export import maybe_restore_timed_grid_export

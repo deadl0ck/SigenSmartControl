@@ -22,10 +22,9 @@ The timed export override follows a three-state lifecycle:
     decisions until the window ends or an SOC floor fires.
 
 **extended**: ``restore_at`` was reached but export conditions are still active.
-    ``restore_at`` is bumped forward by the original ``duration_minutes`` (capped at
-    the ``MAX_TIMED_EXPORT_MINUTES`` wall from ``started_at``) and the state remains
-    *active*.  This prevents the stop/cooldown/restart cycle that would otherwise
-    add a 15-minute gap before export resumes.
+    ``restore_at`` is bumped forward by the original ``duration_minutes`` and the
+    state remains *active*.  This prevents the stop/cooldown/restart cycle that would
+    otherwise add a 15-minute gap before export resumes.
 
     For headroom-based exports: extends when SOC is still above ``export_soc_floor``.
     For clipping exports: extends when SOC is still above
@@ -45,14 +44,13 @@ The timed export override follows a three-state lifecycle:
 
 * **active → active** (extended): ``restore_at`` is reached and export conditions
   are still active.  ``restore_at`` is advanced and the override remains active.
-  Capped at ``started_at + MAX_TIMED_EXPORT_MINUTES``.  For headroom exports this
-  requires SOC still above ``export_soc_floor``; for clipping exports it requires
-  SOC still above ``LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT``.
+  For headroom exports this requires SOC still above ``export_soc_floor``; for
+  clipping exports it requires SOC still above
+  ``LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT``.
 
 * **active → restored** (normal): ``restore_at`` is reached and either no
-  ``export_soc_floor`` is configured, the cap has been reached, or SOC has
-  dropped to or below the floor.  The previous mode is restored and the state
-  file is deleted.
+  ``export_soc_floor`` is configured or SOC has dropped to or below the floor.
+  The previous mode is restored and the state file is deleted.
 
 * **active → restored** (early, export SOC floor): While active, the battery SOC
   drops to or below ``export_soc_floor``.  Checked first on every tick.
@@ -391,6 +389,7 @@ async def maybe_restore_timed_grid_export(
     mode_names: dict[int, str],
     apply_mode_change: ModeChangeApplier,
     logger: logging.Logger,
+    current_export_soc_floor: float | None = None,
 ) -> str:
     """Restore pre-export mode when active timed export window has elapsed.
 
@@ -403,6 +402,12 @@ async def maybe_restore_timed_grid_export(
         mode_names: Mapping of mode value to user-facing mode name.
         apply_mode_change: Callback that performs mode change and accounting.
         logger: Scheduler logger.
+        current_export_soc_floor: SOC floor recalculated for the current
+            period and status, overriding the value stored at export start time.
+            Only applies to headroom-based exports (where export_soc_floor is
+            set).  Allows correct floor enforcement when an export crosses a
+            period boundary with a different forecast status (e.g. Green
+            afternoon extending into Amber evening).
 
     Returns:
         ``"inactive"`` — no override is currently active; the caller should
@@ -421,6 +426,11 @@ async def maybe_restore_timed_grid_export(
     is_clipping = timed_export_override.get("is_clipping_export", False)
     clipping_soc_floor = timed_export_override.get("clipping_soc_floor")
     export_soc_floor = timed_export_override.get("export_soc_floor")
+    # Use the caller-supplied current floor when available so that the threshold
+    # reflects the active period's status rather than the status at export start.
+    effective_export_soc_floor = (
+        current_export_soc_floor if current_export_soc_floor is not None else export_soc_floor
+    )
 
     # SOC floor checks: export_soc_floor is evaluated first because it is an
     # explicit caller-supplied threshold (e.g. pre-period headroom protection)
@@ -428,7 +438,7 @@ async def maybe_restore_timed_grid_export(
     # that fires triggers an early restore and short-circuits the second check.
     if export_soc_floor is not None:
         current_soc = await fetch_soc("timed-export-soc-check")
-        if current_soc is not None and current_soc <= export_soc_floor:
+        if current_soc is not None and current_soc <= effective_export_soc_floor:
             restore_mode = timed_export_override["restore_mode"]
             restore_label = timed_export_override["restore_mode_label"]
             trigger_period = timed_export_override["trigger_period"]
@@ -438,7 +448,7 @@ async def maybe_restore_timed_grid_export(
                     "[TIMED EXPORT] Export SOC floor reached (%.1f%% <= %.1f%%). "
                     "Restoring %s early.",
                     current_soc,
-                    export_soc_floor,
+                    effective_export_soc_floor,
                     restore_label,
                 )
                 logger.info(ACTION_DIVIDER)
@@ -497,55 +507,45 @@ async def maybe_restore_timed_grid_export(
         return "active"
 
     # Auto-extension: before restoring, check whether export conditions are still
-    # active. When solar keeps refilling the battery faster than the export drains it,
-    # SOC stays above the threshold even after the planned window. Bump restore_at
-    # forward rather than stopping and restarting after the cooldown gap.
-    started_at = timed_export_override.get("started_at")
+    # active. SOC floor is the authoritative stopping condition — if SOC is still
+    # above the floor when restore_at is reached, bump restore_at forward rather
+    # than stopping and restarting after the cooldown gap.
     original_duration = timed_export_override.get("duration_minutes") or 0
-    if started_at is not None:
-        max_end_utc = started_at + timedelta(minutes=MAX_TIMED_EXPORT_MINUTES)
-        if now_utc < max_end_utc:
-            if export_soc_floor is not None:
-                extend_soc = await fetch_soc("timed-export-extend-check")
-                if extend_soc is not None and extend_soc > export_soc_floor:
-                    extension_end = now_utc + timedelta(minutes=max(original_duration, 1))
-                    new_restore_at = min(extension_end, max_end_utc)
-                    ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
-                    logger.info(
-                        "[TIMED EXPORT] Window expired but SOC (%.1f%%) is still above the "
-                        "%.1f%% floor — extending export by %s minute(s) "
-                        "(until %s, cap %s).",
-                        extend_soc,
-                        export_soc_floor,
-                        ext_minutes,
-                        new_restore_at.isoformat(),
-                        max_end_utc.isoformat(),
-                    )
-                    extended_state = dict(timed_export_override)
-                    extended_state["restore_at"] = new_restore_at
-                    set_timed_export_override(extended_state)
-                    return "active"
+    if export_soc_floor is not None:
+        extend_soc = await fetch_soc("timed-export-extend-check")
+        if extend_soc is not None and extend_soc > effective_export_soc_floor:
+            new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))
+            ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
+            logger.info(
+                "[TIMED EXPORT] Window expired but SOC (%.1f%%) is still above the "
+                "%.1f%% floor — extending export by %s minute(s) (until %s).",
+                extend_soc,
+                effective_export_soc_floor,
+                ext_minutes,
+                new_restore_at.isoformat(),
+            )
+            extended_state = dict(timed_export_override)
+            extended_state["restore_at"] = new_restore_at
+            set_timed_export_override(extended_state)
+            return "active"
 
-            elif is_clipping:
-                extend_soc = await fetch_soc("clipping-export-extend-check")
-                if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
-                    extension_end = now_utc + timedelta(minutes=max(original_duration, 1))
-                    new_restore_at = min(extension_end, max_end_utc)
-                    ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
-                    logger.info(
-                        "[TIMED EXPORT] Clipping window expired but SOC (%.1f%%) is still above the "
-                        "%.1f%% trigger threshold — extending export by %s minute(s) "
-                        "(until %s, cap %s).",
-                        extend_soc,
-                        LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
-                        ext_minutes,
-                        new_restore_at.isoformat(),
-                        max_end_utc.isoformat(),
-                    )
-                    extended_state = dict(timed_export_override)
-                    extended_state["restore_at"] = new_restore_at
-                    set_timed_export_override(extended_state)
-                    return "active"
+    elif is_clipping:
+        extend_soc = await fetch_soc("clipping-export-extend-check")
+        if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
+            new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))
+            ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
+            logger.info(
+                "[TIMED EXPORT] Clipping window expired but SOC (%.1f%%) is still above the "
+                "%.1f%% trigger threshold — extending export by %s minute(s) (until %s).",
+                extend_soc,
+                LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
+                ext_minutes,
+                new_restore_at.isoformat(),
+            )
+            extended_state = dict(timed_export_override)
+            extended_state["restore_at"] = new_restore_at
+            set_timed_export_override(extended_state)
+            return "active"
 
     restore_mode = timed_export_override["restore_mode"]
     restore_label = timed_export_override["restore_mode_label"]

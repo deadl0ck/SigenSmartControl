@@ -24,9 +24,11 @@ from config.settings import (
     FORECAST_SOLAR_RATE_LIMIT_COOLDOWN_MINUTES,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
     HEADROOM_TARGET_KWH,
+    AMBER_HEADROOM_TARGET_KWH,
     SOLAR_PV_KW,
     INVERTER_KW,
     BATTERY_KWH,
+    DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
     DEFAULT_SIMULATED_SOC_PERCENT,
     TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
@@ -379,6 +381,22 @@ async def run_scheduler() -> None:
 
     coordinator = SchedulerCoordinator(state, sigen, mode_names, logger)
 
+    def _current_export_soc_floor(now_utc: datetime) -> float | None:
+        """Return the SOC floor appropriate for the active period's current status."""
+        active_period = coordinator._get_active_period(now_utc)
+        if not active_period or not state.today_period_forecast:
+            return None
+        period_data = state.today_period_forecast.get(active_period)
+        if period_data is None:
+            return None
+        _, period_status = period_data
+        headroom_kwh = (
+            AMBER_HEADROOM_TARGET_KWH
+            if str(period_status).upper() == "AMBER"
+            else HEADROOM_TARGET_KWH
+        )
+        return max(DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT, 100.0 - headroom_kwh / BATTERY_KWH * 100.0)
+
     async def maybe_restore_timed_grid_export(now_utc: datetime) -> str:
         """Delegate timed-export restore handling to the timed-export module."""
         return await maybe_restore_timed_grid_export_helper(
@@ -390,6 +408,7 @@ async def run_scheduler() -> None:
             mode_names=mode_names,
             apply_mode_change=_apply_mode_change_tracked,
             logger=logger,
+            current_export_soc_floor=_current_export_soc_floor(now_utc),
         )
 
     await coordinator.run_main_loop(
