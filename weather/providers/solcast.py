@@ -23,6 +23,8 @@ from config.settings import (
     QUARTZ_GREEN_CAPACITY_FRACTION,
     QUARTZ_RED_CAPACITY_FRACTION,
     SOLCAST_API_TIMEOUT_SECONDS,
+    SOLCAST_FETCH_WINDOW_END_HOUR,
+    SOLCAST_FETCH_WINDOW_START_HOUR,
     SOLCAST_MIN_FETCH_INTERVAL_MINUTES,
 )
 from config.constants import (
@@ -65,8 +67,10 @@ class SolcastForecast(BaseSolarForecast):
             return "Amber"
         return "Green"
 
-    def _load_cached(self, archive_path: Path, now_utc: datetime) -> list[dict[str, Any]] | None:
-        """Return cached forecasts if the most recent snapshot is still fresh."""
+    def _load_cached(
+        self, archive_path: Path, now_utc: datetime, ignore_age: bool = False
+    ) -> list[dict[str, Any]] | None:
+        """Return cached forecasts if present and still fresh (or if ignore_age is True)."""
         if not archive_path.exists():
             return None
         last: dict[str, Any] | None = None
@@ -83,6 +87,12 @@ class SolcastForecast(BaseSolarForecast):
         try:
             captured = datetime.fromisoformat(last["captured_at_utc"])
             age_minutes = (now_utc - captured).total_seconds() / 60
+            if ignore_age:
+                self.logger.info(
+                    "[SOLCAST] Using cached forecast (%.0f min old, age check suppressed outside fetch window)",
+                    age_minutes,
+                )
+                return last.get("forecasts", [])
             if age_minutes < SOLCAST_MIN_FETCH_INTERVAL_MINUTES:
                 self.logger.info(
                     "[SOLCAST] Using cached forecast (%.0f min old, refresh after %d min)",
@@ -126,9 +136,22 @@ class SolcastForecast(BaseSolarForecast):
         archive_path = Path(SOLCAST_ARCHIVE_PATH)
         local_tz = ZoneInfo(LOCAL_TIMEZONE)
 
-        forecasts = self._load_cached(archive_path, now_utc)
-        if forecasts is None:
-            forecasts = self._fetch_and_archive(archive_path, now_utc)
+        local_hour = datetime.now(local_tz).hour
+        in_fetch_window = SOLCAST_FETCH_WINDOW_START_HOUR <= local_hour < SOLCAST_FETCH_WINDOW_END_HOUR
+
+        if not in_fetch_window:
+            self.logger.info(
+                "[SOLCAST] Outside fetch window (%02d:00–%02d:00 local) — serving cache.",
+                SOLCAST_FETCH_WINDOW_START_HOUR,
+                SOLCAST_FETCH_WINDOW_END_HOUR,
+            )
+            forecasts = self._load_cached(archive_path, now_utc, ignore_age=True)
+            if forecasts is None:
+                forecasts = self._fetch_and_archive(archive_path, now_utc)
+        else:
+            forecasts = self._load_cached(archive_path, now_utc)
+            if forecasts is None:
+                forecasts = self._fetch_and_archive(archive_path, now_utc)
 
         grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
         for entry in forecasts:

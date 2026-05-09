@@ -344,7 +344,7 @@ Meaning:
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 - `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
-- `SOLCAST_MIN_FETCH_INTERVAL_MINUTES`: minimum minutes between live Solcast API calls (default `180`); cached response from `data/solcast_readings.jsonl` is used in between to stay within the free-tier 10-calls/day limit
+- `SOLCAST_MIN_FETCH_INTERVAL_MINUTES`: minimum minutes between live Solcast API calls (default `100`); cached response from `data/solcast_readings.jsonl` is used in between. Live fetches are further restricted to the `SOLCAST_FETCH_WINDOW_START_HOUR`–`SOLCAST_FETCH_WINDOW_END_HOUR` local-time window (default 03:00–20:00); outside that window the cache is always served regardless of age, concentrating all 10 free-tier calls in the hours that matter for decisions
 - `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (12.0 kWh = BATTERY_KWH × 0.5)
 - `AMBER_HEADROOM_FRACTION`: fraction of battery capacity to maintain as free headroom before Amber periods (default `0.25`); `AMBER_HEADROOM_TARGET_KWH` is derived as `BATTERY_KWH * AMBER_HEADROOM_FRACTION`. Set to `0.0` to disable Amber headroom
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
@@ -444,9 +444,12 @@ Actual inverter telemetry is also archived locally for later analysis:
 
 **Rate-limit caching**
 
-To stay within the 10-calls/day limit, the provider caches each raw API response to `data/solcast_readings.jsonl` and reuses it until `SOLCAST_MIN_FETCH_INTERVAL_MINUTES` elapses (default **180 minutes**, giving at most 8 fetches/day). The scheduler can run freely without touching the quota between fetches.
+To stay within the 10-calls/day limit the provider uses two complementary controls:
 
-Reduce the interval in `config/settings.py` if you want more frequent refreshes — 150 minutes gives ~9 fetches/day, still within the limit.
+1. **Fetch window** (`SOLCAST_FETCH_WINDOW_START_HOUR` / `SOLCAST_FETCH_WINDOW_END_HOUR`, default **03:00–20:00 local**): outside this window the cache is served unconditionally regardless of age. There is no solar generation overnight and tomorrow's forecast won't change meaningfully before 03:00, so live API calls in those hours waste quota. The 03:00 start gives a one-hour buffer before the pre-period export window opens.
+2. **Minimum interval** (`SOLCAST_MIN_FETCH_INTERVAL_MINUTES`, default **100 minutes**): within the fetch window, the cached response is reused until this interval elapses. 100 minutes across a 17-hour window (03:00–20:00) gives at most 10 fetches/day — exactly the free-tier limit.
+
+Adjust `SOLCAST_MIN_FETCH_INTERVAL_MINUTES` in `config/settings.py` to trade freshness against quota. Narrowing the fetch window hours reduces the effective call count for the same interval.
 
 Daily bounded calibration is also applied from that telemetry:
 
