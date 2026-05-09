@@ -119,8 +119,18 @@ FORECAST_SOLAR_API_TIMEOUT_SECONDS = 30
 # HTTP timeout for Solcast API requests.
 SOLCAST_API_TIMEOUT_SECONDS = 30
 # Minimum minutes between live Solcast API fetches (free tier: 10 calls/day).
-# 180 minutes = at most 8 fetches/day; cached response is used in between.
-SOLCAST_MIN_FETCH_INTERVAL_MINUTES = 180
+# Fetches are gated to SOLCAST_FETCH_WINDOW_START_HOUR–SOLCAST_FETCH_WINDOW_END_HOUR
+# (local time). Outside that window the cache is always served without an age check,
+# concentrating all 10 daily calls in the hours that matter for decisions.
+# 100 minutes across a 3AM–8PM window (17 hours) ≈ 10 calls/day.
+SOLCAST_MIN_FETCH_INTERVAL_MINUTES = 100
+# Local hours defining when live Solcast fetches are permitted.
+# Before START: no solar generation and tomorrow's forecast won't change meaningfully.
+# After END: evening analysis window has closed; today's forecast is no longer needed.
+# 3AM gives a one-hour buffer before the pre-period export window opens at 4AM
+# (MAX_PRE_PERIOD_WINDOW_MINUTES before FORECAST_ANALYSIS_MORNING_START_HOUR).
+SOLCAST_FETCH_WINDOW_START_HOUR = 3
+SOLCAST_FETCH_WINDOW_END_HOUR = 20
 # HTTP timeout for sunrise/sunset API requests.
 SUNRISE_SUNSET_API_TIMEOUT_SECONDS = 10
 # SMTP connection timeout for outbound email notifications.
