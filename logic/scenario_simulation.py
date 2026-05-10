@@ -23,6 +23,7 @@ from config.settings import (
     FORECAST_ANALYSIS_EVENING_START_HOUR,
     FORECAST_ANALYSIS_MORNING_END_HOUR,
     FORECAST_ANALYSIS_MORNING_START_HOUR,
+    AMBER_HEADROOM_TARGET_KWH,
     HEADROOM_TARGET_KWH,
     INVERTER_KW,
     SIGEN_MODES,
@@ -398,13 +399,18 @@ def evaluate_scenario_row(
     schedule_period = get_schedule_period_for_time(when_utc)
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
     period_solar_kwh = 0.0 if period == "Night" else min(SOLAR_PV_KW, INVERTER_KW) * 3.0
+    headroom_target_kwh = (
+        AMBER_HEADROOM_TARGET_KWH
+        if (normalized_forecast or "").upper() == "AMBER"
+        else HEADROOM_TARGET_KWH
+    )
     target_mode_value, reason = decide_operational_mode(
         DecisionContext(
             period=period,
             status=normalized_forecast,
             soc=soc,
             headroom_kwh=headroom_kwh,
-            headroom_target_kwh=HEADROOM_TARGET_KWH,
+            headroom_target_kwh=headroom_target_kwh,
             live_solar_kw=None,
             hours_until_cheap_rate=get_hours_until_cheap_rate(when_utc),
             estimated_home_load_kw=ESTIMATED_HOME_LOAD_KW,
