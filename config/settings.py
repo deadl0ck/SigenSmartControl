@@ -253,12 +253,8 @@ LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 # Raised to require a sustained high-irradiance run before promoting Amber→Green.
 # 4.5 kW ≈ 51% of array capacity; avoids triggering on brief cloud-break spikes on Amber days.
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.5
-# SOC floor for mid-period clipping export: if timed export started by clipping-risk
-# promotion drops SOC to this floor, cancel the export and restore prior mode.
-# Set to 5% below the promotion threshold to avoid yo-yo behavior.
-LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT = 45.0
-# SOC floor for daytime headroom timed exports (pre-period / period-start) where
-# the scheduler proactively exports to create battery room for forecasted solar.
+# SOC floor for all daytime timed exports (headroom-based pre-period exports and
+# mid-period clipping-risk exports). Export stops when SOC hits this floor.
 DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 40.0
 # Controlled evening export settings.
 # Enables bounded battery export in evening to create headroom, while preserving

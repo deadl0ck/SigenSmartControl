@@ -80,7 +80,7 @@ from zoneinfo import ZoneInfo
 
 from config.constants import TIMED_EXPORT_STATE_PATH
 from config.settings import (
-    LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT,
+    DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
     LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
     LOCAL_TIMEZONE,
     MAX_TIMED_EXPORT_MINUTES,
@@ -371,7 +371,7 @@ async def start_timed_grid_export(
             "duration_minutes": clamped_minutes,
             "is_clipping_export": is_clipping_export,
             "clipping_soc_floor": (
-                LIVE_CLIPPING_EXPORT_SOC_FLOOR_PERCENT if is_clipping_export else None
+                DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT if is_clipping_export else None
             ),
             "export_soc_floor": export_soc_floor,
         }
