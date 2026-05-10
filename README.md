@@ -103,7 +103,7 @@ see exactly what values were used and why each decision was made.
    | `CHEAP_RATE_START_HOUR` | `23` | Hour your cheap-rate electricity starts (local time) |
    | `CHEAP_RATE_END_HOUR` | `8` | Hour your cheap-rate electricity ends (local time) |
    | `ESTIMATED_HOME_LOAD_KW` | `0.8` | Your average household draw in kW when solar is low |
-   | `HEADROOM_TARGET_KWH` | `BATTERY_KWH * 0.5` | Free battery space to maintain before a Green forecast. The alternative physics formula is `(SOLAR_PV_KW - INVERTER_KW) * 3`; use whichever fits your clipping risk tolerance |
+   | `HEADROOM_TARGET_KWH` | `BATTERY_KWH * 0.6` | Free battery space to maintain before a Green forecast (40% SOC floor). The alternative physics formula is `(SOLAR_PV_KW - INVERTER_KW) * 3`; use whichever fits your clipping risk tolerance |
    | `AMBER_HEADROOM_FRACTION` | `0.25` | Fraction of battery capacity to keep free before an Amber forecast (e.g. `0.25` = 25%). Set to `0.0` to disable Amber headroom entirely |
 
    All solar trigger thresholds (`MID_PERIOD_SAFETY_SOLAR_TRIGGER_KW`, `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`) and discharge rate estimates (`PRE_CHEAP_RATE_NIGHT_EXPORT_ASSUMED_DISCHARGE_KW`, `EVENING_EXPORT_ASSUMED_DISCHARGE_KW`) are automatically derived from your hardware specs — you do not need to touch them.
@@ -290,7 +290,7 @@ These settings are **not** derived from hardware and need manual review:
 | `LOCAL_TIMEZONE` | Tariff window detection and period scheduling depend on local time |
 | `CHEAP_RATE_START_HOUR` / `CHEAP_RATE_END_HOUR` | Varies by energy provider and tariff plan |
 | `ESTIMATED_HOME_LOAD_KW` | Household draw varies; affects the evening battery-bridge rule |
-| `HEADROOM_TARGET_KWH` | Currently `BATTERY_KWH * 0.5`. The physics alternative is `(SOLAR_PV_KW - INVERTER_KW) * 3` (surplus kW × 3 h reserve). For systems with a large battery relative to array surplus, the physics formula is more appropriate |
+| `HEADROOM_TARGET_KWH` | Currently `BATTERY_KWH * 0.6` (40% SOC floor). The physics alternative is `(SOLAR_PV_KW - INVERTER_KW) * 3` (surplus kW × 3 h reserve). For systems with a large battery relative to array surplus, the physics formula is more appropriate |
 | `AMBER_HEADROOM_FRACTION` | Fraction of battery capacity to maintain as free headroom before an Amber period. Default `0.25` (25% of battery). Set to `0.0` to disable Amber pre-period exports entirely |
 | `PRE_SUNRISE_DISCHARGE_MONTHS` | Months where pre-sunrise discharge is useful — adjust for your latitude and climate |
 
@@ -310,7 +310,7 @@ QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
 FORECAST_SOLAR_POWER_MULTIPLIER = 1.53
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
-HEADROOM_TARGET_KWH = 12.0
+HEADROOM_TARGET_KWH = 14.4
 AMBER_HEADROOM_FRACTION = 0.25
 ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE = True
 ESTIMATED_HOME_LOAD_KW = 0.8
@@ -320,6 +320,7 @@ MORNING_HIGH_SOC_THRESHOLD_PERCENT = 55.0
 LIVE_CLIPPING_RISK_VALID_PERIODS = "M,A"
 LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT = 50.0
 LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.5
+DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 40.0
 ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE = True
 PRE_SUNRISE_DISCHARGE_MONTHS = "4,5,6,7,8,9"
 PRE_SUNRISE_DISCHARGE_LEAD_MINUTES = 120
@@ -345,13 +346,14 @@ Meaning:
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
 - `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
 - `SOLCAST_MIN_FETCH_INTERVAL_MINUTES`: minimum minutes between live Solcast API calls (default `100`); cached response from `data/solcast_readings.jsonl` is used in between. Live fetches are further restricted to the `SOLCAST_FETCH_WINDOW_START_HOUR`–`SOLCAST_FETCH_WINDOW_END_HOUR` local-time window (default 03:00–20:00); outside that window the cache is always served regardless of age, concentrating all 10 free-tier calls in the hours that matter for decisions
-- `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (12.0 kWh = BATTERY_KWH × 0.5)
+- `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (14.4 kWh = BATTERY_KWH × 0.6, corresponding to a 40% SOC floor)
+- `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`: unified SOC floor for all daytime timed exports — both proactive headroom exports and mid-period clipping-risk exports stop when SOC hits this level (default `40.0`)
 - `AMBER_HEADROOM_FRACTION`: fraction of battery capacity to maintain as free headroom before Amber periods (default `0.25`); `AMBER_HEADROOM_TARGET_KWH` is derived as `BATTERY_KWH * AMBER_HEADROOM_FRACTION`. Set to `0.0` to disable Amber headroom
 - `ENABLE_PRE_CHEAP_RATE_BATTERY_BRIDGE`: when enabled, Evening decisions avoid charge-oriented behavior before cheap-rate starts if battery can bridge the expected load
 - `ESTIMATED_HOME_LOAD_KW`: average household load estimate used to calculate whether current battery energy can cover consumption until cheap-rate begins
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
 - `MORNING_HIGH_SOC_PROTECTION_ENABLED`: enables high-SOC export protection rule for selected daytime periods
-- `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC trigger threshold for the mid-period high-SOC safety export (default 55%, which is 10% above the 45% export floor set by `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`)
+- `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC trigger threshold for the mid-period high-SOC safety export (default 55%, which is 15% above the 40% export floor set by `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`)
 - `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Only applies to the intra-tick live solar check.
 - `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
 - `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
@@ -525,8 +527,8 @@ For night:
 
 ### Quick examples
 
-- Green + headroom < 12.0 kWh -> `GRID_EXPORT` (insufficient space for incoming solar).
-- Green + headroom >= 12.0 kWh -> Follow forecast mode (battery can absorb the solar).
+- Green + headroom < 14.4 kWh -> `GRID_EXPORT` (insufficient space for incoming solar).
+- Green + headroom >= 14.4 kWh -> Follow forecast mode (battery can absorb the solar).
 - Amber + Peak tariff -> `SELF_POWERED` (peak override wins).
 - Red + normal Day tariff -> `SELF_POWERED` (default forecast mapping).
 
@@ -591,7 +593,7 @@ stateDiagram-v2
 
     EvaluatePeriod --> MidPeriodHighSOC: Period started & high_soc_export_set=False?
     MidPeriodHighSOC --> StartHighSOCExport: SOC > 55% threshold?
-    StartHighSOCExport --> MarkHighSOCSet: Start bounded export (floor=45%), set high_soc_export_set=True
+    StartHighSOCExport --> MarkHighSOCSet: Start bounded export (floor=40%), set high_soc_export_set=True
     MarkHighSOCSet --> SkipRestOfPeriods
     MidPeriodHighSOC --> PrePeriodWindow: SOC below threshold or flag already set
 
@@ -631,11 +633,11 @@ stateDiagram-v2
 **Key state flows:**
 
 - **Timed Export Override**: Once active (from pre-export, clipping, or high-SOC), all normal scheduler decisions are skipped until the export window expires or SOC floor is reached (early exit). The restore target mode is saved at export start, not at restore time.
-- **Auto-Extension**: If the export window expires but export conditions are still active, the restore timestamp is bumped forward rather than restoring — this avoids the stop/cooldown/restart gap. The SOC floor is the sole stopping condition; there is no elapsed-time cap on extensions. For headroom-based exports, "still active" means SOC is still above the effective floor for the **current** period's status — so a Green export extending into an Amber period correctly applies the Amber floor (75%) rather than the Green floor (50%) that was stored at export start. For clipping exports, it means SOC is still above `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT` (the same threshold that triggered the export), indicating solar is still filling the battery.
+- **Auto-Extension**: If the export window expires but export conditions are still active, the restore timestamp is bumped forward rather than restoring — this avoids the stop/cooldown/restart gap. The SOC floor is the sole stopping condition; there is no elapsed-time cap on extensions. For headroom-based exports, "still active" means SOC is still above the effective floor for the **current** period's status — so a Green export extending into an Amber period correctly applies the Amber floor (75%) rather than the Green floor (40%) that was stored at export start. For clipping exports, it means SOC is still above `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT` (the same threshold that triggered the export), indicating solar is still filling the battery.
 - **Day Boundary**: Triggers forecast and sunrise/sunset refresh; resets per-period action flags (pre-set, start-set, clipping-export-set, high-soc-export-set)
 - **Night Branching**: If night mode is enabled, either handles summer pre-sunrise discharge (PRE-DAWN) or pre-cheap-rate export (EVENING-NIGHT)
 - **Daytime Evaluation**: For each period in order:
-  1. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 45% floor; fires at most once per period
+  1. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 40% floor; fires at most once per period
   2. **PRE-PERIOD**: Checks headroom deficit; if buffer shortfall detected, triggers bounded GRID_EXPORT
   3. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision
 - **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions
@@ -710,14 +712,14 @@ The headroom target varies by forecast status:
 
 | Forecast | Target | Setting |
 |---|---|---|
-| Green | `BATTERY_KWH × 0.5` (e.g. 12 kWh) | `HEADROOM_TARGET_KWH` |
+| Green | `BATTERY_KWH × 0.6` (e.g. 14.4 kWh) | `HEADROOM_TARGET_KWH` |
 | Amber | `BATTERY_KWH × 0.25` (e.g. 6 kWh) | `AMBER_HEADROOM_TARGET_KWH` (derived from `AMBER_HEADROOM_FRACTION`) |
 | Red | — (no headroom export) | — |
 
 The Green target is a fixed fraction of the battery, ensuring enough free space to absorb a full day's solar without clipping:
 
 $$
-\text{headroom target (Green)} = \text{BATTERY\_KWH} \times 0.5 = 24 \times 0.5 = 12.0 \text{ kWh}
+\text{headroom target (Green)} = \text{BATTERY\_KWH} \times 0.6 = 24 \times 0.6 = 14.4 \text{ kWh}
 $$
 
 The Amber target is a reduced fraction of the battery, reflecting that Amber days carry real but moderate solar risk — enough to warrant partial headroom, but not the full Green reserve. Setting `AMBER_HEADROOM_FRACTION = 0.0` disables Amber headroom entirely.
@@ -990,6 +992,11 @@ All files under `scripts/` are documented below.
 - `scripts/forecast_vs_actual.py`
 	- Full forecast vs actual report comparing ESB, Forecast.Solar, Quartz, and measured inverter telemetry by daytime period. See [Forecast Accuracy Report](#forecast-accuracy-report) for column descriptions.
 	- Run: `python scripts/forecast_vs_actual.py`
+
+- `scripts/solcast_vs_actual.py`
+	- Compares Solcast half-hourly forecasts against actual inverter PV output. For each completed 30-minute slot, finds the latest Solcast snapshot captured before that slot's period end and reports `pv_estimate` vs average `pvPower` from inverter telemetry. Shows slot-level error, P10–P90 uncertainty range, MAE, MAPE, and bias. Loops over all dates with both Solcast snapshots and inverter telemetry; use `--today` to restrict to today only.
+	- Run: `python scripts/solcast_vs_actual.py`
+	- Optional: `python scripts/solcast_vs_actual.py --today`
 
 - `scripts/forecast_command_summary.py`
 	- Summarizes forecast-driven inverter commands from the mode-change archive. Useful for reviewing what the scheduler decided and why across recent days.
