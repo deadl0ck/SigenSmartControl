@@ -2,4 +2,4 @@ aiohttp~=3.13.5
 matplotlib~=3.10.9
 python-dotenv~=1.2.2
 requests~=2.32.5
-sigen~=0.1.9
+sigen~=3.0.2
