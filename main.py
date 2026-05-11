@@ -397,7 +397,7 @@ async def run_scheduler() -> None:
         )
         return max(DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT, 100.0 - headroom_kwh / BATTERY_KWH * 100.0)
 
-    async def maybe_restore_timed_grid_export(now_utc: datetime) -> str:
+    async def maybe_restore_timed_grid_export(now_utc: datetime, current_period: str | None = None) -> str:
         """Delegate timed-export restore handling to the timed-export module."""
         return await maybe_restore_timed_grid_export_helper(
             timed_export_override=state.timed_export_override,
@@ -409,6 +409,7 @@ async def run_scheduler() -> None:
             apply_mode_change=_apply_mode_change_tracked,
             logger=logger,
             current_export_soc_floor=_current_export_soc_floor(now_utc),
+            current_period=current_period,
         )
 
     await coordinator.run_main_loop(

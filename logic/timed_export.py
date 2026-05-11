@@ -87,6 +87,7 @@ from config.settings import (
     SIGEN_MODES,
     TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
+from logic.decision_logic import is_live_clipping_period_enabled
 from logic.mode_control import ACTION_DIVIDER, extract_mode_value
 from logic.schedule_utils import is_cheap_rate_window
 
@@ -390,6 +391,7 @@ async def maybe_restore_timed_grid_export(
     apply_mode_change: ModeChangeApplier,
     logger: logging.Logger,
     current_export_soc_floor: float | None = None,
+    current_period: str | None = None,
 ) -> str:
     """Restore pre-export mode when active timed export window has elapsed.
 
@@ -408,6 +410,10 @@ async def maybe_restore_timed_grid_export(
             set).  Allows correct floor enforcement when an export crosses a
             period boundary with a different forecast status (e.g. Green
             afternoon extending into Amber evening).
+        current_period: Active scheduler period name (e.g. ``"Morn"``,
+            ``"Aftn"``, ``"Eve"``).  When provided, clipping exports are
+            stopped early if the period transitions to one where clipping-risk
+            promotion is not enabled (e.g. Evening on a Red day).
 
     Returns:
         ``"inactive"`` — no override is currently active; the caller should
@@ -498,6 +504,38 @@ async def maybe_restore_timed_grid_export(
                     set_timed_export_override(_empty_timed_export_override())
                     return "restored"
 
+    # Clipping period check: if the active period has moved outside the configured
+    # valid clipping periods (e.g. into Evening when only M,A are enabled), stop
+    # the export immediately rather than letting it run into a non-solar period.
+    if is_clipping and current_period is not None and not is_live_clipping_period_enabled(current_period):
+        restore_mode = timed_export_override["restore_mode"]
+        restore_label = timed_export_override["restore_mode_label"]
+        trigger_period = timed_export_override["trigger_period"]
+        if restore_mode is not None:
+            logger.info(ACTION_DIVIDER)
+            logger.info(
+                "[TIMED EXPORT] Clipping export period no longer valid (now in %s, "
+                "triggered by %s) — stopping export and returning to %s.",
+                current_period,
+                trigger_period,
+                restore_label,
+            )
+            logger.info(ACTION_DIVIDER)
+            restore_ok = await apply_mode_change(
+                sigen=sigen,
+                mode=restore_mode,
+                period=f"{trigger_period} (clipping-export-period-expired)",
+                reason=(
+                    f"Period changed to {current_period} where clipping export is not active — "
+                    f"stopping export and returning to {restore_label}."
+                ),
+                mode_names=mode_names,
+                battery_soc=await fetch_soc("clipping-period-check"),
+            )
+            if restore_ok:
+                set_timed_export_override(_empty_timed_export_override())
+                return "restored"
+
     if restore_at is None:
         logger.warning("[TIMED EXPORT] Override state missing restore_at; clearing state.")
         set_timed_export_override(_empty_timed_export_override())
@@ -529,7 +567,7 @@ async def maybe_restore_timed_grid_export(
             set_timed_export_override(extended_state)
             return "active"
 
-    elif is_clipping:
+    elif is_clipping and (current_period is None or is_live_clipping_period_enabled(current_period)):
         extend_soc = await fetch_soc("clipping-export-extend-check")
         if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
             new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))

@@ -229,7 +229,7 @@ class SchedulerCoordinator:
         Logs, archives telemetry, and sleeps before returning True when the normal
         dispatch should be skipped this tick.
         """
-        timed_export_status = await self._maybe_restore_export(now)
+        timed_export_status = await self._maybe_restore_export(now, self._get_active_period(now))
         if timed_export_status == "inactive":
             return False
         if timed_export_status == "active":
