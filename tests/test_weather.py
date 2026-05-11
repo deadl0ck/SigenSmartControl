@@ -149,8 +149,8 @@ def test_comparison_snapshot_is_written(tmp_path, monkeypatch):
     assert snapshot["today"]["summary"]["mismatches"] == 2
 
 
-def test_comparison_provider_uses_primary_status_with_secondary_watts():
-    """Scheduler-facing forecast should preserve ESB status but use Quartz watts."""
+def test_comparison_provider_returns_primary_values():
+    """Scheduler-facing forecast should return primary provider's watts and status unchanged."""
 
     class StaticProvider:
         def __init__(self, today, tomorrow):
@@ -180,8 +180,8 @@ def test_comparison_provider_uses_primary_status_with_secondary_watts():
         secondary_name="quartz",
     )
 
-    assert provider.get_todays_period_forecast() == {"Aftn": (2118, "Amber")}
-    assert provider.get_tomorrows_period_forecast() == {"Morn": (1139, "Red")}
+    assert provider.get_todays_period_forecast() == {"Aftn": (2500, "Amber")}
+    assert provider.get_tomorrows_period_forecast() == {"Morn": (1000, "Red")}
 
 
 def test_quartz_status_normalization_uses_20_40_capacity_thresholds(monkeypatch):

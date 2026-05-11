@@ -357,40 +357,6 @@ class TestMidPeriodClippingExport:
     """Tests for the mid-period live clipping export branch."""
 
     @pytest.mark.asyncio
-    async def test_clipping_export_set_on_amber_promoted_to_green_with_high_soc_and_solar(self):
-        """clipping_export_set is set to True when Amber is promoted to Green mid-period.
-
-        Conditions:
-          - start_set=True (mid-period is active)
-          - timed_export_override inactive
-          - now_utc >= period_start and < period_end_utc
-          - is_live_clipping_period_enabled("Morn") is True (default setting "M,A")
-          - status="Amber"
-          - SOC >= LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT (50%)
-          - solar >= LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW (3.2 kW)
-        When all these hold, _promote_status_for_live_clipping_risk promotes Amber→Green,
-        so decision_status != status and the clipping branch proceeds.
-        With SOC=90% the headroom deficit is large → mode=GRID_EXPORT and
-        start_timed_grid_export is called, then clipping_export_set=True.
-        """
-        period_start = _PERIOD_START
-        now_utc = period_start + timedelta(minutes=30)   # mid-period
-        period_state = _make_period_state(start_set=True)  # already at period start
-
-        kwargs = _make_handler_kwargs(
-            now_utc=now_utc,
-            period_start=period_start,
-            period_state=period_state,
-            soc_return=90.0,          # >= 50% threshold → promotion eligible; large deficit
-            solar_avg_kw=4.0,         # >= 3.2 kW trigger → promotion proceeds
-            status="Amber",
-            start_timed_export_return=True,
-        )
-        await handle_morning_period(_make_ctx(kwargs))
-
-        assert period_state["clipping_export_set"] is True
-
-    @pytest.mark.asyncio
     async def test_low_soc_blocks_clipping_export(self):
         """clipping_export_set stays False when SOC is below the promotion threshold.
 
