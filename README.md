@@ -354,7 +354,7 @@ Meaning:
 - `BRIDGE_BATTERY_RESERVE_KWH`: safety buffer to keep in battery when evaluating bridge sufficiency
 - `MORNING_HIGH_SOC_PROTECTION_ENABLED`: enables high-SOC export protection rule for selected daytime periods
 - `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC trigger threshold for the mid-period high-SOC safety export (default 55%, which is 15% above the 40% export floor set by `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`)
-- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Only applies to the intra-tick live solar check.
+- `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Controls both the intra-tick promotion check and the lifetime of any clipping export — if the active period transitions outside this set, the clipping export is stopped immediately.
 - `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
 - `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
 - `ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`: enables optional pre-sunrise discharge window in selected months
@@ -559,9 +559,11 @@ stateDiagram-v2
     TimedExportCheck --> TimedExportActive: Timed export in progress?
     TimedExportCheck --> NightCheck: No active timed export
 
-    TimedExportActive --> RestoreCheck: Restore time reached OR SOC floor hit?
+    TimedExportActive --> ClippingPeriodCheck: Clipping export AND period no longer valid?
+    ClippingPeriodCheck --> Restore: YES - period expired, restore immediately
+    ClippingPeriodCheck --> RestoreCheck: NO - continue normal checks
     RestoreCheck --> AutoExtend: Window expired but SOC still above threshold?
-    AutoExtend --> BumpRestoreAt: YES - extend window (bump restore_at forward)
+    AutoExtend --> BumpRestoreAt: YES - valid period & SOC above floor, extend window
     BumpRestoreAt --> SkipNormalDecisions
     AutoExtend --> Restore: NO - restore to pre-export mode (saved at export start)
     Restore --> SkipNormalDecisions: Resume normal decisions next tick
@@ -633,7 +635,7 @@ stateDiagram-v2
 **Key state flows:**
 
 - **Timed Export Override**: Once active (from pre-export, clipping, or high-SOC), all normal scheduler decisions are skipped until the export window expires or SOC floor is reached (early exit). The restore target mode is saved at export start, not at restore time.
-- **Auto-Extension**: If the export window expires but export conditions are still active, the restore timestamp is bumped forward rather than restoring — this avoids the stop/cooldown/restart gap. The SOC floor is the sole stopping condition; there is no elapsed-time cap on extensions. For headroom-based exports, "still active" means SOC is still above the effective floor for the **current** period's status — so a Green export extending into an Amber period correctly applies the Amber floor (75%) rather than the Green floor (40%) that was stored at export start. For clipping exports, it means SOC is still above `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT` (the same threshold that triggered the export), indicating solar is still filling the battery.
+- **Auto-Extension**: If the export window expires but export conditions are still active, the restore timestamp is bumped forward rather than restoring — this avoids the stop/cooldown/restart gap. For headroom-based exports, "still active" means SOC is still above the effective floor for the **current** period's status — so a Green export extending into an Amber period correctly applies the Amber floor (75%) rather than the Green floor (40%) that was stored at export start. For clipping exports, "still active" means SOC is still above `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT` **and** the current period is still in `LIVE_CLIPPING_RISK_VALID_PERIODS`; if the period has moved outside the valid set (e.g. into Evening), the export is stopped immediately rather than extended.
 - **Day Boundary**: Triggers forecast and sunrise/sunset refresh; resets per-period action flags (pre-set, start-set, clipping-export-set, high-soc-export-set)
 - **Night Branching**: If night mode is enabled, either handles summer pre-sunrise discharge (PRE-DAWN) or pre-cheap-rate export (EVENING-NIGHT)
 - **Daytime Evaluation**: For each period in order:
