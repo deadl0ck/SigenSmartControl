@@ -382,9 +382,18 @@ async def run_scheduler() -> None:
     coordinator = SchedulerCoordinator(state, sigen, mode_names, logger)
 
     def _current_export_soc_floor(now_utc: datetime) -> float | None:
-        """Return the SOC floor appropriate for the active period's current status."""
+        """Return the SOC floor for the export's trigger period, if that period is now active.
+
+        Only recalculates the floor when the active period matches the export's trigger
+        period. During the pre-period run-up the trigger period is not yet active, so
+        returning None causes the caller to use the floor that was stored at trigger time
+        (which was computed from the target period's forecast status — the correct value).
+        """
         active_period = coordinator._get_active_period(now_utc)
         if not active_period or not state.today_period_forecast:
+            return None
+        trigger_period = state.timed_export_override.get("trigger_period")
+        if trigger_period and trigger_period != active_period:
             return None
         period_data = state.today_period_forecast.get(active_period)
         if period_data is None:
