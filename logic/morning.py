@@ -119,7 +119,10 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                 if override_started:
                     s["clipping_export_set"] = True
                     return True
-            s["clipping_export_set"] = True
+                # cooldown blocked the export — leave flag False so next tick retries
+            else:
+                # promoted but no export needed (no deficit or mode not GRID_EXPORT)
+                s["clipping_export_set"] = True
 
     # --- Mid-period high-SOC safety export check ---
     if (

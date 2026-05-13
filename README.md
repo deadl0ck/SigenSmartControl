@@ -639,7 +639,8 @@ stateDiagram-v2
 - **Day Boundary**: Triggers forecast and sunrise/sunset refresh; resets per-period action flags (pre-set, start-set, clipping-export-set, high-soc-export-set)
 - **Night Branching**: If night mode is enabled, either handles summer pre-sunrise discharge (PRE-DAWN) or pre-cheap-rate export (EVENING-NIGHT)
 - **Daytime Evaluation**: For each period in order:
-  1. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 40% floor; fires at most once per period
+  1. **MID-PERIOD CLIPPING**: If the period has started, live solar is near the inverter ceiling and SOC is above threshold, promotes Amber → Green and starts a bounded clipping GRID_EXPORT; retries each tick until the export starts (cooldown will not suppress the retry by setting the flag prematurely)
+  2. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 40% floor; fires at most once per period
   2. **PRE-PERIOD**: Checks headroom deficit; if buffer shortfall detected, triggers bounded GRID_EXPORT
   3. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision. If the period-start decision is GRID_EXPORT, also sets `high_soc_export_set` — preventing the mid-period high-SOC check from re-triggering after the period-start export completes. (If solar genuinely pushes SOC high enough to trigger live clipping-risk promotion, that path handles it independently.)
 - **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions
