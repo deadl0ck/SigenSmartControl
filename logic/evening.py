@@ -449,6 +449,7 @@ async def handle_evening_period(ctx: PeriodHandlerContext) -> bool:
                 if override_started:
                     s["start_set"] = True
                     s["pre_set"] = True
+                    s["high_soc_export_set"] = True
                     return True
 
                 logger.warning(
