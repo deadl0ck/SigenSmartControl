@@ -625,7 +625,7 @@ stateDiagram-v2
     CheckClippingExport --> MarkPeriodComplete: NO - regular mode
     StartClippingTimed --> MarkPeriodComplete
 
-    MarkPeriodComplete --> SkipRestOfPeriods: Mark period as start-set
+    MarkPeriodComplete --> SkipRestOfPeriods: Mark period as start-set (also sets high_soc_export_set if GRID_EXPORT)
 
     SkipRestOfPeriods --> ArchiveTelemetry: Collect inverter snapshot
     ArchiveTelemetry --> SleepWithinTolerance: Sleep POLL_INTERVAL_SECONDS
@@ -641,7 +641,7 @@ stateDiagram-v2
 - **Daytime Evaluation**: For each period in order:
   1. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 40% floor; fires at most once per period
   2. **PRE-PERIOD**: Checks headroom deficit; if buffer shortfall detected, triggers bounded GRID_EXPORT
-  3. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision
+  3. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision. If the period-start decision is GRID_EXPORT, also sets `high_soc_export_set` — preventing the mid-period high-SOC check from re-triggering after the period-start export completes. (If solar genuinely pushes SOC high enough to trigger live clipping-risk promotion, that path handles it independently.)
 - **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions
 - **Mode Application**: Switches inverter to decided mode via Sigen API and records telemetry
 - **Restore**: Timed export windows automatically restore to the mode that was active when the export started
