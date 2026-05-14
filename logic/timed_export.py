@@ -549,9 +549,10 @@ async def maybe_restore_timed_grid_export(
     # above the floor when restore_at is reached, bump restore_at forward rather
     # than stopping and restarting after the cooldown gap.
     original_duration = timed_export_override.get("duration_minutes") or 0
+    in_cheap_rate = is_cheap_rate_window(now_utc)
     if export_soc_floor is not None:
         extend_soc = await fetch_soc("timed-export-extend-check")
-        if extend_soc is not None and extend_soc > effective_export_soc_floor:
+        if extend_soc is not None and extend_soc > effective_export_soc_floor and not in_cheap_rate:
             new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))
             ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
             logger.info(
@@ -566,10 +567,15 @@ async def maybe_restore_timed_grid_export(
             extended_state["restore_at"] = new_restore_at
             set_timed_export_override(extended_state)
             return "active"
+        if extend_soc is not None and extend_soc > effective_export_soc_floor and in_cheap_rate:
+            logger.info(
+                "[TIMED EXPORT] Window expired and cheap-rate window is now active — "
+                "restoring instead of extending so TOU mode can take over.",
+            )
 
     elif is_clipping and (current_period is None or is_live_clipping_period_enabled(current_period)):
         extend_soc = await fetch_soc("clipping-export-extend-check")
-        if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
+        if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT and not in_cheap_rate:
             new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))
             ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
             logger.info(
@@ -584,6 +590,11 @@ async def maybe_restore_timed_grid_export(
             extended_state["restore_at"] = new_restore_at
             set_timed_export_override(extended_state)
             return "active"
+        if extend_soc is not None and extend_soc > LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT and in_cheap_rate:
+            logger.info(
+                "[TIMED EXPORT] Clipping window expired and cheap-rate window is now active — "
+                "restoring instead of extending so TOU mode can take over.",
+            )
 
     restore_mode = timed_export_override["restore_mode"]
     restore_label = timed_export_override["restore_mode_label"]
