@@ -552,7 +552,13 @@ async def maybe_restore_timed_grid_export(
     in_cheap_rate = is_cheap_rate_window(now_utc)
     if export_soc_floor is not None:
         extend_soc = await fetch_soc("timed-export-extend-check")
-        if extend_soc is not None and extend_soc > effective_export_soc_floor and not in_cheap_rate:
+        _trigger_period = timed_export_override.get("trigger_period")
+        _period_crossed = (
+            current_period is not None
+            and _trigger_period is not None
+            and current_period != _trigger_period
+        )
+        if extend_soc is not None and extend_soc > effective_export_soc_floor and not in_cheap_rate and not _period_crossed:
             new_restore_at = now_utc + timedelta(minutes=max(original_duration, 1))
             ext_minutes = int((new_restore_at - now_utc).total_seconds() / 60)
             logger.info(
@@ -571,6 +577,14 @@ async def maybe_restore_timed_grid_export(
             logger.info(
                 "[TIMED EXPORT] Window expired and cheap-rate window is now active — "
                 "restoring instead of extending so TOU mode can take over.",
+            )
+        if extend_soc is not None and extend_soc > effective_export_soc_floor and _period_crossed:
+            logger.info(
+                "[TIMED EXPORT] Window expired and period has changed from %s to %s — "
+                "restoring instead of extending so %s handler can take over.",
+                _trigger_period,
+                current_period,
+                current_period,
             )
 
     elif is_clipping and (current_period is None or is_live_clipping_period_enabled(current_period)):
