@@ -39,8 +39,9 @@
 18. [Adding a Forecast Provider](#adding-a-forecast-provider)
 19. [Tests](#tests)
 20. [Session Handoff Recovery](#session-handoff-recovery)
-21. [Recent Updates](#recent-updates)
-22. [Notes](#notes)
+21. [Battery Throughput and Warranty](#battery-throughput-and-warranty)
+22. [Recent Updates](#recent-updates)
+23. [Notes](#notes)
 
 ## Overview
 
@@ -874,7 +875,7 @@ During the cheap-rate window (23:00–08:00 by default), the scheduler applies `
 
 Optional behaviors that run around the night window:
 
-- **Pre-cheap-rate export** (`ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT`): in the evening, if SOC is above a configured floor, the system runs a timed `GRID_EXPORT` window to discharge the battery before cheap-rate charging begins. This avoids paying for grid charge on top of energy that was already in the battery.
+- **Pre-cheap-rate export** (`ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT`): in the evening, if SOC is above a configured floor, the system runs a timed `GRID_EXPORT` window to discharge the battery before cheap-rate charging begins. This avoids paying for grid charge on top of energy that was already in the battery. **This is currently disabled** — see [Battery throughput and warranty](#battery-throughput-and-warranty) for the reasoning.
 - **Summer pre-sunrise discharge** (`ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`): in the configured summer months, the system switches to self-powered shortly before sunrise to create space for morning PV capture.
 
 ### Example strategy (the setup this project was built for)
@@ -976,6 +977,11 @@ Important:
 ## Scripts Reference
 
 All files under `scripts/` are documented below.
+
+- `scripts/battery_throughput.py`
+	- Estimates daily battery discharge throughput from inverter telemetry and compares against the SigenStor BAT 8.0 warranty cap (23.77 MWh/unit). Projects years until warranty throughput limit at current and seasonally-blended rates.
+	- Run: `python scripts/battery_throughput.py`
+	- See `docs/battery-warranty.md` for full warranty and specification details.
 
 - `scripts/compare_forecast_accuracy.py`
 	- Period-level accuracy analysis for ESB, Forecast.Solar, and Quartz against inverter telemetry.
@@ -1476,6 +1482,39 @@ Resume workflow on next session:
 cat docs/session-handoff.md
 cat docs/session-handoff-auto.md
 git status
+```
+
+## Battery Throughput and Warranty
+
+The SigenStor BAT 8.0 carries a performance warranty of **23.77 MWh output per unit** (71.31 MWh for 3 units), or 10 years — whichever comes first. Once cumulative discharge reaches this cap the 70%-capacity-retention warranty expires, regardless of age.
+
+This gives a daily budget of **19.5 kWh/day** across all three units to hit the cap exactly at year 10.
+
+Measured from telemetry (Apr–May 2026, summer baseline):
+
+| Metric | Value |
+|---|---|
+| Average daily discharge | 24.81 kWh/day — 27% above budget |
+| Equivalent cycles/unit/day | 1.06 (usable capacity: 7.8 kWh/unit) |
+| Projection at summer rate only | warranty cap in ~7.9 years |
+| Blended projection (winter ~60% of summer) | ~9.9 years — borderline |
+
+The battery chemistry is **LiFePO4 (LFP)**, which handles deep daily cycling well and is much less sensitive to high SOC than NMC. The concern is not degradation rate per cycle but cumulative throughput against the warranty cap.
+
+### Why pre-cheap-rate export is disabled
+
+The largest avoidable cycling source was the **pre-cheap-rate export** (`ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT`). Each evening it discharged the battery toward a 15% SOC floor before cheap-rate charging, then TOU refilled it overnight. This added roughly one additional deep discharge-recharge cycle per day purely for grid arbitrage (export at ~18c/kWh, recharge at ~11c/kWh — a margin of ~€200/year).
+
+The rest of the cycling — headroom exports before Green periods, clipping prevention, and self-powered evening discharge — is retained because it directly protects solar generation and self-consumption income, which has a better return per cycle than the overnight arbitrage.
+
+To re-enable if rates or priorities change: set `ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True` in `config/settings.py`.
+
+Full battery specification and warranty details: [`docs/battery-warranty.md`](docs/battery-warranty.md)
+
+To measure current throughput rate against the warranty cap:
+
+```sh
+python scripts/battery_throughput.py
 ```
 
 ## Recent Updates
