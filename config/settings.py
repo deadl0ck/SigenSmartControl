@@ -223,7 +223,7 @@ ESTIMATED_HOME_LOAD_KW = 0.8
 BRIDGE_BATTERY_RESERVE_KWH = 1.0
 # Pre-cheap-rate night export: discharge battery toward a SOC floor before the cheap-rate
 # window opens, so the battery has room to charge on cheap-rate electricity.
-ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = True
+ENABLE_PRE_CHEAP_RATE_NIGHT_EXPORT = False
 # SOC floor below which no further pre-cheap-rate export is triggered.
 PRE_CHEAP_RATE_NIGHT_EXPORT_MIN_SOC_PERCENT = 15.0
 # Conservative assumed net battery discharge power used to size the export window.
