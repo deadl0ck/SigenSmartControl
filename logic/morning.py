@@ -58,6 +58,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
     period_calibration = ctx.period_calibration
     fetch_soc = ctx.fetch_soc
     get_live_solar_average_kw = ctx.get_live_solar_average_kw
+    get_live_solar_min_kw = ctx.get_live_solar_min_kw
     get_effective_battery_export_kw = ctx.get_effective_battery_export_kw
     start_timed_grid_export = ctx.start_timed_grid_export
     apply_mode_change = ctx.apply_mode_change
@@ -78,6 +79,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
         decision_status = status
         if soc is not None:
             solar_avg_kw_3 = get_live_solar_average_kw()
+            solar_min_kw_3 = get_live_solar_min_kw()
             decision_data = _evaluate_period_mode_decision(
                 period=PERIOD,
                 status=status,
@@ -86,6 +88,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                 now_utc=now_utc,
                 schedule_time_utc=now_utc,
                 solar_avg_kw_3=solar_avg_kw_3,
+                solar_min_kw_3=solar_min_kw_3,
             )
             decision_status = str(decision_data["decision_status"])
         if soc is not None and decision_status != status:
@@ -197,6 +200,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
         soc = await fetch_soc(PERIOD)
         if soc is not None:
             solar_avg_kw_3 = get_live_solar_average_kw()
+            solar_min_kw_3 = get_live_solar_min_kw()
             decision_data = _evaluate_period_mode_decision(
                 period=PERIOD,
                 status=status,
@@ -205,6 +209,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                 now_utc=now_utc,
                 schedule_time_utc=period_start,
                 solar_avg_kw_3=solar_avg_kw_3,
+                solar_min_kw_3=solar_min_kw_3,
             )
             decision_status = str(decision_data["decision_status"])
             headroom_kwh = float(decision_data["headroom_kwh"])
@@ -313,6 +318,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
         soc = await fetch_soc(PERIOD)
         if soc is not None:
             solar_avg_kw_3 = get_live_solar_average_kw()
+            solar_min_kw_3 = get_live_solar_min_kw()
             decision_data = _evaluate_period_mode_decision(
                 period=PERIOD,
                 status=status,
@@ -321,6 +327,7 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                 now_utc=now_utc,
                 schedule_time_utc=period_start,
                 solar_avg_kw_3=solar_avg_kw_3,
+                solar_min_kw_3=solar_min_kw_3,
             )
             decision_status = str(decision_data["decision_status"])
             headroom_kwh = float(decision_data["headroom_kwh"])

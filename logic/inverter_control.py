@@ -368,6 +368,23 @@ def get_live_solar_average_kw(live_solar_kw_samples: deque[float]) -> float | No
     return sum(live_solar_kw_samples) / len(live_solar_kw_samples)
 
 
+def get_live_solar_min_kw(live_solar_kw_samples: deque[float]) -> float | None:
+    """Return the minimum live solar reading across recent samples.
+
+    Used for Amber→Green promotion: requires every sample to clear the threshold,
+    not just the average, so a single spike cannot trigger export on its own.
+
+    Args:
+        live_solar_kw_samples: Rolling deque of sampled live solar kW values.
+
+    Returns:
+        Minimum kW when at least one sample is present, else None.
+    """
+    if not live_solar_kw_samples:
+        return None
+    return min(live_solar_kw_samples)
+
+
 def get_effective_battery_export_kw(
     avg_live_solar_kw: float | None,
     *,

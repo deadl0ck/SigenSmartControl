@@ -357,7 +357,7 @@ Meaning:
 - `MORNING_HIGH_SOC_THRESHOLD_PERCENT`: SOC trigger threshold for the mid-period high-SOC safety export (default 55%, which is 15% above the 40% export floor set by `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`)
 - `LIVE_CLIPPING_RISK_VALID_PERIODS`: comma-separated period codes where live clipping-risk Amber→Green promotion is active (`M`=Morning, `A`=Afternoon, `E`=Evening). Controls both the intra-tick promotion check and the lifetime of any clipping export — if the active period transitions outside this set, the clipping export is stopped immediately.
 - `LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT`: SOC threshold for live clipping-risk Amber→Green promotion
-- `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: rolling live-solar kW threshold for live clipping-risk promotion
+- `LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW`: minimum live-solar kW threshold for live clipping-risk promotion — every sample in the rolling window must individually clear this value, so a single spike cannot trigger an export on its own
 - `ENABLE_SUMMER_PRE_SUNRISE_DISCHARGE`: enables optional pre-sunrise discharge window in selected months
 - `PRE_SUNRISE_DISCHARGE_MONTHS`: local months where pre-sunrise discharge can run (for example Apr-Sep)
 - `PRE_SUNRISE_DISCHARGE_LEAD_MINUTES`: minutes before sunrise where night mode can switch to self-powered to create headroom
@@ -500,7 +500,7 @@ The runtime does not just apply one mapping directly. It uses this order:
 
 1. Export rules first (highest priority):
 If forecast is Green and battery headroom is too low, use `GRID_EXPORT`.
-Live clipping-risk can promote Amber to Green when configured period, SOC, and live-solar triggers are met.
+Live clipping-risk can promote Amber to Green when configured period, SOC, and live-solar triggers are met. The solar check uses the minimum of the rolling sample window — every reading must clear the threshold, not just their average, so a single spike cannot trigger export on its own.
 High-SOC export protection can also force export in configured periods when SOC is high and headroom is below target.
 2. Evening bridge rule second:
 If period is Evening and battery can safely cover expected household demand until cheap-rate starts, use `SELF_POWERED`.
@@ -644,7 +644,7 @@ stateDiagram-v2
   2. **MID-PERIOD HIGH-SOC**: If the period has started and SOC is above the trigger threshold (55%) and the one-shot flag is not yet set, starts a bounded GRID_EXPORT down to the 40% floor; fires at most once per period
   2. **PRE-PERIOD**: Checks headroom deficit; if buffer shortfall detected, triggers bounded GRID_EXPORT
   3. **PERIOD-START**: Detects live clipping risk (solar near inverter ceiling) and promotes forecast status; applies final mode decision. If the period-start decision is GRID_EXPORT, also sets `high_soc_export_set` — preventing the mid-period high-SOC check from re-triggering after the period-start export completes. (If solar genuinely pushes SOC high enough to trigger live clipping-risk promotion, that path handles it independently.)
-- **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions
+- **Live Clipping Promotion**: If Amber forecast but live solar is near ceiling and SOC is high, runtime system promotes it to Green for export decisions. The solar check uses the minimum of the 3-sample rolling window — all readings must clear the threshold, not just their average, preventing a single spike from triggering export.
 - **Mode Application**: Switches inverter to decided mode via Sigen API and records telemetry
 - **Restore**: Timed export windows automatically restore to the mode that was active when the export started
 
