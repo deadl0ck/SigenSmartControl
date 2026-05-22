@@ -59,6 +59,7 @@ class PeriodHandlerContext:
         period_calibration: Calibration multipliers for this period.
         fetch_soc: Async callable returning current battery SOC or None.
         get_live_solar_average_kw: Returns rolling live solar average in kW.
+        get_live_solar_min_kw: Returns the minimum live solar reading in kW across recent samples.
         get_effective_battery_export_kw: Returns effective battery export kW.
         start_timed_grid_export: Async callable to begin a bounded timed export.
         apply_mode_change: Async callable to apply a mode change with tracking.
@@ -77,6 +78,7 @@ class PeriodHandlerContext:
     period_calibration: dict[str, Any]
     fetch_soc: Callable[[str], Awaitable[float | None]]
     get_live_solar_average_kw: Callable[[], float | None]
+    get_live_solar_min_kw: Callable[[], float | None]
     get_effective_battery_export_kw: Callable[[float | None], float]
     start_timed_grid_export: Callable[..., Awaitable[bool]]
     apply_mode_change: Callable[..., Awaitable[bool]]
@@ -88,15 +90,18 @@ def _promote_status_for_live_clipping_risk(
     period: str,
     status: str,
     soc: float | None,
-    avg_live_solar_kw: float | None,
+    min_live_solar_kw: float | None,
 ) -> tuple[str, str | None]:
     """Promote Amber forecast status to Green when live clipping risk is high.
+
+    All recent solar samples must individually clear the threshold — not just
+    their average — so a single spike cannot trigger export on its own.
 
     Args:
         period: Current period name (e.g., Morn/Aftn/Eve).
         status: Forecast status for the period.
         soc: Current battery SOC percentage.
-        avg_live_solar_kw: Rolling live solar average in kW.
+        min_live_solar_kw: Minimum live solar reading across recent samples in kW.
 
     Returns:
         Tuple of (effective_status, override_reason). override_reason is None
@@ -110,15 +115,15 @@ def _promote_status_for_live_clipping_risk(
         return status, None
     if soc is None or soc < LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
         return status, None
-    if avg_live_solar_kw is None:
+    if min_live_solar_kw is None:
         return status, None
 
     trigger_kw = LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW
-    if avg_live_solar_kw < trigger_kw:
+    if min_live_solar_kw < trigger_kw:
         return status, None
 
     reason = (
-        f"Solar output is high ({avg_live_solar_kw:.2f} kW) and battery is nearly full "
+        f"All recent solar readings are high (min {min_live_solar_kw:.2f} kW) and battery is nearly full "
         f"({soc:.1f}%) — treating forecast as Green to trigger export."
     )
     return "Green", reason
@@ -133,6 +138,7 @@ def _evaluate_period_mode_decision(
     now_utc: datetime,
     schedule_time_utc: datetime,
     solar_avg_kw_3: float | None,
+    solar_min_kw_3: float | None,
 ) -> dict[str, Any]:
     """Evaluate mode and headroom metrics for a period decision point.
 
@@ -143,14 +149,15 @@ def _evaluate_period_mode_decision(
         period_solar_kwh: Estimated period solar energy in kWh.
         now_utc: Current scheduler tick timestamp in UTC.
         schedule_time_utc: Timestamp used to derive tariff schedule period.
-        solar_avg_kw_3: Rolling average live solar generation in kW.
+        solar_avg_kw_3: Rolling average live solar generation in kW (used for export capacity).
+        solar_min_kw_3: Minimum live solar reading across recent samples in kW (used for promotion check).
 
     Returns:
         Dict with decision_status, reason, mode, headroom_kwh,
         headroom_target_kwh, headroom_deficit_kwh, and status_override_reason.
     """
     decision_status, status_override_reason = _promote_status_for_live_clipping_risk(
-        period, status, soc, solar_avg_kw_3
+        period, status, soc, solar_min_kw_3
     )
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
     headroom_target_kwh = (

@@ -29,6 +29,7 @@ from logic.schedule_utils import (
 from logic.inverter_control import (
     sample_live_solar_power as sample_live_solar_power_control,
     get_live_solar_average_kw as get_live_solar_average_kw_control,
+    get_live_solar_min_kw as get_live_solar_min_kw_control,
     get_effective_battery_export_kw as get_effective_battery_export_kw_control,
 )
 from telemetry.forecast_calibration import (
@@ -189,6 +190,18 @@ def get_live_solar_average_kw(state: SchedulerState) -> float | None:
         Rolling average solar power in kW, or None if insufficient samples.
     """
     return get_live_solar_average_kw_control(state.live_solar_kw_samples)
+
+
+def get_live_solar_min_kw(state: SchedulerState) -> float | None:
+    """Return the minimum live solar reading across recent samples.
+
+    Args:
+        state: Scheduler state object containing live solar samples.
+
+    Returns:
+        Minimum solar power in kW, or None if no samples present.
+    """
+    return get_live_solar_min_kw_control(state.live_solar_kw_samples)
 
 
 def get_effective_battery_export_kw(

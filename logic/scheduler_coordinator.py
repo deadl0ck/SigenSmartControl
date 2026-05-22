@@ -21,6 +21,7 @@ from logic.scheduler_operations import (
     fetch_soc,
     sample_live_solar_power,
     get_live_solar_average_kw,
+    get_live_solar_min_kw,
     get_effective_battery_export_kw,
     estimate_solar,
     archive_inverter_telemetry,
@@ -122,6 +123,10 @@ class SchedulerCoordinator:
     def _get_live_solar_avg(self) -> float | None:
         """Delegate to module-level get_live_solar_average_kw."""
         return get_live_solar_average_kw(self.state)
+
+    def _get_live_solar_min(self) -> float | None:
+        """Delegate to module-level get_live_solar_min_kw."""
+        return get_live_solar_min_kw(self.state)
 
     def _get_effective_export(self, avg_live_solar_kw: float | None) -> float:
         """Delegate to module-level get_effective_battery_export_kw."""
@@ -372,6 +377,7 @@ class SchedulerCoordinator:
                     period_calibration=get_period_calibration(self.state.forecast_calibration, period),
                     fetch_soc=self._fetch_soc,
                     get_live_solar_average_kw=self._get_live_solar_avg,
+                    get_live_solar_min_kw=self._get_live_solar_min,
                     get_effective_battery_export_kw=self._get_effective_export,
                     start_timed_grid_export=self._start_timed_export,
                     apply_mode_change=self._apply_mode_change,

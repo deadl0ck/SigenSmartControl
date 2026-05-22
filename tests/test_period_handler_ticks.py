@@ -77,6 +77,7 @@ def _make_handler_kwargs(
     timed_export_override: dict[str, Any] | None = None,
     soc_return: float | None = 30.0,
     solar_avg_kw: float | None = 1.0,
+    solar_min_kw: float | None = None,
     effective_export_kw: float = 3.0,
     start_timed_export_return: bool = True,
     apply_mode_change_return: bool = True,
@@ -92,6 +93,7 @@ def _make_handler_kwargs(
         timed_export_override: Override dict; defaults to inactive if None.
         soc_return: Value that fetch_soc() returns.
         solar_avg_kw: Value that get_live_solar_average_kw() returns.
+        solar_min_kw: Value that get_live_solar_min_kw() returns; defaults to solar_avg_kw if None.
         effective_export_kw: Value that get_effective_battery_export_kw() returns.
         start_timed_export_return: Bool returned by start_timed_grid_export().
         apply_mode_change_return: Bool returned by apply_mode_change().
@@ -110,6 +112,7 @@ def _make_handler_kwargs(
     start_timed_grid_export = AsyncMock(return_value=start_timed_export_return)
     apply_mode_change = AsyncMock(return_value=apply_mode_change_return)
     get_live_solar_average_kw = MagicMock(return_value=solar_avg_kw)
+    get_live_solar_min_kw = MagicMock(return_value=solar_min_kw if solar_min_kw is not None else solar_avg_kw)
     get_effective_battery_export_kw = MagicMock(return_value=effective_export_kw)
 
     return dict(
@@ -124,6 +127,7 @@ def _make_handler_kwargs(
         period_calibration=_make_calibration(),
         fetch_soc=fetch_soc,
         get_live_solar_average_kw=get_live_solar_average_kw,
+        get_live_solar_min_kw=get_live_solar_min_kw,
         get_effective_battery_export_kw=get_effective_battery_export_kw,
         start_timed_grid_export=start_timed_grid_export,
         apply_mode_change=apply_mode_change,
