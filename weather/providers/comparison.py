@@ -64,7 +64,6 @@ class ForecastComparisonProvider:
         self._cached_today_secondary: PeriodForecast | None = None
         self._cached_tomorrow_secondary: PeriodForecast | None = None
         self._fallback_today_alerted: bool = False
-        self._fallback_tomorrow_alerted: bool = False
         self._log_comparison()
 
     def _ordered_periods(
@@ -336,37 +335,83 @@ class ForecastComparisonProvider:
             tomorrow_tertiary,
         )
 
-    def _send_fallback_alert(self, day_label: str, fallback_forecast: PeriodForecast) -> None:
-        """Send a one-shot email alert when scheduling falls back to the secondary provider."""
+    def _send_fallback_alert(self, fallback_forecast: PeriodForecast) -> None:
+        """Send a one-shot HTML email alert when today's scheduling falls back to the secondary provider."""
+        from html import escape as _escape
         try:
             sender = _get_email_sender_instance()
             receiver = get_email_receiver_address()
             if sender is None or not receiver:
                 return
-            period_lines = "\n".join(
-                f"  {period}: {status} ({watts}W)"
-                for period, (watts, status) in sorted(
-                    fallback_forecast.items(),
-                    key=lambda kv: self._period_order.get(kv[0], 99),
-                )
-            )
+
             subject = (
-                f"Solar Alert — {self._primary_name} returned empty forecast "
-                f"({day_label}), using {self._secondary_name}"
+                f"Solar Alert • Forecast outage • "
+                f"{self._primary_name} unavailable • using {self._secondary_name}"
             )
-            body = (
-                f"The primary forecast provider ({self._primary_name}) returned an empty "
-                f"forecast for {day_label.lower()}.\n\n"
+
+            _status_colours = {"Green": "#1f6f43", "Amber": "#92400e", "Red": "#b42318"}
+            _status_bg = {"Green": "#e8f7ee", "Amber": "#fef3c7", "Red": "#fdecea"}
+
+            period_lines: list[str] = []
+            period_rows = ""
+            for period, (watts, status) in sorted(
+                fallback_forecast.items(),
+                key=lambda kv: self._period_order.get(kv[0], 99),
+            ):
+                period_label = {"Morn": "Morning", "Aftn": "Afternoon", "Eve": "Evening"}.get(period, period)
+                fg = _status_colours.get(status, "#172033")
+                bg = _status_bg.get(status, "#f8fafc")
+                period_lines.append(f"  {period_label}: {status} ({watts}W)")
+                period_rows += (
+                    f'<tr>'
+                    f'<td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">{_escape(period_label)}</td>'
+                    f'<td style="padding:4px 8px;">'
+                    f'<span style="padding:2px 8px;border-radius:999px;background:{bg};color:{fg};font-size:11px;font-weight:700;">{_escape(status)}</span>'
+                    f'</td>'
+                    f'<td style="padding:4px 0;font-size:12px;color:#172033;">{watts}W</td>'
+                    f'</tr>'
+                )
+
+            plain_body = (
+                f"Forecast provider outage detected.\n\n"
+                f"The primary forecast provider ({self._primary_name}) returned no data for today.\n"
                 f"Scheduling decisions are now using {self._secondary_name} as a fallback.\n\n"
                 f"Fallback forecast ({self._secondary_name}):\n"
-                f"{period_lines}\n\n"
-                f"No action is required — exports will continue using the fallback data. "
-                f"Check the ESB API if this persists."
+                + "\n".join(period_lines)
+                + "\n\nExports will continue using the fallback data. Check the ESB API if this persists."
             )
-            sender.send(receiver, subject, body)
+
+            html_body = f"""<!DOCTYPE html>
+<html lang="en">
+    <body style="margin:0;padding:12px;background:#f4f7fb;font-family:Segoe UI,Helvetica,Arial,sans-serif;color:#172033;">
+        <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(23,32,51,0.08);">
+            <div style="padding:14px 18px;background:linear-gradient(135deg,#143a52 0%,#1e5f74 100%);color:#ffffff;">
+                <div style="font-size:11px;letter-spacing:0.10em;text-transform:uppercase;opacity:0.75;">Solar Alert</div>
+                <div style="margin-top:3px;font-size:18px;font-weight:700;line-height:1.2;">Forecast provider outage</div>
+                <div style="margin-top:6px;">
+                    <span style="font-size:12px;opacity:0.85;">{_escape(self._primary_name)} unavailable &mdash; using {_escape(self._secondary_name)}</span>
+                    <span style="margin-left:10px;padding:2px 9px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;">FALLBACK ACTIVE</span>
+                </div>
+            </div>
+            <div style="padding:14px 18px;">
+                <div style="margin-bottom:12px;padding:10px 12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;font-size:13px;line-height:1.5;color:#78350f;">
+                    <strong>{_escape(self._primary_name)}</strong> returned no forecast data for today.
+                    Scheduling decisions are now using <strong>{_escape(self._secondary_name)}</strong> as a fallback.
+                    Exports will continue normally. Check the ESB API if this persists.
+                </div>
+                <div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:6px;">Fallback forecast &mdash; {_escape(self._secondary_name)}</div>
+                    <table role="presentation" style="width:100%;border-collapse:collapse;">{period_rows}</table>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>"""
+
+            sender.send(receiver, subject, plain_body, html_body)
             self.logger.info(
                 f"[FORECAST-COMPARE] Sent fallback alert email: {self._primary_name} empty "
-                f"for {day_label.lower()}, using {self._secondary_name}."
+                f"for today, using {self._secondary_name}."
             )
         except Exception as exc:
             self.logger.warning(
@@ -382,7 +427,7 @@ class ForecastComparisonProvider:
             )
             if not self._fallback_today_alerted:
                 self._fallback_today_alerted = True
-                self._send_fallback_alert("Today", self._cached_today_secondary)
+                self._send_fallback_alert(self._cached_today_secondary)
             return self._cached_today_secondary
         return result
 
@@ -393,9 +438,6 @@ class ForecastComparisonProvider:
                 f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
                 f"forecast for tomorrow — falling back to {self._secondary_name} for scheduling decisions."
             )
-            if not self._fallback_tomorrow_alerted:
-                self._fallback_tomorrow_alerted = True
-                self._send_fallback_alert("Tomorrow", self._cached_tomorrow_secondary)
             return self._cached_tomorrow_secondary
         return result
 
