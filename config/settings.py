@@ -53,6 +53,12 @@ LIVE_SOLAR_AVERAGE_SAMPLE_COUNT = 3
 # Lower bound for effective battery export capacity in pre-period calculations.
 # 0.2 kW is the minimum measurable net export after inverter standby losses; values below this are indistinguishable from idle.
 MIN_EFFECTIVE_BATTERY_EXPORT_KW = 0.2
+# Assumed net battery discharge rate used to size daytime timed export durations.
+# Applied when live solar saturates the inverter and get_effective_battery_export_kw
+# falls to MIN_EFFECTIVE_BATTERY_EXPORT_KW, which would otherwise produce absurdly long
+# duration estimates. The SOC-floor mechanism stops the export early when needed.
+# ~36% of inverter capacity matches the same assumption used for evening/night exports.
+DAYTIME_EXPORT_ASSUMED_BATTERY_KW = round(INVERTER_KW * 0.36, 2)
 
 # Simulation and safety controls.
 # Default fallback SOC used in full simulation mode when env var parsing fails.
