@@ -12,7 +12,7 @@
    - [Portability](#portability)
    - [Scheduler and decision thresholds](#scheduler-and-decision-thresholds)
    - [Tariff schedule windows](#tariff-schedule-windows)
-   - [Forecast providers](#forecast-providers-esb-primary-forecastsolar-backup-quartz-fallback-solcast-optional)
+   - [Forecast providers](#forecast-providers-solcast-primary-esb-secondary-forecastsolar-tertiary)
    - [Mode mappings](#mode-mappings)
    - [Decision order](#final-decision-order-very-important)
 7. [How It Works](#how-it-works)
@@ -47,8 +47,9 @@
 
 This project provides a locally run control system for a Sigen inverter using:
 
-- ESB county API forecast data (primary decision source)
-- Optional Open Quartz forecast data (secondary comparison source)
+- Solcast rooftop PV forecast (primary decision source)
+- ESB county API forecast data (secondary comparison source, Ireland only)
+- Forecast.Solar as tertiary comparison source
 - Battery state of charge from the Sigen API
 - Configurable operational mode mappings
 - A self-contained scheduler that evaluates conditions throughout the day
@@ -375,41 +376,34 @@ The tariff time windows in `config/settings.py` define when each tariff period i
 
 The scheduler uses these windows to determine whether to use self-powered or TOU modes at each transition. Actual electricity rates (c/kWh) are not stored in the config — the system makes mode decisions from forecast quality, SOC/headroom, and tariff period.
 
-### Forecast providers (ESB primary, Forecast.Solar backup, Quartz fallback, Solcast optional)
+### Forecast providers (Solcast primary, ESB secondary, Forecast.Solar tertiary)
 
 Forecast ingestion is abstracted behind a stable provider interface in `weather/forecast.py`.
 
-- Default runtime mode (`FORECAST_PROVIDER=esb_api`) uses ESB county API data for decisions.
-- In ESB mode, the app pulls Forecast.Solar first and Quartz second and logs a period-by-period comparison summary each refresh.
-- Forecast.Solar and Quartz are comparison-only in this mode; inverter decisions still follow ESB-derived statuses.
-- Secondary and tertiary providers are comparison-only — they are logged but do not influence decisions or headroom calculations.
-- **Fallback behaviour:** if the primary provider returns an empty forecast (e.g. ESB API outage), the scheduler automatically uses the secondary provider (Forecast.Solar) for that day's scheduling decisions. A one-shot email alert is sent to notify you of the fallback, including the fallback forecast periods and watts. If both providers return empty, scheduling is skipped for that day.
+- Default runtime mode (`FORECAST_PROVIDER=solcast`) uses Solcast satellite-derived rooftop PV forecasts for all scheduling decisions.
+- ESB county API is fetched each refresh cycle as secondary comparison data (Ireland only). It does not influence decisions or headroom calculations.
+- Forecast.Solar is fetched as a tertiary comparison source where available.
+- All secondary and tertiary providers are comparison-only — they are logged and archived but never change the scheduling outcome.
+- **Fallback behaviour:** if the primary provider returns an empty forecast, the scheduler automatically uses the secondary provider (ESB) for that day's scheduling decisions. A one-shot email alert is sent per day when this occurs, including the fallback forecast periods. The alert fires at most once per calendar day regardless of restarts. If both providers are empty, scheduling is skipped for that day.
+- If you set `FORECAST_PROVIDER=esb_api`, ESB becomes the decision source with Forecast.Solar as secondary and Quartz as tertiary (original Ireland-focused mode).
 - If you set `FORECAST_PROVIDER=forecast_solar`, Forecast.Solar becomes the decision source.
 - If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
-- If you set `FORECAST_PROVIDER=solcast`, Solcast becomes the decision source (see Solcast section below).
 
-Why keep Forecast.Solar/Quartz as secondary sources while ESB is primary:
+Why Solcast was chosen as primary:
 
-- ESB county statuses align with the public county forecast users already see.
-- Forecast.Solar and Quartz provide independent site-level predictions, useful for validating trends and potential future migration.
-- Running both lets you quantify match/mismatch over time before changing decision source.
+- Accuracy comparison over 57 periods (20 days): Solcast achieved **77.2% status accuracy** and **482W MAE**, versus 62.7% / 982W for Forecast.Solar and 54.5% / 1217W for Quartz.
+- Solcast median actual/forecast ratio of 0.90 means it slightly overestimates, which is a safer failure mode than underestimating on good days (which delays headroom exports).
+- The free Hobbyist tier (10 API calls/day) is sufficient with the built-in 100-minute fetch cache.
 
-How the comparison is normalized:
+How comparison normalization works:
 
-- ESB and Quartz are not naturally comparable. ESB is county-level and categorical (`Red`/`Amber`/`Green`), while Quartz is site-level and numeric (predicted power by timestamp).
-- Quartz timestamps are first converted into the local tariff timezone (`Europe/Dublin`) before grouping into project periods (`Morn`, `Aftn`, `Eve`, `NIGHT`). This avoids false mismatches caused by comparing UTC buckets to local scheduler windows.
-- Quartz period status is derived from average predicted output as a share of configured array size (`QUARTZ_SITE_CAPACITY_KWP`). Current normalization is:
-	- `Red`: less than `QUARTZ_RED_CAPACITY_FRACTION` (default 20%)
-	- `Amber`: from `QUARTZ_RED_CAPACITY_FRACTION` up to `QUARTZ_GREEN_CAPACITY_FRACTION` (default 20% to <40%)
-	- `Green`: `QUARTZ_GREEN_CAPACITY_FRACTION` or more (default >=40%)
-- ESB still exposes synthetic placeholder forecast values (`Red=1000`, `Amber=2500`, `Green=5000`) internally so the rest of the control logic keeps working unchanged. In comparison logs these are explicitly labelled as synthetic and not as measured site power.
-
-Why the normalization exists:
-
-- Without local-time bucketing, Quartz can look wrong simply because its morning energy lands in the wrong scheduler period.
-- Without capacity-based thresholds, Quartz will look unrealistically optimistic for a larger array because even modest output easily exceeds tiny fixed watt cutoffs.
-- Without labelling ESB values as synthetic, the logs can make county statuses look like real measured watts, which is misleading.
-- The goal is not to force perfect agreement. The goal is to make ESB-vs-Quartz differences interpretable enough to judge whether Quartz is a credible future decision source.
+- Solcast and ESB are not naturally comparable. Solcast is site-level and numeric (predicted power in kW by 30-min slot); ESB is county-level and categorical (`Red`/`Amber`/`Green`).
+- Solcast 30-min slots are bucketed into local scheduler periods (`Morn`, `Aftn`, `Eve`) before comparison. This avoids false mismatches from UTC vs. local time.
+- ESB period status is mapped to synthetic placeholder watts (`Red=1000`, `Amber=2500`, `Green=5000`) internally so the rest of the control logic works unchanged. In comparison logs these are explicitly labelled as synthetic.
+- Solcast/Forecast.Solar/Quartz status is derived from average predicted output as a share of configured array size. Current thresholds:
+	- `Red`: less than `QUARTZ_RED_CAPACITY_FRACTION` (default 20%) of site kWp
+	- `Amber`: 20% up to `QUARTZ_GREEN_CAPACITY_FRACTION` (default 40%) of site kWp
+	- `Green`: 40% or more of site kWp
 
 Actual inverter telemetry is also archived locally for later analysis:
 
@@ -419,9 +413,9 @@ Actual inverter telemetry is also archived locally for later analysis:
 - Each record also includes derived clipping heuristics. A sample is flagged as likely clipping only when inverter-side solar equals the `5.5 kW` ceiling.
 - This file is intended for post-run analysis so you can compare forecasted periods against what the inverter and battery actually did.
 
-#### Solcast rooftop forecast provider
+#### Solcast rooftop forecast provider (primary)
 
-[Solcast](https://toolkit.solcast.com.au) offers a site-specific rooftop PV forecast based on satellite irradiance data. The free Hobbyist tier allows **10 API calls per day**.
+[Solcast](https://toolkit.solcast.com.au) offers a site-specific rooftop PV forecast based on satellite irradiance data. The free Hobbyist tier allows **10 API calls per day**, which is sufficient with the built-in 100-minute fetch cache.
 
 **Setup**
 
@@ -1531,7 +1525,8 @@ python scripts/battery_throughput.py
 ## Recent Updates
 
 **2026-05-25**
-- **Forecast.Solar fallback when ESB API returns empty:** If the primary forecast provider (ESB) returns an empty forecast (e.g. due to an API outage), the scheduler now automatically falls back to the secondary provider (Forecast.Solar) for scheduling decisions. A one-shot email alert is sent when this occurs, listing the fallback forecast periods and watts. If both providers return empty, scheduling is skipped for that day. The secondary provider results are cached at startup from the existing comparison fetch — no extra API calls are made.
+- **Solcast promoted to primary forecast provider:** After 20 days of parallel accuracy data (57 periods), Solcast achieved 77.2% status accuracy and 482W MAE — significantly better than ESB (62.7% / 1229W) and Forecast.Solar (62.7% / 982W). ESB is now the secondary comparison source; Forecast.Solar is tertiary. Set `FORECAST_PROVIDER=solcast` in `.env` to activate (requires a free Solcast Hobbyist API key).
+- **Forecast fallback with email alert:** If the primary provider returns an empty forecast, the scheduler automatically uses the secondary provider for that day's decisions and sends a one-shot email alert (at most once per calendar day, surviving restarts).
 - **Export duration calculation fix:** When live solar saturates the inverter, `effective_battery_export_kw` drops to its 0.2 kW floor, which previously caused the duration formula to produce absurdly large values (e.g. 3,699 min) that were silently clamped to `MAX_TIMED_EXPORT_MINUTES=240`. The formula now uses `max(effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW)` (~1.98 kW, 36% of inverter capacity) as the minimum denominator, producing realistic durations on bright days.
 
 See `git log --oneline` for a full history of changes.

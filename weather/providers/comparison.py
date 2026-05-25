@@ -63,7 +63,7 @@ class ForecastComparisonProvider:
         self._config = config
         self._cached_today_secondary: PeriodForecast | None = None
         self._cached_tomorrow_secondary: PeriodForecast | None = None
-        self._fallback_today_alerted: bool = False
+        self._fallback_alert_file = Path(self._config.archive_path).parent / ".fallback_alert_sent"
         self._log_comparison()
 
     def _ordered_periods(
@@ -307,13 +307,15 @@ class ForecastComparisonProvider:
             f"[FORECAST-COMPARE] Decision provider is {self._primary_name}. "
             f"All other providers are comparison-only and do not influence decisions or headroom calculations."
         )
-        self.logger.info(
-            "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
-            f"({self._config.local_timezone}) and capacity-based thresholds: "
-            f"Red < {int(self._config.quartz_red_fraction * 100)}%, "
-            f"Amber < {int(self._config.quartz_green_fraction * 100)}%, "
-            "Green >= that share of configured array output."
-        )
+        uses_quartz = "quartz" in {self._secondary_name, self._tertiary_name}
+        if uses_quartz:
+            self.logger.info(
+                "[FORECAST-COMPARE] Quartz normalization uses local period bucketing "
+                f"({self._config.local_timezone}) and capacity-based thresholds: "
+                f"Red < {int(self._config.quartz_red_fraction * 100)}%, "
+                f"Amber < {int(self._config.quartz_green_fraction * 100)}%, "
+                "Green >= that share of configured array output."
+            )
 
         today_counts = self._log_day_comparison("Today", today_primary, today_secondary)
         tomorrow_counts = self._log_day_comparison("Tomorrow", tomorrow_primary, tomorrow_secondary)
@@ -323,8 +325,7 @@ class ForecastComparisonProvider:
         total_missing = today_counts[2] + tomorrow_counts[2]
         self.logger.info(
             "[FORECAST-COMPARE] Summary: "
-            f"matches={total_matches}, mismatches={total_mismatches}, missing={total_missing}. "
-            "Use mismatch trends to evaluate whether Quartz should replace or supplement ESB later."
+            f"matches={total_matches}, mismatches={total_mismatches}, missing={total_missing}."
         )
         self._persist_comparison_snapshot(
             today_primary,
@@ -378,7 +379,7 @@ class ForecastComparisonProvider:
                 f"Scheduling decisions are now using {self._secondary_name} as a fallback.\n\n"
                 f"Fallback forecast ({self._secondary_name}):\n"
                 + "\n".join(period_lines)
-                + "\n\nExports will continue using the fallback data. Check the ESB API if this persists."
+                + f"\n\nExports will continue using the fallback data. Check {self._primary_name} if this persists."
             )
 
             html_body = f"""<!DOCTYPE html>
@@ -397,7 +398,7 @@ class ForecastComparisonProvider:
                 <div style="margin-bottom:12px;padding:10px 12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;font-size:13px;line-height:1.5;color:#78350f;">
                     <strong>{_escape(self._primary_name)}</strong> returned no forecast data for today.
                     Scheduling decisions are now using <strong>{_escape(self._secondary_name)}</strong> as a fallback.
-                    Exports will continue normally. Check the ESB API if this persists.
+                    Exports will continue normally. Check {_escape(self._primary_name)} if this persists.
                 </div>
                 <div style="margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
                     <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:6px;">Fallback forecast &mdash; {_escape(self._secondary_name)}</div>
@@ -409,6 +410,7 @@ class ForecastComparisonProvider:
 </html>"""
 
             sender.send(receiver, subject, plain_body, html_body)
+            self._mark_fallback_alerted_today()
             self.logger.info(
                 f"[FORECAST-COMPARE] Sent fallback alert email: {self._primary_name} empty "
                 f"for today, using {self._secondary_name}."
@@ -418,6 +420,24 @@ class ForecastComparisonProvider:
                 f"[FORECAST-COMPARE] Failed to send fallback alert email: {exc}"
             )
 
+    def _fallback_already_alerted_today(self) -> bool:
+        """Return True if a fallback alert was already sent today (survives restarts via file stamp)."""
+        today = datetime.now(ZoneInfo(self._config.local_timezone)).date().isoformat()
+        try:
+            if self._fallback_alert_file.exists():
+                return self._fallback_alert_file.read_text().strip() == today
+        except OSError:
+            pass
+        return False
+
+    def _mark_fallback_alerted_today(self) -> None:
+        """Stamp today's date so restarts don't re-send the alert."""
+        today = datetime.now(ZoneInfo(self._config.local_timezone)).date().isoformat()
+        try:
+            self._fallback_alert_file.write_text(today)
+        except OSError as exc:
+            self.logger.warning(f"[FORECAST-COMPARE] Could not write fallback alert stamp: {exc}")
+
     def get_todays_period_forecast(self) -> PeriodForecast:
         result = self._primary.get_todays_period_forecast()
         if not result and self._cached_today_secondary:
@@ -425,8 +445,7 @@ class ForecastComparisonProvider:
                 f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
                 f"forecast for today — falling back to {self._secondary_name} for scheduling decisions."
             )
-            if not self._fallback_today_alerted:
-                self._fallback_today_alerted = True
+            if not self._fallback_already_alerted_today():
                 self._send_fallback_alert(self._cached_today_secondary)
             return self._cached_today_secondary
         return result
