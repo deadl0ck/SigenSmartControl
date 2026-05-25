@@ -14,6 +14,7 @@ from datetime import timedelta
 from config.settings import (
     AMBER_HEADROOM_TARGET_KWH,
     BATTERY_KWH,
+    DAYTIME_EXPORT_ASSUMED_BATTERY_KW,
     DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,
     HEADROOM_TARGET_KWH,
     MAX_PRE_PERIOD_WINDOW_MINUTES,
@@ -99,9 +100,9 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
             reason = str(decision_data["reason"])
             if mode == SIGEN_MODES["GRID_EXPORT"] and headroom_deficit > 0:
                 effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
-                duration_minutes = math.ceil(
-                    (headroom_deficit / effective_battery_export_kw) * 60
-                )
+                duration_minutes = max(1, math.ceil(
+                    (headroom_deficit / max(effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW)) * 60
+                ))
                 log_decision_checkpoint(
                     PERIOD, "MID-PERIOD-CLIPPING",
                     mode_names=mode_names, now_utc=now_utc,
@@ -153,9 +154,9 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
                 mid_period_effective_battery_export_kw = get_effective_battery_export_kw(
                     mid_period_solar_kw
                 )
-                mid_period_duration_minutes = math.ceil(
-                    (mid_period_headroom_deficit / mid_period_effective_battery_export_kw) * 60
-                )
+                mid_period_duration_minutes = max(1, math.ceil(
+                    (mid_period_headroom_deficit / max(mid_period_effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW)) * 60
+                ))
                 mid_period_reason = (
                     f"Battery is high ({mid_period_soc:.1f}%) and solar is strong "
                     f"({mid_period_solar_kw:.1f} kW) but only {mid_period_headroom_kwh:.2f} kWh "
@@ -332,7 +333,7 @@ async def handle_afternoon_period(ctx: PeriodHandlerContext) -> bool:
             if mode == SIGEN_MODES["GRID_EXPORT"]:
                 effective_battery_export_kw = get_effective_battery_export_kw(solar_avg_kw_3)
                 duration_minutes = max(
-                    1, math.ceil((headroom_deficit / effective_battery_export_kw) * 60)
+                    1, math.ceil((headroom_deficit / max(effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW)) * 60)
                 )
                 is_clipping_export = (
                     (status or "").upper() == "AMBER"
