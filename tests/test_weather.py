@@ -184,6 +184,79 @@ def test_comparison_provider_returns_primary_values():
     assert provider.get_tomorrows_period_forecast() == {"Morn": (1000, "Red")}
 
 
+def test_comparison_provider_falls_back_to_secondary_when_primary_empty_today():
+    """When primary returns {} for today, scheduler sees secondary's today forecast."""
+
+    class StaticProvider:
+        def __init__(self, today, tomorrow):
+            self._today = today
+            self._tomorrow = tomorrow
+        def get_todays_period_forecast(self): return self._today
+        def get_tomorrows_period_forecast(self): return self._tomorrow
+        def get_todays_solar_values(self): return []
+        def get_simple_inverter_plan(self): return {}
+        def is_good_day(self): return False
+
+    provider = ComparingSolarForecastProvider(
+        DummyLogger(),
+        StaticProvider({}, {"Morn": (1000, "Red")}),
+        StaticProvider({"Morn": (3849, "Green"), "Aftn": (5454, "Green")}, {}),
+        primary_name="esb_api",
+        secondary_name="forecast_solar",
+    )
+
+    assert provider.get_todays_period_forecast() == {"Morn": (3849, "Green"), "Aftn": (5454, "Green")}
+    assert provider.get_tomorrows_period_forecast() == {"Morn": (1000, "Red")}
+
+
+def test_comparison_provider_falls_back_to_secondary_when_primary_empty_tomorrow():
+    """When primary returns {} for tomorrow, scheduler sees secondary's tomorrow forecast."""
+
+    class StaticProvider:
+        def __init__(self, today, tomorrow):
+            self._today = today
+            self._tomorrow = tomorrow
+        def get_todays_period_forecast(self): return self._today
+        def get_tomorrows_period_forecast(self): return self._tomorrow
+        def get_todays_solar_values(self): return []
+        def get_simple_inverter_plan(self): return {}
+        def is_good_day(self): return False
+
+    provider = ComparingSolarForecastProvider(
+        DummyLogger(),
+        StaticProvider({"Morn": (2500, "Amber")}, {}),
+        StaticProvider({}, {"Morn": (4500, "Green")}),
+        primary_name="esb_api",
+        secondary_name="forecast_solar",
+    )
+
+    assert provider.get_todays_period_forecast() == {"Morn": (2500, "Amber")}
+    assert provider.get_tomorrows_period_forecast() == {"Morn": (4500, "Green")}
+
+
+def test_comparison_provider_no_fallback_when_both_providers_empty():
+    """When both primary and secondary return {}, an empty dict is returned."""
+
+    class StaticProvider:
+        def __init__(self): pass
+        def get_todays_period_forecast(self): return {}
+        def get_tomorrows_period_forecast(self): return {}
+        def get_todays_solar_values(self): return []
+        def get_simple_inverter_plan(self): return {}
+        def is_good_day(self): return False
+
+    provider = ComparingSolarForecastProvider(
+        DummyLogger(),
+        StaticProvider(),
+        StaticProvider(),
+        primary_name="esb_api",
+        secondary_name="forecast_solar",
+    )
+
+    assert provider.get_todays_period_forecast() == {}
+    assert provider.get_tomorrows_period_forecast() == {}
+
+
 def test_quartz_status_normalization_uses_20_40_capacity_thresholds(monkeypatch):
     """Quartz status should map to Red/Amber/Green at 20% and 40% capacity bands."""
     monkeypatch.setattr(weather_module, "QUARTZ_SITE_CAPACITY_KWP", 10.0)

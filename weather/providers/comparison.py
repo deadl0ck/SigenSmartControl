@@ -10,6 +10,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from weather.providers.common import InverterPlan, PeriodForecast, SolarForecastProvider
+from notifications.email_notifications import (
+    _get_email_sender_instance,
+    get_email_receiver_address,
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,10 @@ class ForecastComparisonProvider:
         self._secondary_name = secondary_name
         self._tertiary_name = tertiary_name
         self._config = config
+        self._cached_today_secondary: PeriodForecast | None = None
+        self._cached_tomorrow_secondary: PeriodForecast | None = None
+        self._fallback_today_alerted: bool = False
+        self._fallback_tomorrow_alerted: bool = False
         self._log_comparison()
 
     def _ordered_periods(
@@ -287,6 +295,8 @@ class ForecastComparisonProvider:
         today_secondary = self._secondary.get_todays_period_forecast()
         tomorrow_primary = self._primary.get_tomorrows_period_forecast()
         tomorrow_secondary = self._secondary.get_tomorrows_period_forecast()
+        self._cached_today_secondary = today_secondary
+        self._cached_tomorrow_secondary = tomorrow_secondary
         today_tertiary = (
             self._tertiary.get_todays_period_forecast() if self._tertiary is not None else None
         )
@@ -326,11 +336,68 @@ class ForecastComparisonProvider:
             tomorrow_tertiary,
         )
 
+    def _send_fallback_alert(self, day_label: str, fallback_forecast: PeriodForecast) -> None:
+        """Send a one-shot email alert when scheduling falls back to the secondary provider."""
+        try:
+            sender = _get_email_sender_instance()
+            receiver = get_email_receiver_address()
+            if sender is None or not receiver:
+                return
+            period_lines = "\n".join(
+                f"  {period}: {status} ({watts}W)"
+                for period, (watts, status) in sorted(
+                    fallback_forecast.items(),
+                    key=lambda kv: self._period_order.get(kv[0], 99),
+                )
+            )
+            subject = (
+                f"Solar Alert — {self._primary_name} returned empty forecast "
+                f"({day_label}), using {self._secondary_name}"
+            )
+            body = (
+                f"The primary forecast provider ({self._primary_name}) returned an empty "
+                f"forecast for {day_label.lower()}.\n\n"
+                f"Scheduling decisions are now using {self._secondary_name} as a fallback.\n\n"
+                f"Fallback forecast ({self._secondary_name}):\n"
+                f"{period_lines}\n\n"
+                f"No action is required — exports will continue using the fallback data. "
+                f"Check the ESB API if this persists."
+            )
+            sender.send(receiver, subject, body)
+            self.logger.info(
+                f"[FORECAST-COMPARE] Sent fallback alert email: {self._primary_name} empty "
+                f"for {day_label.lower()}, using {self._secondary_name}."
+            )
+        except Exception as exc:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Failed to send fallback alert email: {exc}"
+            )
+
     def get_todays_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_todays_period_forecast()
+        result = self._primary.get_todays_period_forecast()
+        if not result and self._cached_today_secondary:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
+                f"forecast for today — falling back to {self._secondary_name} for scheduling decisions."
+            )
+            if not self._fallback_today_alerted:
+                self._fallback_today_alerted = True
+                self._send_fallback_alert("Today", self._cached_today_secondary)
+            return self._cached_today_secondary
+        return result
 
     def get_tomorrows_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_tomorrows_period_forecast()
+        result = self._primary.get_tomorrows_period_forecast()
+        if not result and self._cached_tomorrow_secondary:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
+                f"forecast for tomorrow — falling back to {self._secondary_name} for scheduling decisions."
+            )
+            if not self._fallback_tomorrow_alerted:
+                self._fallback_tomorrow_alerted = True
+                self._send_fallback_alert("Tomorrow", self._cached_tomorrow_secondary)
+            return self._cached_tomorrow_secondary
+        return result
 
     def get_todays_solar_values(self) -> list[str]:
         return self._primary.get_todays_solar_values()
