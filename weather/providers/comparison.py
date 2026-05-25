@@ -63,7 +63,7 @@ class ForecastComparisonProvider:
         self._config = config
         self._cached_today_secondary: PeriodForecast | None = None
         self._cached_tomorrow_secondary: PeriodForecast | None = None
-        self._fallback_today_alerted: bool = False
+        self._fallback_alert_file = Path(self._config.archive_path).parent / ".fallback_alert_sent"
         self._log_comparison()
 
     def _ordered_periods(
@@ -335,6 +335,24 @@ class ForecastComparisonProvider:
             tomorrow_tertiary,
         )
 
+    def _fallback_already_alerted_today(self) -> bool:
+        """Return True if a fallback alert was already sent today (survives restarts via file stamp)."""
+        today = datetime.now(ZoneInfo(self._config.local_timezone)).date().isoformat()
+        try:
+            if self._fallback_alert_file.exists():
+                return self._fallback_alert_file.read_text().strip() == today
+        except OSError:
+            pass
+        return False
+
+    def _mark_fallback_alerted_today(self) -> None:
+        """Stamp today's date so restarts don't re-send the alert."""
+        today = datetime.now(ZoneInfo(self._config.local_timezone)).date().isoformat()
+        try:
+            self._fallback_alert_file.write_text(today)
+        except OSError as exc:
+            self.logger.warning(f"[FORECAST-COMPARE] Could not write fallback alert stamp: {exc}")
+
     def _send_fallback_alert(self, fallback_forecast: PeriodForecast) -> None:
         """Send a one-shot HTML email alert when today's scheduling falls back to the secondary provider."""
         from html import escape as _escape
@@ -409,6 +427,7 @@ class ForecastComparisonProvider:
 </html>"""
 
             sender.send(receiver, subject, plain_body, html_body)
+            self._mark_fallback_alerted_today()
             self.logger.info(
                 f"[FORECAST-COMPARE] Sent fallback alert email: {self._primary_name} empty "
                 f"for today, using {self._secondary_name}."
@@ -425,8 +444,7 @@ class ForecastComparisonProvider:
                 f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
                 f"forecast for today — falling back to {self._secondary_name} for scheduling decisions."
             )
-            if not self._fallback_today_alerted:
-                self._fallback_today_alerted = True
+            if not self._fallback_already_alerted_today():
                 self._send_fallback_alert(self._cached_today_secondary)
             return self._cached_today_secondary
         return result

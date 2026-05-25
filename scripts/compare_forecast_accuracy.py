@@ -1,7 +1,7 @@
 """Compare forecast provider accuracy against inverter telemetry.
 
-This script evaluates ESB, Forecast.Solar, and Quartz period forecasts against
-actual inverter PV production so far. It uses the latest forecast snapshot
+This script evaluates ESB, Forecast.Solar, Quartz, and Solcast period forecasts
+against actual inverter PV production so far. It uses the latest forecast snapshot
 captured before each period start (Morn/Aftn/Eve) and computes:
 - Status accuracy (Red/Amber/Green)
 - Value MAE/MAPE versus actual average watts
@@ -24,6 +24,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from config.settings import (
+    FORECAST_SOLAR_SITE_KWP,
     LOCAL_TIMEZONE,
     QUARTZ_GREEN_CAPACITY_FRACTION,
     QUARTZ_RED_CAPACITY_FRACTION,
@@ -210,6 +211,67 @@ def _iter_forecast_candidates(comparison_rows: list[dict[str, Any]]) -> list[For
     return candidates
 
 
+def _iter_solcast_candidates(solcast_rows: list[dict[str, Any]]) -> list[ForecastPick]:
+    """Convert raw Solcast archive rows into ForecastPick candidates."""
+    local_tz = ZoneInfo(LOCAL_TIMEZONE)
+    capacity_kw = max(FORECAST_SOLAR_SITE_KWP, 0.1)
+    candidates: list[ForecastPick] = []
+
+    for row in solcast_rows:
+        if not isinstance(row, dict):
+            continue
+        captured_raw = row.get("captured_at_utc")
+        if not isinstance(captured_raw, str):
+            continue
+        try:
+            generated_at = datetime.fromisoformat(captured_raw).astimezone(local_tz)
+        except ValueError:
+            continue
+
+        forecasts = row.get("forecasts")
+        if not isinstance(forecasts, list):
+            continue
+
+        period_buckets: dict[tuple[str, str], list[float]] = {}
+        for slot in forecasts:
+            period_end_raw = slot.get("period_end")
+            pv_kw = slot.get("pv_estimate")
+            if not isinstance(period_end_raw, str) or not isinstance(pv_kw, (int, float)):
+                continue
+            try:
+                slot_end = datetime.fromisoformat(period_end_raw.rstrip("Z") + "+00:00").astimezone(local_tz)
+            except ValueError:
+                continue
+            slot_start = slot_end - timedelta(minutes=30)
+            period = _period_for_local_hour(slot_start.hour)
+            if period is None:
+                continue
+            day_key = slot_start.date().isoformat()
+            period_buckets.setdefault((day_key, period), []).append(float(pv_kw))
+
+        for (day_key, period), kw_values in period_buckets.items():
+            avg_kw = sum(kw_values) / len(kw_values)
+            fraction = avg_kw / capacity_kw
+            if fraction < QUARTZ_RED_CAPACITY_FRACTION:
+                status = "Red"
+            elif fraction < QUARTZ_GREEN_CAPACITY_FRACTION:
+                status = "Amber"
+            else:
+                status = "Green"
+            candidates.append(
+                ForecastPick(
+                    provider="solcast",
+                    target_day=day_key,
+                    period=period,
+                    generated_at=generated_at,
+                    status=status,
+                    value_watts=avg_kw * 1000.0,
+                )
+            )
+
+    return candidates
+
+
 def _pick_latest_before_period_start(candidates: list[ForecastPick]) -> dict[tuple[str, str, str], ForecastPick]:
     """Select latest forecast for each provider/day/period before period start."""
     local_tz = ZoneInfo(LOCAL_TIMEZONE)
@@ -272,6 +334,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     comparison_rows = _load_jsonl(root / "data/forecast_comparisons.jsonl")
     telemetry_rows = _load_jsonl(root / "data/inverter_telemetry.jsonl")
+    solcast_rows = _load_jsonl(root / "data/solcast_readings.jsonl")
 
     if not comparison_rows:
         raise SystemExit("No forecast comparisons found in data/forecast_comparisons.jsonl")
@@ -280,6 +343,7 @@ def main() -> None:
 
     actuals = _build_actuals(telemetry_rows)
     candidates = _iter_forecast_candidates(comparison_rows)
+    candidates += _iter_solcast_candidates(solcast_rows)
     picks = _pick_latest_before_period_start(candidates)
     stats = _score_providers(picks, actuals)
 
