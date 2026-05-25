@@ -383,6 +383,7 @@ Forecast ingestion is abstracted behind a stable provider interface in `weather/
 - In ESB mode, the app pulls Forecast.Solar first and Quartz second and logs a period-by-period comparison summary each refresh.
 - Forecast.Solar and Quartz are comparison-only in this mode; inverter decisions still follow ESB-derived statuses.
 - Secondary and tertiary providers are comparison-only — they are logged but do not influence decisions or headroom calculations.
+- **Fallback behaviour:** if the primary provider returns an empty forecast (e.g. ESB API outage), the scheduler automatically uses the secondary provider (Forecast.Solar) for that day's scheduling decisions. A one-shot email alert is sent to notify you of the fallback, including the fallback forecast periods and watts. If both providers return empty, scheduling is skipped for that day.
 - If you set `FORECAST_PROVIDER=forecast_solar`, Forecast.Solar becomes the decision source.
 - If you set `FORECAST_PROVIDER=quartz`, Quartz becomes the decision source.
 - If you set `FORECAST_PROVIDER=solcast`, Solcast becomes the decision source (see Solcast section below).
@@ -779,6 +780,16 @@ $$
 $$
 
 This causes earlier export start when live solar is already high (because less inverter headroom remains for battery discharge).
+
+**Timed export duration:**
+
+Once an export starts, the scheduler sets a maximum duration so the inverter is not left in export mode indefinitely:
+
+$$
+\text{duration minutes} = \left\lceil \frac{\text{headroom deficit}}{\max(\text{effective battery export kW},\ \text{DAYTIME\_EXPORT\_ASSUMED\_BATTERY\_KW})} \times 60 \right\rceil
+$$
+
+The `DAYTIME_EXPORT_ASSUMED_BATTERY_KW` floor (~36% of inverter capacity, `≈1.98 kW`) prevents absurdly long durations when live solar is saturating the inverter and `effective battery export kW` falls to its 0.2 kW floor. Without this floor, a sunny-day export could calculate a 3,600-minute budget and be silently clamped to `MAX_TIMED_EXPORT_MINUTES=240`. The SOC-floor mechanism (`DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`) stops the export early if needed regardless of the duration budget.
 
 The scheduler then calculates:
 
@@ -1518,6 +1529,10 @@ python scripts/battery_throughput.py
 ```
 
 ## Recent Updates
+
+**2026-05-25**
+- **Forecast.Solar fallback when ESB API returns empty:** If the primary forecast provider (ESB) returns an empty forecast (e.g. due to an API outage), the scheduler now automatically falls back to the secondary provider (Forecast.Solar) for scheduling decisions. A one-shot email alert is sent when this occurs, listing the fallback forecast periods and watts. If both providers return empty, scheduling is skipped for that day. The secondary provider results are cached at startup from the existing comparison fetch — no extra API calls are made.
+- **Export duration calculation fix:** When live solar saturates the inverter, `effective_battery_export_kw` drops to its 0.2 kW floor, which previously caused the duration formula to produce absurdly large values (e.g. 3,699 min) that were silently clamped to `MAX_TIMED_EXPORT_MINUTES=240`. The formula now uses `max(effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW)` (~1.98 kW, 36% of inverter capacity) as the minimum denominator, producing realistic durations on bright days.
 
 See `git log --oneline` for a full history of changes.
 
