@@ -57,6 +57,8 @@ class ForecastComparisonProvider:
         self._secondary_name = secondary_name
         self._tertiary_name = tertiary_name
         self._config = config
+        self._cached_today_secondary: PeriodForecast | None = None
+        self._cached_tomorrow_secondary: PeriodForecast | None = None
         self._log_comparison()
 
     def _ordered_periods(
@@ -287,6 +289,8 @@ class ForecastComparisonProvider:
         today_secondary = self._secondary.get_todays_period_forecast()
         tomorrow_primary = self._primary.get_tomorrows_period_forecast()
         tomorrow_secondary = self._secondary.get_tomorrows_period_forecast()
+        self._cached_today_secondary = today_secondary
+        self._cached_tomorrow_secondary = tomorrow_secondary
         today_tertiary = (
             self._tertiary.get_todays_period_forecast() if self._tertiary is not None else None
         )
@@ -327,10 +331,24 @@ class ForecastComparisonProvider:
         )
 
     def get_todays_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_todays_period_forecast()
+        result = self._primary.get_todays_period_forecast()
+        if not result and self._cached_today_secondary:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
+                f"forecast for today — falling back to {self._secondary_name} for scheduling decisions."
+            )
+            return self._cached_today_secondary
+        return result
 
     def get_tomorrows_period_forecast(self) -> PeriodForecast:
-        return self._primary.get_tomorrows_period_forecast()
+        result = self._primary.get_tomorrows_period_forecast()
+        if not result and self._cached_tomorrow_secondary:
+            self.logger.warning(
+                f"[FORECAST-COMPARE] Primary provider ({self._primary_name}) returned empty "
+                f"forecast for tomorrow — falling back to {self._secondary_name} for scheduling decisions."
+            )
+            return self._cached_tomorrow_secondary
+        return result
 
     def get_todays_solar_values(self) -> list[str]:
         return self._primary.get_todays_solar_values()
