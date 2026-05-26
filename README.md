@@ -798,7 +798,7 @@ $$
 When current time is at or after `export_by`, it triggers the pre-period export decision.
 
 **Why anchor to cheap-rate end rather than period start?**
-In summer the morning solar period starts at sunrise (e.g. 05:20 BST) but cheap-rate TOU charging continues until 08:00 BST. Exporting early to create headroom would be immediately undone by TOU refilling the battery from the grid. By anchoring the target to `max(period_start, cheap_rate_end)`, the export is timed to complete just as TOU stops — so headroom is created at the moment it can actually be preserved. The pre-period window and export duration are both extended to match this later target.
+In summer the morning solar period starts at sunrise (e.g. 05:20 BST) but cheap-rate TOU charging continues until 08:00 BST. Exporting early to create headroom would be immediately undone by TOU refilling the battery from the grid. By anchoring the target to `max(period_start, cheap_rate_end)`, the export is timed to complete just as TOU stops — so headroom is created at the moment it can actually be preserved. The pre-period window is extended to match this later target; the export duration is always calculated from the headroom deficit and SOC floor, so the export stops as soon as the battery reaches the target level regardless of when it started.
 
 ### Night behavior
 
@@ -1523,6 +1523,10 @@ python scripts/battery_throughput.py
 ```
 
 ## Recent Updates
+
+**2026-05-26**
+- **Fix: scheduler stuck in night-window when ESB is down at startup.** `EsbSolarForecast.__init__` fetches live data at construction time. When ESB is down and Solcast is primary, the unguarded `SolarForecast(logger)` call failed, causing the entire `create_solar_forecast_provider` call to throw. `refresh_daily_data` then left `state.today_period_windows` holding yesterday's period times. After midnight the scheduler evaluated the current time as being after yesterday's sunset and locked into EVENING-NIGHT mode indefinitely — no daytime exports fired. Fixed by wrapping ESB construction in try/except (matching the existing pattern for Forecast.Solar). If ESB is unavailable, Forecast.Solar is used as the comparison secondary; if both fail, Solcast runs alone.
+- **Fix: pre-period export duration now always covers the full headroom deficit.** The pre-period export was using `time-until-deadline` as its duration. In the normal on-time case this is correct — but when the system starts late the deadline is only minutes away and the export stops far short of the headroom target SOC. The duration is now always calculated from the headroom deficit (identical to how mid-period and period-start exports work). The SOC floor already stops the export when the target is reached; the duration is purely an upper-bound safety.
 
 **2026-05-25**
 - **Solcast promoted to primary forecast provider:** After 20 days of parallel accuracy data (57 periods), Solcast achieved 77.2% status accuracy and 482W MAE — significantly better than ESB (62.7% / 1229W) and Forecast.Solar (62.7% / 982W). ESB is now the secondary comparison source; Forecast.Solar is tertiary. Set `FORECAST_PROVIDER=solcast` in `.env` to activate (requires a free Solcast Hobbyist API key).
