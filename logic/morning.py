@@ -232,7 +232,9 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
                 pre_check_complete = False
                 if mode == SIGEN_MODES["GRID_EXPORT"]:
                     duration_minutes = max(
-                        1, math.ceil((_pre_period_target - now_utc).total_seconds() / 60)
+                        1, math.ceil(
+                            headroom_deficit / max(effective_battery_export_kw, DAYTIME_EXPORT_ASSUMED_BATTERY_KW) * 60
+                        )
                     )
                     log_decision_checkpoint(
                         PERIOD, "PRE-PERIOD",
