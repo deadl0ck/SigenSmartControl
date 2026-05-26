@@ -94,7 +94,12 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
     """Create the active forecast provider based on constants configuration."""
     if FORECAST_PROVIDER == "solcast":
         primary = SolcastForecast(logger)
-        esb_provider = SolarForecast(logger)
+
+        esb_provider: SolarForecast | None = None
+        try:
+            esb_provider = SolarForecast(logger)
+        except Exception as exc:
+            logger.warning("[FORECAST-COMPARE] esb_api unavailable: %s", exc)
 
         forecast_solar_provider: _ForecastSolarForecast | None = None
         try:
@@ -102,15 +107,28 @@ def create_solar_forecast_provider(logger: logging.Logger) -> SolarForecastProvi
         except Exception as exc:
             logger.warning("[FORECAST-COMPARE] forecast_solar unavailable: %s", exc)
 
-        return ComparingSolarForecastProvider(
-            logger,
-            primary,
-            esb_provider,
-            primary_name="solcast",
-            secondary_name="esb_api",
-            tertiary=forecast_solar_provider,
-            tertiary_name="forecast_solar" if forecast_solar_provider is not None else None,
+        if esb_provider is not None:
+            return ComparingSolarForecastProvider(
+                logger,
+                primary,
+                esb_provider,
+                primary_name="solcast",
+                secondary_name="esb_api",
+                tertiary=forecast_solar_provider,
+                tertiary_name="forecast_solar" if forecast_solar_provider is not None else None,
+            )
+        if forecast_solar_provider is not None:
+            return ComparingSolarForecastProvider(
+                logger,
+                primary,
+                forecast_solar_provider,
+                primary_name="solcast",
+                secondary_name="forecast_solar",
+            )
+        logger.warning(
+            "[FORECAST-COMPARE] No comparison providers available. Using Solcast alone."
         )
+        return primary
 
     if FORECAST_PROVIDER == "esb_api":
         primary = SolarForecast(logger)
