@@ -429,3 +429,51 @@ class TestMidPeriodClippingExport:
         await handle_morning_period(_make_ctx(kwargs))
 
         assert period_state["clipping_export_set"] is False
+
+    @pytest.mark.asyncio
+    async def test_red_promoted_to_amber_triggers_clipping_export(self):
+        """Red forecast with high SOC and sustained high solar promotes to Amber and exports.
+
+        SOC=80% > 50% threshold, solar=5.0 kW > 4.5 kW trigger — Red is promoted
+        to Amber. Amber headroom target is 6.0 kWh; at 80% SOC headroom is 4.8 kWh,
+        so a deficit exists and timed export is started.
+        """
+        period_start = _PERIOD_START
+        now_utc = period_start + timedelta(minutes=30)
+        period_state = _make_period_state(start_set=True)
+
+        kwargs = _make_handler_kwargs(
+            now_utc=now_utc,
+            period_start=period_start,
+            period_state=period_state,
+            soc_return=80.0,
+            solar_avg_kw=5.0,
+            status="Red",
+        )
+        await handle_morning_period(_make_ctx(kwargs))
+
+        assert period_state["clipping_export_set"] is True
+        assert kwargs["_start_timed_grid_export"].called
+
+    @pytest.mark.asyncio
+    async def test_low_soc_blocks_red_to_amber_promotion(self):
+        """Red forecast is not promoted to Amber when SOC is below the threshold.
+
+        SOC=20% < LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT (50%) — no promotion
+        fires and clipping_export_set stays False.
+        """
+        period_start = _PERIOD_START
+        now_utc = period_start + timedelta(minutes=30)
+        period_state = _make_period_state(start_set=True)
+
+        kwargs = _make_handler_kwargs(
+            now_utc=now_utc,
+            period_start=period_start,
+            period_state=period_state,
+            soc_return=20.0,
+            solar_avg_kw=5.0,
+            status="Red",
+        )
+        await handle_morning_period(_make_ctx(kwargs))
+
+        assert period_state["clipping_export_set"] is False
