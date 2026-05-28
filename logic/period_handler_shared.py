@@ -92,10 +92,11 @@ def _promote_status_for_live_clipping_risk(
     soc: float | None,
     min_live_solar_kw: float | None,
 ) -> tuple[str, str | None]:
-    """Promote Amber forecast status to Green when live clipping risk is high.
+    """Promote forecast status one level when live clipping risk is high.
 
-    All recent solar samples must individually clear the threshold — not just
-    their average — so a single spike cannot trigger export on its own.
+    Red is promoted to Amber; Amber is promoted to Green. All recent solar
+    samples must individually clear the threshold — not just their average —
+    so a single spike cannot trigger export on its own.
 
     Args:
         period: Current period name (e.g., Morn/Aftn/Eve).
@@ -111,7 +112,7 @@ def _promote_status_for_live_clipping_risk(
 
     if not is_live_clipping_period_enabled(period):
         return status, None
-    if status_key != "AMBER":
+    if status_key not in ("RED", "AMBER"):
         return status, None
     if soc is None or soc < LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT:
         return status, None
@@ -122,11 +123,18 @@ def _promote_status_for_live_clipping_risk(
     if min_live_solar_kw < trigger_kw:
         return status, None
 
+    if status_key == "RED":
+        promoted_to = "Amber"
+        action = "treating forecast as Amber"
+    else:
+        promoted_to = "Green"
+        action = "treating forecast as Green"
+
     reason = (
         f"All recent solar readings are high (min {min_live_solar_kw:.2f} kW) and battery is nearly full "
-        f"({soc:.1f}%) — treating forecast as Green to trigger export."
+        f"({soc:.1f}%) — {action} to trigger export."
     )
-    return "Green", reason
+    return promoted_to, reason
 
 
 def _evaluate_period_mode_decision(
