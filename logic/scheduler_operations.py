@@ -87,32 +87,38 @@ async def refresh_daily_data(
     )
     logger.info(f"[SCHEDULER] Tomorrow sunrise: {tomorrow_sunrise.isoformat()}")
 
-    daytime_periods = order_daytime_periods(state.today_period_forecast)
     tomorrow_daytime_periods = order_daytime_periods(state.tomorrow_period_forecast)
-    state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
-    state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda item: item[1])
     state.tomorrow_period_windows = derive_period_windows(
         tomorrow_sunrise,
         tomorrow_sunset,
         tomorrow_daytime_periods,
     )
+
+    if reset_day_state:
+        # Derive today's period windows from the full 3-period forecast at day start.
+        # Intra-day refreshes must NOT recalculate these: once Morn completes Solcast
+        # stops returning it, so the list shrinks to 2 periods and the windows would
+        # be recalculated as halves instead of thirds, shifting Eve ~3 h too early.
+        daytime_periods = order_daytime_periods(state.today_period_forecast)
+        state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
+        state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda item: item[1])
+        state.day_state = {
+            p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
+            for p in daytime_periods
+        }
+    else:
+        daytime_periods = list(state.today_period_windows.keys())
+        for period in daytime_periods:
+            state.day_state.setdefault(
+                period, {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
+            )
+
     logger.info("[SCHEDULER] Ordered daytime periods today: %s", daytime_periods)
     logger.info("[SCHEDULER] Ordered daytime periods tomorrow: %s", tomorrow_daytime_periods)
     for period, start in state.today_period_windows.items():
         logger.info(f"[SCHEDULER] Period '{period}' starts at {start.isoformat()} UTC")
     for period, start in state.tomorrow_period_windows.items():
         logger.info(f"[SCHEDULER] Tomorrow period '{period}' starts at {start.isoformat()} UTC")
-
-    if reset_day_state:
-        state.day_state = {
-            p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
-            for p in daytime_periods
-        }
-    else:
-        for period in daytime_periods:
-            state.day_state.setdefault(
-                period, {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
-            )
 
     state.last_forecast_refresh_utc = datetime.now(timezone.utc)
 
