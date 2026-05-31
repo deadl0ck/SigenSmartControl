@@ -22,6 +22,7 @@ from config.settings import (
     MORNING_HIGH_SOC_PROTECTION_ENABLED,
     MORNING_HIGH_SOC_THRESHOLD_PERCENT,
     SIGEN_MODES,
+    TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT,
 )
 from logic.decision_logic import (
     calc_headroom_kwh,
@@ -320,6 +321,15 @@ async def handle_morning_period(ctx: PeriodHandlerContext) -> bool:
     if not s["start_set"] and now_utc >= period_start:
         soc = await fetch_soc(PERIOD)
         if soc is not None:
+            if s.get("soc_floor_hit", False):
+                recovery_threshold = DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT + TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT
+                if soc < recovery_threshold:
+                    logger.info(
+                        "[%s] SOC %.1f%% below floor-hit recovery threshold %.1f%% — "
+                        "waiting before restarting export.",
+                        PERIOD, soc, recovery_threshold,
+                    )
+                    return True
             solar_avg_kw_3 = get_live_solar_average_kw()
             solar_min_kw_3 = get_live_solar_min_kw()
             decision_data = _evaluate_period_mode_decision(

@@ -392,6 +392,7 @@ async def maybe_restore_timed_grid_export(
     logger: logging.Logger,
     current_export_soc_floor: float | None = None,
     current_period: str | None = None,
+    on_soc_floor_hit: Callable[[str], None] | None = None,
 ) -> str:
     """Restore pre-export mode when active timed export window has elapsed.
 
@@ -414,6 +415,9 @@ async def maybe_restore_timed_grid_export(
             ``"Aftn"``, ``"Eve"``).  When provided, clipping exports are
             stopped early if the period transitions to one where clipping-risk
             promotion is not enabled (e.g. Evening on a Red day).
+        on_soc_floor_hit: Optional callback invoked with the trigger period name
+            when the export SOC floor fires and the restore succeeds.  Used by
+            callers to set the per-period soc_floor_hit flag in day_state.
 
     Returns:
         ``"inactive"`` — no override is currently active; the caller should
@@ -471,6 +475,8 @@ async def maybe_restore_timed_grid_export(
                 )
                 if restore_ok:
                     set_timed_export_override(_empty_timed_export_override())
+                    if on_soc_floor_hit is not None:
+                        on_soc_floor_hit(trigger_period)
                     return "restored"
 
     if is_clipping and clipping_soc_floor is not None:

@@ -23,12 +23,17 @@ class DayStateEntry(TypedDict):
         high_soc_export_set: True once a mid-period high-SOC safety export has fired.
             Prevents repeated exports within the same period after solar recharges
             the battery above the trigger threshold.
+        soc_floor_hit: True if a timed export was stopped by the SOC floor during this
+            period. Requires SOC to recover TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT
+            above DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT before the period-start export
+            will attempt to restart.
     """
 
     pre_set: bool
     start_set: bool
     clipping_export_set: bool
     high_soc_export_set: bool
+    soc_floor_hit: bool
 
 
 class NightState(TypedDict):

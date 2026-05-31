@@ -262,6 +262,10 @@ LIVE_CLIPPING_RISK_SOLAR_TRIGGER_KW = 4.5
 # SOC floor for all daytime timed exports (headroom-based pre-period exports and
 # mid-period clipping-risk exports). Export stops when SOC hits this floor.
 DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT = 40.0
+# After an export SOC floor hit, require SOC to recover this many percentage points
+# above DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT before restarting the same-period export.
+# Prevents the oscillation of brief re-exports that immediately re-hit the floor.
+TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT = 7.5
 # Controlled evening export settings.
 # Enables bounded battery export in evening to create headroom, while preserving
 # enough energy to avoid avoidable grid import before cheap-rate charging.
