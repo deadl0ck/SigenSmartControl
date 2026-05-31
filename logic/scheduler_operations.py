@@ -103,14 +103,14 @@ async def refresh_daily_data(
         state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
         state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda item: item[1])
         state.day_state = {
-            p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
+            p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False, "soc_floor_hit": False}
             for p in daytime_periods
         }
     else:
         daytime_periods = list(state.today_period_windows.keys())
         for period in daytime_periods:
             state.day_state.setdefault(
-                period, {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False}
+                period, {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False, "soc_floor_hit": False}
             )
 
     logger.info("[SCHEDULER] Ordered daytime periods today: %s", daytime_periods)
