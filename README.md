@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-05-31**
+- **Fix: export restart blocked after SOC floor hit until SOC recovers.** When a timed export was stopped early by the SOC floor, the 15-minute cooldown previously allowed a restart as soon as it expired — even if SOC had only recovered marginally above the floor. This caused brief oscillating re-exports (e.g. a 3-minute export) that immediately re-hit the floor. A per-period `soc_floor_hit` flag is now set in `day_state` when the SOC floor fires. The period-start export path then requires SOC to recover to `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT + TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT` (default 40% + 7.5% = 47.5%) before restarting. The flag is per-period and resets at midnight. Configurable via `TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT` in `settings.py`.
+
 **2026-05-30**
 - **Fix: period windows locked after initial daily setup.** Intra-day forecast refreshes (every 30 minutes) recalculated `today_period_windows` from whatever periods the forecast returned. Once the Morning period completes, Solcast stops returning it — so the list shrinks to 2 periods (Aftn, Eve) and `derive_period_windows` divided the solar day into halves instead of thirds, shifting the Eve boundary ~3 hours early. This caused the evening controlled export to fire in the middle of the afternoon, discharging the battery to ~40% on a day with no Green forecast. Period windows are now calculated once at midnight/startup (`reset_day_state=True`) and held fixed for the rest of the day. Forecast values (watts, status) continue to refresh every 30 minutes as before.
 
