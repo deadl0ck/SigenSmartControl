@@ -436,10 +436,14 @@ async def maybe_restore_timed_grid_export(
     is_clipping = timed_export_override.get("is_clipping_export", False)
     clipping_soc_floor = timed_export_override.get("clipping_soc_floor")
     export_soc_floor = timed_export_override.get("export_soc_floor")
-    # Use the caller-supplied current floor when available so that the threshold
-    # reflects the active period's status rather than the status at export start.
+    # For headroom exports, use the dynamically computed floor so that the
+    # threshold reflects the active period's status if a period boundary was
+    # crossed mid-export. For clipping/high-SOC exports the stored floor
+    # (DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT) is always correct — using the
+    # dynamic Amber floor (75%) would fire immediately when SOC < 75%.
     effective_export_soc_floor = (
-        current_export_soc_floor if current_export_soc_floor is not None else export_soc_floor
+        export_soc_floor if is_clipping
+        else (current_export_soc_floor if current_export_soc_floor is not None else export_soc_floor)
     )
 
     # SOC floor checks: export_soc_floor is evaluated first because it is an

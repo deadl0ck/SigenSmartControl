@@ -428,6 +428,106 @@ class TestTimedExportStateMachine:
         assert result == "restored", "Should restore when SOC is at trigger threshold"
         apply_mode_change.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_clipping_export_ignores_dynamic_floor_uses_stored_floor(self):
+        """Clipping/high-SOC export must use its stored floor, not the dynamic period floor.
+
+        Regression: 2026-06-01. Eve = Amber → dynamic floor = 75%. High-SOC export
+        started at SOC 60.8% with stored floor = 40%. The export was terminating
+        immediately because 60.8% <= 75% (dynamic). With the fix, clipping exports
+        always use the stored floor (40%), so 60.8% > 40% → export continues.
+        """
+        from logic.timed_export import maybe_restore_timed_grid_export
+        from config.settings import DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT
+
+        started_at = datetime(2026, 6, 1, 15, 33, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 6, 1, 18, 5, tzinfo=timezone.utc)
+        now_utc = started_at + timedelta(minutes=5)  # Still within window
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Eve",
+            "duration_minutes": 152,
+            "is_clipping_export": True,
+            "clipping_soc_floor": None,
+            "export_soc_floor": DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,  # 40%
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=59.8)  # Below dynamic Amber floor (75%), above stored (40%)
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+            current_export_soc_floor=75.0,  # Dynamic Amber floor — must be ignored for clipping export
+        )
+
+        assert result == "active", (
+            "Clipping export must not terminate at 59.8% when stored floor is 40%"
+        )
+        apply_mode_change.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_clipping_export_restores_at_stored_floor_not_dynamic(self):
+        """Clipping export must restore at the stored floor (40%), not the dynamic one."""
+        from logic.timed_export import maybe_restore_timed_grid_export
+        from config.settings import DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT
+
+        started_at = datetime(2026, 6, 1, 15, 33, tzinfo=timezone.utc)
+        restore_at = datetime(2026, 6, 1, 18, 5, tzinfo=timezone.utc)
+        now_utc = started_at + timedelta(minutes=5)
+
+        override = {
+            "active": True,
+            "started_at": started_at,
+            "restore_at": restore_at,
+            "restore_mode": SIGEN_MODES["SELF_POWERED"],
+            "restore_mode_label": "SELF_POWERED",
+            "trigger_period": "Eve",
+            "duration_minutes": 152,
+            "is_clipping_export": True,
+            "clipping_soc_floor": None,
+            "export_soc_floor": DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT,  # 40%
+        }
+
+        saved_state = {}
+
+        def set_override(state):
+            saved_state.update(state)
+
+        fetch_soc = AsyncMock(return_value=39.0)  # Below both 40% stored and 75% dynamic
+        apply_mode_change = AsyncMock(return_value=True)
+
+        result = await maybe_restore_timed_grid_export(
+            timed_export_override=override,
+            set_timed_export_override=set_override,
+            now_utc=now_utc,
+            fetch_soc=fetch_soc,
+            sigen=None,
+            mode_names={},
+            apply_mode_change=apply_mode_change,
+            logger=logger,
+            current_export_soc_floor=75.0,
+        )
+
+        assert result == "restored", "Export must restore when SOC drops below the stored 40% floor"
+        apply_mode_change.assert_called_once()
+
     def test_timed_export_persistence_structure(self):
         """Persisted timed export state should include all required fields."""
         state_to_persist = {
