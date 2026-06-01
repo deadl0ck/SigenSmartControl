@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-06-01**
+- **Fix: crash and blind restart when Solcast drops past periods mid-day.** Two related bugs surfaced when the monitor restarted at 10:38 UTC. (1) The intra-day forecast refresh replaced `today_period_forecast` wholesale with Solcast's 2-period result (Aftn, Eve) while `ordered_period_windows` still held all 3 periods — the coordinator then crashed with `KeyError: 'Morn'`. (2) On restart, `today_period_windows` is empty so the startup flow fell into the intra-day branch, produced `daytime_periods = []`, and fired no handlers for the rest of the day. Fixed by: merging (not replacing) `today_period_forecast` on intra-day refresh; always anchoring window boundaries to the canonical `["Morn","Aftn","Eve"]` triplet on day-reset so windows remain thirds even after a mid-day restart; triggering a day-reset when `ordered_period_windows` is empty at startup; and guarding `_process_period_windows` against any period absent from the forecast.
+
 **2026-05-31**
 - **Fix: export restart blocked after SOC floor hit until SOC recovers.** When a timed export was stopped early by the SOC floor, the 15-minute cooldown previously allowed a restart as soon as it expired — even if SOC had only recovered marginally above the floor. This caused brief oscillating re-exports (e.g. a 3-minute export) that immediately re-hit the floor. A per-period `soc_floor_hit` flag is now set in `day_state` when the SOC floor fires. The period-start export path then requires SOC to recover to `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT + TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT` (default 40% + 7.5% = 47.5%) before restarting. The flag is per-period and resets at midnight. Configurable via `TIMED_EXPORT_FLOOR_HIT_RECOVERY_PERCENT` in `settings.py`.
 

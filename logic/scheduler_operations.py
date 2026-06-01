@@ -60,8 +60,15 @@ async def refresh_daily_data(
     logger.info("[SCHEDULER] Refreshing daily forecast and sunrise/sunset data.")
     state.forecast_calibration = build_and_save_forecast_calibration()
     forecast_obj: SolarForecastProvider = create_solar_forecast_provider(logger)
-    state.today_period_forecast = forecast_obj.get_todays_period_forecast()
+    new_today = forecast_obj.get_todays_period_forecast()
     state.tomorrow_period_forecast = forecast_obj.get_tomorrows_period_forecast()
+    if reset_day_state:
+        state.today_period_forecast = new_today
+    else:
+        # Intra-day: merge rather than replace. Solcast stops returning past periods
+        # (e.g. Morn after ~10:00), but today_period_windows still references them;
+        # a full overwrite would cause a KeyError in _process_period_windows.
+        state.today_period_forecast.update(new_today)
     logger.info(f"[SCHEDULER] Today's forecast: {state.today_period_forecast}")
     logger.info(f"[SCHEDULER] Tomorrow's forecast: {state.tomorrow_period_forecast}")
 
@@ -95,17 +102,18 @@ async def refresh_daily_data(
     )
 
     if reset_day_state:
-        # Derive today's period windows from the full 3-period forecast at day start.
-        # Intra-day refreshes must NOT recalculate these: once Morn completes Solcast
-        # stops returning it, so the list shrinks to 2 periods and the windows would
-        # be recalculated as halves instead of thirds, shifting Eve ~3 h too early.
-        daytime_periods = order_daytime_periods(state.today_period_forecast)
-        state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, daytime_periods)
+        # Always anchor windows to the full canonical period set. Solcast drops
+        # past periods mid-day, so a mid-day restart would otherwise produce
+        # 2-period windows (halves of the solar day) instead of the correct thirds.
+        # _process_period_windows skips any period absent from today_period_forecast.
+        canonical_periods = ["Morn", "Aftn", "Eve"]
+        state.today_period_windows = derive_period_windows(sunrise_utc, sunset_utc, canonical_periods)
         state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda item: item[1])
         state.day_state = {
             p: {"pre_set": False, "start_set": False, "clipping_export_set": False, "high_soc_export_set": False, "soc_floor_hit": False}
-            for p in daytime_periods
+            for p in canonical_periods
         }
+        daytime_periods = canonical_periods
     else:
         daytime_periods = list(state.today_period_windows.keys())
         for period in daytime_periods:
