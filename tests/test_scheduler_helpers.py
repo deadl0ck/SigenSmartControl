@@ -381,3 +381,83 @@ def test_is_pre_sunrise_discharge_window_false_outside_months() -> None:
         months_csv="4,5,6,7,8,9",
         lead_minutes=60,
     ) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for mid-day restart / Solcast period-drop resilience (2026-06-01 crash)
+# ---------------------------------------------------------------------------
+
+def _make_day_state(periods: list[str]) -> "dict[str, Any]":
+    return {p: {"pre_set": False, "start_set": False, "clipping_export_set": False,
+                "high_soc_export_set": False, "soc_floor_hit": False} for p in periods}
+
+
+def test_refresh_daily_data_intraday_preserves_dropped_periods(tmp_path, monkeypatch) -> None:
+    """Intra-day forecast refresh must merge, not replace, so past periods
+    that Solcast has stopped returning are kept in today_period_forecast.
+    Regression: 2026-06-01 crash KeyError: 'Morn'."""
+    import asyncio
+    from unittest.mock import patch as _patch, MagicMock
+    from datetime import date
+    from logic.scheduler_operations import refresh_daily_data
+    from logic.scheduler_state import SchedulerState
+    from logic.schedule_utils import derive_period_windows
+
+    sunrise = datetime(2026, 6, 1, 4, 5, tzinfo=timezone.utc)
+    sunset = datetime(2026, 6, 1, 20, 51, tzinfo=timezone.utc)
+
+    state = SchedulerState(current_date=date(2026, 6, 1))
+    state.today_period_forecast = {"Morn": (1059, "Red"), "Aftn": (2871, "Amber"), "Eve": (2466, "Amber")}
+    state.today_period_windows = derive_period_windows(sunrise, sunset, ["Morn", "Aftn", "Eve"])
+    state.ordered_period_windows = sorted(state.today_period_windows.items(), key=lambda x: x[1])
+    state.day_state = _make_day_state(["Morn", "Aftn", "Eve"])
+
+    mock_provider = MagicMock()
+    mock_provider.get_todays_period_forecast.return_value = {"Aftn": (2757, "Amber"), "Eve": (2330, "Amber")}
+    mock_provider.get_tomorrows_period_forecast.return_value = {"Morn": (2142, "Amber")}
+
+    with _patch("logic.scheduler_operations.build_and_save_forecast_calibration", return_value={}), \
+         _patch("logic.scheduler_operations.create_solar_forecast_provider", return_value=mock_provider), \
+         _patch("logic.scheduler_operations.get_sunrise_sunset", side_effect=[
+             ("2026-06-01T04:05:14+00:00", "2026-06-01T20:51:26+00:00"),
+             ("2026-06-02T04:04:22+00:00", "2026-06-02T20:52:37+00:00"),
+         ]):
+        asyncio.run(refresh_daily_data(state, _test_logger, reset_day_state=False))
+
+    assert "Morn" in state.today_period_forecast, "Morn must be preserved after intra-day merge"
+    assert state.today_period_forecast["Aftn"] == (2757, "Amber")
+    assert state.today_period_forecast["Eve"] == (2330, "Amber")
+
+
+def test_refresh_daily_data_reset_uses_canonical_period_windows(tmp_path, monkeypatch) -> None:
+    """Day-reset must always compute windows against canonical ['Morn','Aftn','Eve']
+    even when Solcast only returns 2 periods (mid-day restart scenario).
+    Regression: after 2026-06-01 crash, restart left ordered_period_windows=[]."""
+    import asyncio
+    from unittest.mock import patch as _patch, MagicMock
+    from datetime import date
+    from logic.scheduler_operations import refresh_daily_data
+    from logic.scheduler_state import SchedulerState
+
+    state = SchedulerState(current_date=date(2026, 6, 1))
+
+    mock_provider = MagicMock()
+    mock_provider.get_todays_period_forecast.return_value = {"Aftn": (2757, "Amber"), "Eve": (2330, "Amber")}
+    mock_provider.get_tomorrows_period_forecast.return_value = {"Morn": (2142, "Amber"), "Aftn": (4831, "Green"), "Eve": (2455, "Amber")}
+
+    with _patch("logic.scheduler_operations.build_and_save_forecast_calibration", return_value={}), \
+         _patch("logic.scheduler_operations.create_solar_forecast_provider", return_value=mock_provider), \
+         _patch("logic.scheduler_operations.get_sunrise_sunset", side_effect=[
+             ("2026-06-01T04:05:14+00:00", "2026-06-01T20:51:26+00:00"),
+             ("2026-06-02T04:04:22+00:00", "2026-06-02T20:52:37+00:00"),
+         ]):
+        asyncio.run(refresh_daily_data(state, _test_logger, reset_day_state=True))
+
+    assert set(state.today_period_windows.keys()) == {"Morn", "Aftn", "Eve"}
+    assert len(state.ordered_period_windows) == 3
+    assert set(state.day_state.keys()) == {"Morn", "Aftn", "Eve"}
+    # Windows must be thirds of the solar day — Eve start must be > halfway
+    morn_start = state.today_period_windows["Morn"]
+    aftn_start = state.today_period_windows["Aftn"]
+    eve_start = state.today_period_windows["Eve"]
+    assert morn_start < aftn_start < eve_start

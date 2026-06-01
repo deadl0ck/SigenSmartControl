@@ -160,7 +160,7 @@ class SchedulerCoordinator:
 
     async def _handle_forecast_refresh(self, now: datetime, today: date) -> bool:
         """Refresh forecast data if needed. Returns True if the tick should be skipped."""
-        if today != self.state.current_date:
+        if today != self.state.current_date or not self.state.ordered_period_windows:
             self.state.current_date = today
             try:
                 await refresh_daily_data(self.state, self.logger, reset_day_state=True)
@@ -359,6 +359,8 @@ class SchedulerCoordinator:
 
         if not night_tick_consumed:
             for period_index, (period, period_start) in enumerate(self.state.ordered_period_windows):
+                if period not in self.state.today_period_forecast:
+                    continue
                 solar_value, status = self.state.today_period_forecast[period]
                 period_end_utc = (
                     self.state.ordered_period_windows[period_index + 1][1]
