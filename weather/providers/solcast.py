@@ -131,6 +131,55 @@ class SolcastForecast(BaseSolarForecast):
         self.logger.info("[SOLCAST] Fetched and archived %d forecast points", len(forecasts))
         return forecasts
 
+    def _today_daytime_entries(
+        self, forecasts: list[dict[str, Any]], local_tz: ZoneInfo
+    ) -> list[dict[str, Any]]:
+        """Return only the entries from forecasts that map to today's Morn/Aftn/Eve."""
+        today_label = datetime.now(local_tz).strftime("%a").capitalize()
+        result = []
+        for entry in forecasts:
+            try:
+                dt = datetime.fromisoformat(entry["period_end"].replace("Z", "+00:00"))
+                local_dt = dt.astimezone(local_tz)
+                if local_dt.strftime("%a").capitalize() == today_label and self._period_from_hour(local_dt.hour) != "Night":
+                    result.append(entry)
+            except Exception:
+                continue
+        return result
+
+    def _supplement_from_archive(
+        self, archive_path: Path, local_tz: ZoneInfo
+    ) -> list[dict[str, Any]]:
+        """Scan backward through the archive for today daytime entries missing from the latest snapshot.
+
+        Solcast stops including completed half-hour slots in its responses, so after
+        ~18:30 UTC the latest snapshot has no today daytime entries at all. Earlier
+        snapshots captured while those slots were still future do have the data.
+        """
+        if not archive_path.exists():
+            return []
+        snapshots: list[dict[str, Any]] = []
+        with archive_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    snapshots.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        # Skip the last snapshot (already processed); scan backward through the rest
+        for snapshot in reversed(snapshots[:-1]):
+            entries = self._today_daytime_entries(snapshot.get("forecasts", []), local_tz)
+            if entries:
+                self.logger.info(
+                    "[SOLCAST] Latest snapshot has no today daytime data; using %d entries from earlier snapshot (%s).",
+                    len(entries),
+                    snapshot.get("captured_at_utc", "unknown"),
+                )
+                return entries
+        return []
+
     def _load_solcast_table(self) -> None:
         now_utc = datetime.now(timezone.utc)
         archive_path = Path(SOLCAST_ARCHIVE_PATH)
@@ -152,6 +201,13 @@ class SolcastForecast(BaseSolarForecast):
             forecasts = self._load_cached(archive_path, now_utc)
             if forecasts is None:
                 forecasts = self._fetch_and_archive(archive_path, now_utc)
+
+        # If the latest snapshot has no today daytime entries (Solcast drops completed
+        # half-hour slots), supplement from the most recent earlier snapshot that has them.
+        if not self._today_daytime_entries(forecasts, local_tz):
+            supplemental = self._supplement_from_archive(archive_path, local_tz)
+            if supplemental:
+                forecasts = supplemental + forecasts
 
         grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
         for entry in forecasts:
