@@ -161,6 +161,7 @@ class SchedulerCoordinator:
     async def _handle_forecast_refresh(self, now: datetime, today: date) -> bool:
         """Refresh forecast data if needed. Returns True if the tick should be skipped."""
         if today != self.state.current_date or not self.state.ordered_period_windows:
+            previous_date = self.state.current_date
             self.state.current_date = today
             try:
                 await refresh_daily_data(self.state, self.logger, reset_day_state=True)
@@ -170,6 +171,10 @@ class SchedulerCoordinator:
                 if suppressed_periods:
                     self._log_suppressed_periods(suppressed_periods, now, level="info")
             except Exception as e:
+                # Roll back current_date so the retry condition fires on the next tick.
+                # Without this, the next tick sees today==current_date and falls through
+                # to the intra-day branch, leaving period windows permanently stale.
+                self.state.current_date = previous_date
                 self.logger.error(f"[SCHEDULER] Failed to refresh daily data: {e}. Retrying next tick.")
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 return True
