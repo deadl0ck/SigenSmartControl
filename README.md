@@ -1525,6 +1525,7 @@ python scripts/battery_throughput.py
 ## Recent Updates
 
 **2026-06-11**
+- **Fix: Sigen API HTTP 404 error responses silently treated as success.** The response error-detection in `inverter_control.py` only caught failures where the JSON body contained a non-zero `"code"` field. HTTP-style error responses (`"status": 404, "error": "Not Found"`) had no `"code"` key, so they passed the check and were counted as successful mode changes — sending false-positive success emails and masking the actual API failure. Now also raises on responses with `"status" >= 400`.
 - **Fix: day-reset failure permanently stuck period windows and night-handler mode key.** When the sunrise-sunset API timed out at midnight, `state.current_date` was already updated to today before the exception was caught. On the next tick `today == current_date` and `ordered_period_windows` was non-empty (still yesterday's), so the day-reset retry condition was never true again. Period windows stayed on yesterday's date all day; the night handler's `mode_set_key` matched yesterday's key so it skipped TOU charging and the self-powered morning restore — leaving the inverter in ToU mode all day with no emails. Fix: roll `current_date` back to `previous_date` on failure so the next tick retries unconditionally.
 
 **2026-06-01**

@@ -223,6 +223,13 @@ async def apply_mode_change(
                     raise RuntimeError(
                         f"Inverter rejected mode change (code {code}): {response.get('msg', response)}"
                     )
+                # Also catch HTTP-style error responses (status >= 400 with an "error" field).
+                # The 404 Not Found response uses "status"/"error" keys, not "code"/"msg".
+                http_status = response.get("status")
+                if isinstance(http_status, int) and http_status >= 400:
+                    raise RuntimeError(
+                        f"Inverter API error (HTTP {http_status}): {response.get('error', response)}"
+                    )
 
             logger.info("Set mode response for %s: %s", period, response)
             if should_archive_mode_change_events():
