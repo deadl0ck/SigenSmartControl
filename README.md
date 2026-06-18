@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-06-18**
+- **Fix: Red period exports drained battery to 40% floor on bad solar days.** `headroom_target_kwh` was set by `else HEADROOM_TARGET_KWH` — meaning Red fell through to the same 14.4 kWh (Green) target instead of 6 kWh (Amber). A Red Evening at 100% SOC would export all the way to the 40% floor when only 6 kWh of headroom (75% floor) was needed. Fixed by inverting the condition: only Green gets `HEADROOM_TARGET_KWH`; Amber and Red both use `AMBER_HEADROOM_TARGET_KWH`. Same fix applied to `_current_export_soc_floor` in `main.py` for consistency.
+
 **2026-06-11**
 - **Upgrade sigen library 0.1.9 → 3.0.2 to fix broken mode-set endpoint.** Sigen migrated their cloud API; the old mode-set endpoint (`/setting/operational/mode/`) now returns 404. The 3.0.2 library uses the new endpoint (`PUT device/energy-profile/mode`). The `get_energy_flow` URL is unchanged. Tested live: `get_operational_mode` returns a string label (already handled by `extract_mode_value`), `get_energy_flow` SOC reads work correctly.
 - **Fix: Sigen API HTTP 404 error responses silently treated as success.** The response error-detection in `inverter_control.py` only caught failures where the JSON body contained a non-zero `"code"` field. HTTP-style error responses (`"status": 404, "error": "Not Found"`) had no `"code"` key, so they passed the check and were counted as successful mode changes — sending false-positive success emails and masking the actual API failure. Now also raises on responses with `"status" >= 400`.
