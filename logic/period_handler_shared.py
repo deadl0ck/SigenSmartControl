@@ -169,9 +169,9 @@ def _evaluate_period_mode_decision(
     )
     headroom_kwh = calc_headroom_kwh(BATTERY_KWH, soc)
     headroom_target_kwh = (
-        AMBER_HEADROOM_TARGET_KWH
-        if decision_status.upper() == "AMBER"
-        else HEADROOM_TARGET_KWH
+        HEADROOM_TARGET_KWH
+        if decision_status.upper() == "GREEN"
+        else AMBER_HEADROOM_TARGET_KWH
     )
     headroom_deficit_kwh = max(0.0, headroom_target_kwh - headroom_kwh)
     mode, reason = decide_operational_mode(

@@ -400,9 +400,9 @@ async def run_scheduler() -> None:
             return None
         _, period_status = period_data
         headroom_kwh = (
-            AMBER_HEADROOM_TARGET_KWH
-            if str(period_status).upper() == "AMBER"
-            else HEADROOM_TARGET_KWH
+            HEADROOM_TARGET_KWH
+            if str(period_status).upper() == "GREEN"
+            else AMBER_HEADROOM_TARGET_KWH
         )
         return max(DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT, 100.0 - headroom_kwh / BATTERY_KWH * 100.0)
 
