@@ -9,6 +9,7 @@ Handles .env loading, logging, and type hints.
 import os
 import logging
 from typing import Optional
+import aiohttp
 from dotenv import load_dotenv
 from sigen import Sigen
 from integrations.sigen_official import SigenOfficial
@@ -18,6 +19,27 @@ logger = logging.getLogger(__name__)
 
 # Singleton instance cache
 _sigen_instance: Optional[object] = None
+
+# Sigen's CloudFront WAF blocks requests carrying aiohttp's default User-Agent
+# (e.g. "Python/3.13 aiohttp/3.13.5") with a 403 "Request blocked" response,
+# even with valid credentials. The legacy `sigen` package creates a fresh
+# aiohttp.ClientSession() with no custom headers on every API call (auth,
+# refresh, mode get/set, energy flow), so we patch the default headers here
+# to unblock it without forking the vendored package.
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+_original_client_session_init = aiohttp.ClientSession.__init__
+
+
+def _client_session_init_with_browser_ua(self, *args, headers=None, **kwargs):
+    merged_headers = dict(headers) if headers else {}
+    merged_headers.setdefault("User-Agent", _BROWSER_USER_AGENT)
+    _original_client_session_init(self, *args, headers=merged_headers, **kwargs)
+
+
+aiohttp.ClientSession.__init__ = _client_session_init_with_browser_ua
 
 async def get_sigen_instance() -> object:
     """

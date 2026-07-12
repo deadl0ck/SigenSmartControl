@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-07-12**
+- **Fix: Sigen Cloud API blocking all auth requests with 403 "Request blocked" (CloudFront WAF).** After a power cut on 2026-07-08, `sigen-monitor.service` could not authenticate at all — every attempt got an HTTP 403 CloudFront "Request blocked" page from `POST /auth/oauth/token`, not a normal credentials error. Root cause, isolated with curl comparisons: Sigen's CloudFront WAF blocks requests carrying aiohttp's default User-Agent string (`Python/3.13 aiohttp/3.13.5`) — reproducible by setting that exact User-Agent on an otherwise-identical curl request, and avoidable by using any browser-like User-Agent instead. It was unrelated to IP, account, or rate-limiting — a bare curl request from the same IP/account succeeded throughout the outage. The legacy `sigen` package creates a fresh `aiohttp.ClientSession()` with no custom headers on every API call (auth, refresh, mode get/set, energy flow), so `integrations/sigen_auth.py` now patches `aiohttp.ClientSession.__init__` at import time to default the `User-Agent` header to a browser string when the caller doesn't set one — fixing this without forking the vendored package. Verified live: full auth, mode read, and energy flow calls succeed again.
+
 **2026-06-18**
 - **Fix: Red period exports drained battery to 40% floor on bad solar days.** `headroom_target_kwh` was set by `else HEADROOM_TARGET_KWH` — meaning Red fell through to the same 14.4 kWh (Green) target instead of 6 kWh (Amber). A Red Evening at 100% SOC would export all the way to the 40% floor when only 6 kWh of headroom (75% floor) was needed. Fixed by inverting the condition: only Green gets `HEADROOM_TARGET_KWH`; Amber and Red both use `AMBER_HEADROOM_TARGET_KWH`. Same fix applied to `_current_export_soc_floor` in `main.py` for consistency.
 
