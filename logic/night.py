@@ -193,6 +193,12 @@ async def handle_night_window(
 
     mode_set_key = (night_context["target_date"], night_mode)
     if night_state["mode_set_key"] != mode_set_key:
+        if soc is None:
+            # Neither the PRE-DAWN nor EVENING-NIGHT branches above populated soc
+            # (e.g. this tick lands exactly at the cheap-rate boundary, after the
+            # pre-cheap-rate export planning window has already closed). Fetch it
+            # directly so the mode-change email doesn't show SOC as Unknown.
+            soc = await fetch_soc(night_period_name)
         log_decision_checkpoint(
             night_period_name, "NIGHT-BASE",
             mode_names=mode_names, now_utc=now_utc,
@@ -200,7 +206,7 @@ async def handle_night_window(
             solar_value=night_context["solar_value"],
             status=night_context["status"],
             period_solar_kwh=period_solar_kwh,
-            soc=None, headroom_kwh=None,
+            soc=soc, headroom_kwh=None,
             headroom_target_kwh=night_headroom_target_kwh,
             headroom_deficit_kwh=0.0,
             export_by_utc=night_context["night_start"],

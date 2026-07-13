@@ -182,7 +182,27 @@ async def apply_mode_change(
                 soc_value = energy_flow_for_email.get("batterySoc")
                 if isinstance(soc_value, (int, float)):
                     battery_soc = float(soc_value)
+                else:
+                    logger.warning(
+                        "Energy flow response for %s had no usable 'batterySoc' value "
+                        "(got %r); mode-change email will show SOC as Unknown.",
+                        period,
+                        soc_value,
+                    )
             solar_generated_today_kwh = extract_today_solar_generation_kwh(energy_flow_for_email)
+            if solar_generated_today_kwh is None:
+                logger.warning(
+                    "Could not extract today's solar generation from energy flow response "
+                    "for %s; mode-change email will show Solar Produced Today as Unknown.",
+                    period,
+                )
+        else:
+            logger.warning(
+                "Energy flow response for %s was not a dict (got %s); "
+                "mode-change email will show SOC/Solar as Unknown.",
+                period,
+                type(energy_flow_for_email).__name__,
+            )
     except SigenPayloadError as exc:
         logger.warning(
             "Inverter payload error reading energy flow before mode-change email for %s: %s",
@@ -190,7 +210,7 @@ async def apply_mode_change(
             exc,
         )
     except Exception as exc:
-        logger.debug(
+        logger.warning(
             "Could not read energy flow before mode-change email for %s: %s",
             period,
             exc,
