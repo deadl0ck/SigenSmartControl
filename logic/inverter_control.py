@@ -28,6 +28,15 @@ from telemetry.telemetry_archive import (
 )
 
 
+# The energy-flow fetch used to populate SOC/solar for mode-change emails hits a
+# real, recurring Sigen-side transient failure (502/503 "unexpected mimetype",
+# 446 occurrences observed since 2026-05-15, usually clearing within seconds to
+# a few ticks). A short retry meaningfully reduces how often emails show
+# "Unknown" without meaningfully delaying the mode-change flow.
+_ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS = 3
+_ENERGY_FLOW_FOR_EMAIL_RETRY_DELAY_SECONDS = 2
+
+
 class ModeChangeNotifier(Protocol):
     """Callback invoked after a mode-change attempt, whether successful or not."""
 
@@ -175,45 +184,50 @@ async def apply_mode_change(
             exc,
         )
 
-    try:
-        energy_flow_for_email = await sigen.get_energy_flow()
-        if isinstance(energy_flow_for_email, dict):
-            if battery_soc is None:
-                soc_value = energy_flow_for_email.get("batterySoc")
-                if isinstance(soc_value, (int, float)):
-                    battery_soc = float(soc_value)
-                else:
-                    logger.warning(
-                        "Energy flow response for %s had no usable 'batterySoc' value "
-                        "(got %r); mode-change email will show SOC as Unknown.",
-                        period,
-                        soc_value,
-                    )
-            solar_generated_today_kwh = extract_today_solar_generation_kwh(energy_flow_for_email)
-            if solar_generated_today_kwh is None:
-                logger.warning(
-                    "Could not extract today's solar generation from energy flow response "
-                    "for %s; mode-change email will show Solar Produced Today as Unknown.",
-                    period,
-                )
-        else:
+    energy_flow_for_email: Any = None
+    for attempt in range(1, _ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS + 1):
+        try:
+            energy_flow_for_email = await sigen.get_energy_flow()
+            break
+        except Exception as exc:
+            retrying = attempt < _ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS
             logger.warning(
-                "Energy flow response for %s was not a dict (got %s); "
-                "mode-change email will show SOC/Solar as Unknown.",
+                "Could not read energy flow before mode-change email for %s "
+                "(attempt %s/%s): %s.%s",
                 period,
-                type(energy_flow_for_email).__name__,
+                attempt,
+                _ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS,
+                exc,
+                f" Retrying in {_ENERGY_FLOW_FOR_EMAIL_RETRY_DELAY_SECONDS}s..." if retrying else "",
             )
-    except SigenPayloadError as exc:
+            if retrying:
+                await asyncio.sleep(_ENERGY_FLOW_FOR_EMAIL_RETRY_DELAY_SECONDS)
+
+    if isinstance(energy_flow_for_email, dict):
+        if battery_soc is None:
+            soc_value = energy_flow_for_email.get("batterySoc")
+            if isinstance(soc_value, (int, float)):
+                battery_soc = float(soc_value)
+            else:
+                logger.warning(
+                    "Energy flow response for %s had no usable 'batterySoc' value "
+                    "(got %r); mode-change email will show SOC as Unknown.",
+                    period,
+                    soc_value,
+                )
+        solar_generated_today_kwh = extract_today_solar_generation_kwh(energy_flow_for_email)
+        if solar_generated_today_kwh is None:
+            logger.warning(
+                "Could not extract today's solar generation from energy flow response "
+                "for %s; mode-change email will show Solar Produced Today as Unknown.",
+                period,
+            )
+    elif energy_flow_for_email is not None:
         logger.warning(
-            "Inverter payload error reading energy flow before mode-change email for %s: %s",
+            "Energy flow response for %s was not a dict (got %s); "
+            "mode-change email will show SOC/Solar as Unknown.",
             period,
-            exc,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Could not read energy flow before mode-change email for %s: %s",
-            period,
-            exc,
+            type(energy_flow_for_email).__name__,
         )
 
     logger.info(ACTION_DIVIDER)
