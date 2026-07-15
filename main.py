@@ -78,7 +78,7 @@ POLL_INTERVAL_SECONDS = POLL_INTERVAL_MINUTES * 60
 async def log_current_mode_on_startup(
     sigen: SigenInteraction,
     mode_names: dict[int, str],
-) -> tuple[Any, float | None, float | None]:
+) -> tuple[Any, float | None, float | None, float | None]:
     """Log retrievable startup data and return current mode/SOC snapshot.
 
     Args:
@@ -86,9 +86,12 @@ async def log_current_mode_on_startup(
         mode_names: Mapping from numeric mode to human-readable label.
 
     Returns:
-        Tuple of (current_mode_raw, battery_soc, solar_generated_today_kwh).
+        Tuple of (current_mode_raw, battery_soc, solar_generated_today_kwh, live_solar_kw).
     """
-    from telemetry.telemetry_archive import extract_today_solar_generation_kwh
+    from telemetry.telemetry_archive import (
+        extract_live_solar_power_kw,
+        extract_today_solar_generation_kwh,
+    )
 
     logger.info(ACTION_DIVIDER)
     logger.info("STARTUP CHECK: fetching retrievable inverter data")
@@ -96,6 +99,7 @@ async def log_current_mode_on_startup(
     current_mode_raw: Any = None
     battery_soc: float | None = None
     solar_generated_today_kwh: float | None = None
+    live_solar_kw: float | None = None
 
     try:
         current_mode_raw = await sigen.get_operational_mode()
@@ -110,6 +114,7 @@ async def log_current_mode_on_startup(
             if isinstance(soc_value, (int, float)):
                 battery_soc = float(soc_value)
             solar_generated_today_kwh = extract_today_solar_generation_kwh(energy_flow)
+            live_solar_kw = extract_live_solar_power_kw(energy_flow)
         log_payload_tree(logger, "Startup energy flow payload", energy_flow)
     except SigenPayloadError as e:
         logger.error("Inverter returned unexpected payload on startup energy flow fetch: %s", e)
@@ -127,7 +132,7 @@ async def log_current_mode_on_startup(
         logger.error("Failed to fetch supported operational modes on startup: %s", e)
 
     logger.info(ACTION_DIVIDER)
-    return current_mode_raw, battery_soc, solar_generated_today_kwh
+    return current_mode_raw, battery_soc, solar_generated_today_kwh, live_solar_kw
 
 
 async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInteraction | None:
@@ -172,7 +177,7 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                     "[SCHEDULER] Could not fetch today's forecast for startup email: %s",
                     exc,
                 )
-            startup_mode_raw, startup_soc, startup_solar_today_kwh = await log_current_mode_on_startup(sigen, mode_names)
+            startup_mode_raw, startup_soc, startup_solar_today_kwh, startup_live_solar_kw = await log_current_mode_on_startup(sigen, mode_names)
             startup_zappi_status = None
             startup_zappi_daily = None
             try:
@@ -190,6 +195,7 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                 current_mode_raw=startup_mode_raw,
                 battery_soc=startup_soc,
                 solar_generated_today_kwh=startup_solar_today_kwh,
+                live_solar_kw=startup_live_solar_kw,
                 today_period_forecast=startup_today_period_forecast,
                 mode_names=mode_names,
                 event_time_utc=datetime.now(timezone.utc),

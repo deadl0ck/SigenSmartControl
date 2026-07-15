@@ -213,7 +213,7 @@ async def test_create_scheduler_interaction_success_logs_startup(monkeypatch: py
         called["startup_log"] = True
         assert sigen is interaction
         assert mode_names == {1: "AI"}
-        return None, None, None
+        return None, None, None, None
 
     monkeypatch.setattr(main.SigenInteraction, "create", fake_create)
     monkeypatch.setattr(main, "log_current_mode_on_startup", fake_log_current_mode_on_startup)
