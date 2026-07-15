@@ -73,6 +73,7 @@ async def notify_startup_email(
     mode_names: dict[int, str],
     event_time_utc: datetime,
     logger: logging.Logger,
+    live_solar_kw: float | None = None,
     zappi_status: dict[str, Any] | None = None,
     zappi_daily: dict[str, Any] | None = None,
 ) -> None:
@@ -82,6 +83,7 @@ async def notify_startup_email(
         current_mode_raw: Current mode payload returned at startup.
         battery_soc: Battery state-of-charge percentage, when available.
         solar_generated_today_kwh: Current day's cumulative solar generation in kWh.
+        live_solar_kw: Instantaneous solar generation in kW at startup, when known.
         today_period_forecast: Daytime period forecast snapshot for today.
         mode_names: Mapping from mode value to human-readable mode label.
         event_time_utc: Startup timestamp in UTC.
@@ -108,6 +110,9 @@ async def notify_startup_email(
         f"{solar_generated_today_kwh:.2f} kWh"
         if solar_generated_today_kwh is not None
         else "Unknown"
+    )
+    live_solar_text = (
+        f"{live_solar_kw:.2f} kW" if live_solar_kw is not None else "Unknown"
     )
     subject = (
         f"Solar Update • Startup • {current_mode_label} • "
@@ -166,7 +171,8 @@ async def notify_startup_email(
         f"Local Time: {local_time}\n"
         f"Current Mode: {current_mode_label}\n"
         f"Battery SOC: {soc_text}\n\n"
-        f"Solar Produced Today: {today_solar_text}\n\n"
+        f"Solar Produced Today: {today_solar_text}\n"
+        f"Live Generation: {live_solar_text}\n\n"
         f"{forecast_text}\n"
         + (f"{zappi_text}\n" if zappi_text else "")
         + "Transitions Since 10:30 PM\n"
@@ -203,10 +209,16 @@ async def notify_startup_email(
                         </td>
                     </tr>
                     <tr>
-                        <td style="padding:12px 6px 0 0;vertical-align:top;" colspan="2">
+                        <td style="width:50%;padding:12px 6px 0 0;vertical-align:top;">
                             <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
                                 <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Solar Produced Today</div>
                                 <div style="font-size:14px;font-weight:700;color:#172033;">{escape(today_solar_text)}</div>
+                            </div>
+                        </td>
+                        <td style="width:50%;padding:12px 0 0 6px;vertical-align:top;">
+                            <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;">
+                                <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:3px;">Live Generation</div>
+                                <div style="font-size:14px;font-weight:700;color:#172033;">{escape(live_solar_text)}</div>
                             </div>
                         </td>
                     </tr>
