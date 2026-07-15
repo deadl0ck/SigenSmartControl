@@ -53,6 +53,7 @@ class ModeChangeNotifier(Protocol):
         event_time_utc: datetime,
         battery_soc: float | None,
         solar_generated_today_kwh: float | None,
+        live_solar_kw: float | None,
         today_period_forecast: dict[str, tuple[int, str]] | None,
         zappi_status: dict[str, Any] | None = None,
         zappi_daily: dict[str, Any] | None = None,
@@ -111,6 +112,7 @@ async def apply_mode_change(
     mode_label = mode_names.get(mode, mode)
     current_mode_raw: Any = None
     solar_generated_today_kwh: float | None = None
+    live_solar_kw: float | None = None
 
     if sigen is None:
         if full_simulation_mode:
@@ -154,6 +156,7 @@ async def apply_mode_change(
                 event_time_utc=event_time,
                 battery_soc=battery_soc,
                 solar_generated_today_kwh=solar_generated_today_kwh,
+                live_solar_kw=live_solar_kw,
                 today_period_forecast=today_period_forecast,
                 zappi_status=zappi_status,
                 zappi_daily=zappi_daily,
@@ -222,6 +225,7 @@ async def apply_mode_change(
                 "for %s; mode-change email will show Solar Produced Today as Unknown.",
                 period,
             )
+        live_solar_kw = extract_live_solar_power_kw(energy_flow_for_email)
     elif energy_flow_for_email is not None:
         logger.warning(
             "Energy flow response for %s was not a dict (got %s); "
@@ -298,6 +302,7 @@ async def apply_mode_change(
                 event_time_utc=event_time,
                 battery_soc=battery_soc,
                 solar_generated_today_kwh=solar_generated_today_kwh,
+                live_solar_kw=live_solar_kw,
                 today_period_forecast=today_period_forecast,
                 zappi_status=zappi_status,
                 zappi_daily=zappi_daily,
@@ -350,6 +355,7 @@ async def apply_mode_change(
         event_time_utc=event_time,
         battery_soc=battery_soc,
         solar_generated_today_kwh=solar_generated_today_kwh,
+        live_solar_kw=live_solar_kw,
         today_period_forecast=today_period_forecast,
         zappi_status=zappi_status,
         zappi_daily=zappi_daily,
