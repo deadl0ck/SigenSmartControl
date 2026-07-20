@@ -309,7 +309,7 @@ NIGHT_MODE_ENABLED = True
 LOCAL_TIMEZONE = "Europe/Dublin"
 QUARTZ_RED_CAPACITY_FRACTION = 0.20
 QUARTZ_GREEN_CAPACITY_FRACTION = 0.40
-FORECAST_SOLAR_POWER_MULTIPLIER = 1.53
+FORECAST_SOLAR_POWER_MULTIPLIER = 2.29
 CHEAP_RATE_START_HOUR = 23
 CHEAP_RATE_END_HOUR = 8
 HEADROOM_TARGET_KWH = 14.4
@@ -346,7 +346,7 @@ Meaning:
 - `QUARTZ_SITE_CAPACITY_KWP`: site capacity sent to Quartz when used
 - `QUARTZ_RED_CAPACITY_FRACTION`: lower Quartz status threshold as a fraction of configured array capacity
 - `QUARTZ_GREEN_CAPACITY_FRACTION`: upper Quartz status threshold as a fraction of configured array capacity
-- `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting)
+- `FORECAST_SOLAR_POWER_MULTIPLIER`: scalar applied to Forecast.Solar watts before period status/value normalization; use this to correct persistent local bias (for example, historical under-forecasting). Current value (2.29, set 2026-07-19 via `scripts/suggest_forecast_multiplier.py`) is a flat compromise across periods that have meaningfully different ratios (Morn/Aftn ~2.3, Eve ~1.35) — re-run the suggestion script periodically to check whether it still tracks reality, and consider a per-period multiplier if the Eve skew persists. Forecast.Solar is comparison-only and does not affect scheduling decisions (Solcast does).
 - `SOLCAST_MIN_FETCH_INTERVAL_MINUTES`: minimum minutes between live Solcast API calls (default `100`); cached response from `data/solcast_readings.jsonl` is used in between. Live fetches are further restricted to the `SOLCAST_FETCH_WINDOW_START_HOUR`–`SOLCAST_FETCH_WINDOW_END_HOUR` local-time window (default 03:00–20:00); outside that window the cache is always served regardless of age, concentrating all 10 free-tier calls in the hours that matter for decisions
 - `HEADROOM_TARGET_KWH`: fixed battery headroom target for Green periods (14.4 kWh = BATTERY_KWH × 0.6, corresponding to a 40% SOC floor)
 - `DAYTIME_TIMED_EXPORT_MIN_SOC_PERCENT`: unified SOC floor for all daytime timed exports — both proactive headroom exports and mid-period clipping-risk exports stop when SOC hits this level (default `40.0`)
@@ -1523,6 +1523,9 @@ python scripts/battery_throughput.py
 ```
 
 ## Recent Updates
+
+**2026-07-19**
+- **Re-tuned `FORECAST_SOLAR_POWER_MULTIPLIER` from 1.53 to 2.29.** `scripts/suggest_forecast_multiplier.py` (30-day window, 76 matched samples) showed Forecast.Solar still substantially underestimating actual generation even with the old 1.53x multiplier applied — median per-period ratios of `actual/raw_forecast` were Morn=2.30, Aftn=2.29, Eve=1.35. New value is the median of those period medians. **Flagging the period skew for later:** Eve's true ratio is ~40% lower than Morn/Aftn, so this single flat multiplier necessarily over-corrects Evening while fitting Morn/Aftn well — worth moving to a per-period multiplier if that skew is still there next time this is checked. Forecast.Solar is comparison-only (Solcast drives scheduling decisions), so this has no effect on mode changes either way — it only affects the accuracy of Forecast.Solar's own comparison numbers in `forecast_vs_actual.py` and mode-change emails.
 
 **2026-07-15**
 - **Add live solar generation (kW) to mode-change emails.** Mode-change emails already showed "Solar Produced Today" (cumulative kWh); they now also show "Live Generation" — instantaneous solar power at the moment of the command, extracted via `extract_live_solar_power_kw()` from the same energy-flow payload already fetched for SOC/solar-today, so no extra API call is needed. Rendered as a new stat tile alongside "Solar Produced Today" in both the HTML and plain-text mode-change email bodies. Subject line unchanged to keep it concise.

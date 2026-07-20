@@ -113,7 +113,18 @@ FORECAST_SOLAR_PLANE_AZIMUTH = -40
 # Multiplier applied to Forecast.Solar site-level power (kW) before period
 # normalization and downstream scheduler calculations. Use this to correct
 # persistent under/over-forecast bias against local inverter telemetry.
-FORECAST_SOLAR_POWER_MULTIPLIER = 1.53
+#
+# Bumped 1.53 -> 2.29 on 2026-07-19 via `scripts/suggest_forecast_multiplier.py`
+# (30-day window, 76 matched (date, period) samples; median of per-period
+# medians: Morn=2.30, Aftn=2.29, Eve=1.35). NOTE the large period skew — Eve's
+# ratio is roughly 40% lower than Morn/Aftn, so this single flat value
+# necessarily over-corrects Evening while fitting Morn/Aftn well. Forecast.Solar
+# is comparison-only (Solcast drives scheduling decisions), so this doesn't
+# affect mode changes either way — but re-run the suggestion script
+# periodically (`python scripts/suggest_forecast_multiplier.py`) to check
+# whether this value (and the period skew) still track reality, and consider
+# a per-period multiplier if the skew persists.
+FORECAST_SOLAR_POWER_MULTIPLIER = 2.29
 
 # Provider request timeouts.
 # HTTP timeout for ESB county forecast API requests.
