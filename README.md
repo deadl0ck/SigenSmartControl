@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-07-22**
+- **Added a cached-telemetry fallback for mode-change emails when the energy-flow retry is fully exhausted.** During longer Sigen-side 502 outages, all 3 retry attempts (added 2026-07-15) can still fail within the same tick, leaving Solar Produced Today / Live Generation as Unknown in the mode-change email even though SOC (fetched independently by each period handler beforehand) is usually still populated. `telemetry.telemetry_archive.read_latest_inverter_telemetry_snapshot()` now reads the last line of `data/inverter_telemetry.jsonl` (archived roughly every `POLL_INTERVAL_MINUTES`) as a fallback source for Solar/Live Generation (and SOC, as a backstop) when the live fetch fails outright, as long as the snapshot is no older than 3x the poll interval. Falls back to "Unknown" only if no sufficiently-recent snapshot exists either.
+
 **2026-07-19**
 - **Re-tuned `FORECAST_SOLAR_POWER_MULTIPLIER` from 1.53 to 2.29.** `scripts/suggest_forecast_multiplier.py` (30-day window, 76 matched samples) showed Forecast.Solar still substantially underestimating actual generation even with the old 1.53x multiplier applied — median per-period ratios of `actual/raw_forecast` were Morn=2.30, Aftn=2.29, Eve=1.35. New value is the median of those period medians. **Flagging the period skew for later:** Eve's true ratio is ~40% lower than Morn/Aftn, so this single flat multiplier necessarily over-corrects Evening while fitting Morn/Aftn well — worth moving to a per-period multiplier if that skew is still there next time this is checked. Forecast.Solar is comparison-only (Solcast drives scheduling decisions), so this has no effect on mode changes either way — it only affects the accuracy of Forecast.Solar's own comparison numbers in `forecast_vs_actual.py` and mode-change emails.
 

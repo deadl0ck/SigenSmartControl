@@ -6,7 +6,7 @@ can be compared against what the system actually did over time.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
@@ -313,6 +313,65 @@ def append_inverter_telemetry_snapshot(
         logger.info(f"[TELEMETRY] Saved inverter snapshot to {archive_path}")
     except OSError as exc:
         logger.warning(f"[TELEMETRY] Failed to save inverter snapshot to {archive_path}: {exc}")
+
+
+def read_latest_inverter_telemetry_snapshot(
+    *,
+    max_age_minutes: float | None = None,
+    now_utc: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Read the most recently archived inverter telemetry snapshot.
+
+    Used as a fallback data source when a live energy-flow fetch fails (e.g.
+    the recurring Sigen 502 outages around period transitions), so mode-change
+    emails can show recent-but-slightly-stale figures instead of "Unknown".
+    Only the last line of the archive file is read.
+
+    Args:
+        max_age_minutes: Reject the snapshot if older than this many minutes.
+            None disables the age check.
+        now_utc: Current time for the age check; defaults to now in UTC.
+
+    Returns:
+        The parsed snapshot dict, or None if unavailable, unparsable, or stale.
+    """
+    archive_path = Path(INVERTER_TELEMETRY_ARCHIVE_PATH)
+    try:
+        with archive_path.open("rb") as archive_file:
+            archive_file.seek(0, 2)
+            remaining = archive_file.tell()
+            block_size = 4096
+            data = b""
+            while remaining > 0 and data.count(b"\n") < 2:
+                read_size = min(block_size, remaining)
+                remaining -= read_size
+                archive_file.seek(remaining)
+                data = archive_file.read(read_size) + data
+    except OSError as exc:
+        logger.warning(f"[TELEMETRY] Failed to read latest snapshot from {archive_path}: {exc}")
+        return None
+
+    last_line = data.strip().split(b"\n")[-1]
+    if not last_line:
+        return None
+
+    try:
+        snapshot = json.loads(last_line)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"[TELEMETRY] Failed to parse latest snapshot from {archive_path}: {exc}")
+        return None
+
+    if max_age_minutes is not None:
+        try:
+            captured_at = datetime.fromisoformat(snapshot["scheduler_now_utc"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        reference_now = now_utc or datetime.now(timezone.utc)
+        age_minutes = (reference_now - captured_at).total_seconds() / 60.0
+        if age_minutes > max_age_minutes:
+            return None
+
+    return snapshot
 
 
 def append_mode_change_event(

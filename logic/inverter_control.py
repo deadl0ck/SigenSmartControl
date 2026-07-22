@@ -17,6 +17,7 @@ import asyncio
 from config.settings import (
     MODE_CHANGE_RETRY_ATTEMPTS,
     MODE_CHANGE_RETRY_DELAY_SECONDS,
+    POLL_INTERVAL_MINUTES,
     SIGEN_MODES,
 )
 from integrations.sigen_interaction import SigenPayloadError
@@ -25,6 +26,7 @@ from logic.mode_logging import log_mode_status
 from telemetry.telemetry_archive import (
     extract_live_solar_power_kw,
     extract_today_solar_generation_kwh,
+    read_latest_inverter_telemetry_snapshot,
 )
 
 
@@ -35,6 +37,13 @@ from telemetry.telemetry_archive import (
 # "Unknown" without meaningfully delaying the mode-change flow.
 _ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS = 3
 _ENERGY_FLOW_FOR_EMAIL_RETRY_DELAY_SECONDS = 2
+
+# When all retries above are exhausted (e.g. a longer Sigen-side outage spanning
+# the whole transition tick), fall back to the last archived telemetry snapshot
+# rather than showing Solar/Live Generation as Unknown. Archive snapshots are
+# written roughly every POLL_INTERVAL_MINUTES, so 3x that window keeps the
+# fallback figures recent enough to be meaningful.
+_ENERGY_FLOW_FALLBACK_MAX_AGE_MINUTES = POLL_INTERVAL_MINUTES * 3
 
 
 class ModeChangeNotifier(Protocol):
@@ -226,13 +235,42 @@ async def apply_mode_change(
                 period,
             )
         live_solar_kw = extract_live_solar_power_kw(energy_flow_for_email)
-    elif energy_flow_for_email is not None:
-        logger.warning(
-            "Energy flow response for %s was not a dict (got %s); "
-            "mode-change email will show SOC/Solar as Unknown.",
-            period,
-            type(energy_flow_for_email).__name__,
+    else:
+        if energy_flow_for_email is not None:
+            logger.warning(
+                "Energy flow response for %s was not a dict (got %s); "
+                "falling back to last archived telemetry snapshot.",
+                period,
+                type(energy_flow_for_email).__name__,
+            )
+        fallback_snapshot = read_latest_inverter_telemetry_snapshot(
+            max_age_minutes=_ENERGY_FLOW_FALLBACK_MAX_AGE_MINUTES,
         )
+        fallback_energy_flow = (
+            fallback_snapshot.get("energy_flow") if fallback_snapshot else None
+        )
+        if isinstance(fallback_energy_flow, dict):
+            if battery_soc is None:
+                soc_value = fallback_energy_flow.get("batterySoc")
+                if isinstance(soc_value, (int, float)):
+                    battery_soc = float(soc_value)
+            solar_generated_today_kwh = extract_today_solar_generation_kwh(
+                fallback_energy_flow
+            )
+            live_solar_kw = extract_live_solar_power_kw(fallback_energy_flow)
+            logger.info(
+                "Using cached telemetry snapshot from %s as fallback for %s "
+                "mode-change email after energy-flow fetch failed %s times.",
+                fallback_snapshot.get("captured_at"),
+                period,
+                _ENERGY_FLOW_FOR_EMAIL_MAX_ATTEMPTS,
+            )
+        else:
+            logger.warning(
+                "No recent cached telemetry available as fallback for %s; "
+                "mode-change email will show SOC/Solar as Unknown.",
+                period,
+            )
 
     logger.info(ACTION_DIVIDER)
     logger.info("Calling inverter set_operational_mode")
