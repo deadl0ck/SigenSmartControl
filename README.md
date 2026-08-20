@@ -1524,6 +1524,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-08-19**
+- **Added `docs/rcd-trip-investigation.md`.** Documentation only, no code changes. Records findings from investigating recurring main-breaker trips (Hager NBN263A, B63, EN 60947-2) affecting the granny charger (BYD) and Zappi (Tesla) overnight charging setup — likely causes (RCD discrimination between the garage sub-board and the main incomer, cumulative earth leakage, and genuine overcurrent when a shower overlaps EV charging), diagnostic steps, and why this project's telemetry (`data/inverter_telemetry.jsonl`, `data/zappi_telemetry.jsonl`) can't pin down exact trip timing due to scheduled overnight polling gaps.
+
 **2026-07-22**
 - **Added a cached-telemetry fallback for mode-change emails when the energy-flow retry is fully exhausted.** During longer Sigen-side 502 outages, all 3 retry attempts (added 2026-07-15) can still fail within the same tick, leaving Solar Produced Today / Live Generation as Unknown in the mode-change email even though SOC (fetched independently by each period handler beforehand) is usually still populated. `telemetry.telemetry_archive.read_latest_inverter_telemetry_snapshot()` now reads the last line of `data/inverter_telemetry.jsonl` (archived roughly every `POLL_INTERVAL_MINUTES`) as a fallback source for Solar/Live Generation (and SOC, as a backstop) when the live fetch fails outright, as long as the snapshot is no older than 3x the poll interval. Falls back to "Unknown" only if no sufficiently-recent snapshot exists either.
 
