@@ -69,6 +69,11 @@ FULL_SIMULATION_MODE = False
 # Maximum allowed duration for timed grid export override (minutes) — prevents accidental
 # over-discharge or excessive grid arbitrage cycles.
 MAX_TIMED_EXPORT_MINUTES = 240
+# Comma-separated local month numbers where Morn headroom / high-SOC timed exports are
+# suppressed (clipping-triggered exports still run). Clipping is minimal in these
+# months, so the early-morning export mostly sells back energy bought at night for
+# a ~EUR 0.035/kWh margin while spending battery warranty throughput. Empty = never suppress.
+MORNING_HEADROOM_EXPORT_DISABLED_MONTHS = "8,9,10"
 # Mode-change retry behaviour.
 # Number of additional attempts after an initial failure (0 = no retries).
 MODE_CHANGE_RETRY_ATTEMPTS = 3

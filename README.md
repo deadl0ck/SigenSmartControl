@@ -1529,6 +1529,9 @@ python scripts/battery_throughput.py
 ## Recent Updates
 
 **2026-10-07**
+- **Disabled Morn headroom/high-SOC timed exports in Aug–Oct (`MORNING_HEADROOM_EXPORT_DISABLED_MONTHS`, default `"8,9,10"`).** Log analysis showed ~810 kWh exported 05:00–08:00, largely energy bought at the night rate and sold back for ~€0.035/kWh net while spending battery warranty throughput; clipping is ~1 h/month in these months. Clipping-triggered Morn exports and other periods are unaffected. Set to `""` to restore the old behaviour.
+
+**2026-10-07**
 - **Added Tapo P110 granny-charger plug as an optional read-only device.** Polls power, on/off and daily/monthly kWh each tick (via `python-kasa`), archives to `data/tapo_telemetry.jsonl`, and adds a "Granny Charger" section to startup and mode-change emails, giving a second EV-charging data point alongside the Zappi. Enable with `TAPO_HOST`, `TAPO_USERNAME` (Tapo cloud email) and `TAPO_PASSWORD` in `.env`; absent values disable it.
 
 **2026-08-19**

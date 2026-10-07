@@ -84,12 +84,13 @@ from config.settings import (
     LIVE_CLIPPING_RISK_SOC_THRESHOLD_PERCENT,
     LOCAL_TIMEZONE,
     MAX_TIMED_EXPORT_MINUTES,
+    MORNING_HEADROOM_EXPORT_DISABLED_MONTHS,
     SIGEN_MODES,
     TIMED_EXPORT_RESTORE_COOLDOWN_MINUTES,
 )
 from logic.decision_logic import is_live_clipping_period_enabled
 from logic.mode_control import ACTION_DIVIDER, extract_mode_value
-from logic.schedule_utils import is_cheap_rate_window
+from logic.schedule_utils import is_cheap_rate_window, parse_month_list
 
 
 ModeChangeApplier = Callable[..., Awaitable[bool]]
@@ -260,6 +261,19 @@ async def start_timed_grid_export(
             "Keeping current override and skipping new request.",
             period,
             timed_export_override["restore_at"],
+        )
+        return False
+
+    if (
+        period == "Morn"
+        and not is_clipping_export
+        and now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE)).month
+        in parse_month_list(MORNING_HEADROOM_EXPORT_DISABLED_MONTHS)
+    ):
+        logger.info(
+            "[TIMED EXPORT] Skipping Morn headroom export — disabled for this month "
+            "(MORNING_HEADROOM_EXPORT_DISABLED_MONTHS=%s).",
+            MORNING_HEADROOM_EXPORT_DISABLED_MONTHS,
         )
         return False
 
