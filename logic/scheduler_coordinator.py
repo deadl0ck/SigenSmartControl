@@ -35,8 +35,9 @@ from telemetry.forecast_calibration import get_period_calibration
 from config.enums import Period
 from config.settings import SWITCHBOT_IMMERSION_ENABLED
 from logic.immersion_control import check_immersion_boost
+from integrations.tapo_auth import get_tapo_plug
 from integrations.zappi_auth import get_zappi_interaction
-from telemetry.telemetry_archive import append_zappi_telemetry_snapshot
+from telemetry.telemetry_archive import append_tapo_telemetry_snapshot, append_zappi_telemetry_snapshot
 from config.settings import (
     POLL_INTERVAL_MINUTES,
     FORECAST_REFRESH_INTERVAL_MINUTES,
@@ -304,6 +305,17 @@ class SchedulerCoordinator:
         except Exception as exc:
             self.logger.warning("[ZAPPI] Failed to fetch Zappi daily totals: %s", exc)
 
+    async def _fetch_tapo_status(self, now: datetime) -> None:
+        """Fetch Tapo granny-charger plug status and archive a snapshot."""
+        plug = get_tapo_plug()
+        if plug is None:
+            return
+        status = await plug.get_live_status()
+        if status is None:
+            return
+        self.state.latest_tapo_status = status
+        append_tapo_telemetry_snapshot(live_status=status, scheduler_now_utc=now)
+
     async def _check_immersion_boost(self, now: datetime, today: date) -> None:
         """Evaluate immersion heater boost conditions and act if appropriate."""
         if not SWITCHBOT_IMMERSION_ENABLED:
@@ -438,6 +450,7 @@ class SchedulerCoordinator:
             self._handle_archive(now)
             await sample_live_solar_power(self.state, now, self.sigen, self.logger)
             await self._fetch_zappi_status(now)
+            await self._fetch_tapo_status(now)
 
             if await self._check_timed_export_active(now):
                 await self._check_immersion_boost(now, today)

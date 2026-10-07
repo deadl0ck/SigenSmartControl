@@ -22,6 +22,7 @@ from config.settings import (
 from config.constants import (
     INVERTER_TELEMETRY_ARCHIVE_PATH,
     MODE_CHANGE_EVENTS_ARCHIVE_PATH,
+    TAPO_TELEMETRY_ARCHIVE_PATH,
     ZAPPI_TELEMETRY_ARCHIVE_PATH,
 )
 
@@ -456,3 +457,33 @@ def append_zappi_telemetry_snapshot(
         logger.debug(f"[TELEMETRY] Saved Zappi snapshot to {archive_path}")
     except OSError as exc:
         logger.warning(f"[TELEMETRY] Failed to save Zappi snapshot to {archive_path}: {exc}")
+
+
+def append_tapo_telemetry_snapshot(
+    *,
+    live_status: dict[str, Any],
+    scheduler_now_utc: datetime,
+) -> None:
+    """Append one Tapo granny-charger plug snapshot to the local archive.
+
+    Args:
+        live_status: Normalized plug status dict from TapoPlug.
+        scheduler_now_utc: Current scheduler timestamp in UTC.
+    """
+    archive_path = Path(TAPO_TELEMETRY_ARCHIVE_PATH)
+    captured_at_local = scheduler_now_utc.astimezone(ZoneInfo(LOCAL_TIMEZONE))
+    snapshot = {
+        "captured_at": captured_at_local.isoformat(),
+        "scheduler_now_utc": scheduler_now_utc.isoformat(),
+        "timezone": LOCAL_TIMEZONE,
+        "live_status": _json_safe(live_status),
+    }
+
+    try:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive_path.open("a", encoding="utf-8") as archive_file:
+            json.dump(snapshot, archive_file, sort_keys=True)
+            archive_file.write("\n")
+        logger.debug(f"[TELEMETRY] Saved Tapo snapshot to {archive_path}")
+    except OSError as exc:
+        logger.warning(f"[TELEMETRY] Failed to save Tapo snapshot to {archive_path}: {exc}")
