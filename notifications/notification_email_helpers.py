@@ -76,6 +76,7 @@ async def notify_startup_email(
     live_solar_kw: float | None = None,
     zappi_status: dict[str, Any] | None = None,
     zappi_daily: dict[str, Any] | None = None,
+    tapo_status: dict[str, Any] | None = None,
 ) -> None:
     """Send a startup email with current mode, SOC, and recent transition summary.
 
@@ -90,6 +91,7 @@ async def notify_startup_email(
         logger: Logger instance used for status/error output.
         zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
         zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
+        tapo_status: Latest Tapo granny-charger plug snapshot, or None when unavailable.
     """
     sender = _get_email_sender_instance()
     if sender is None:
@@ -120,6 +122,7 @@ async def notify_startup_email(
     )
     forecast_text, forecast_html = _build_today_forecast_email_sections(today_period_forecast)
     zappi_text, zappi_html = _build_zappi_email_sections(zappi_status, zappi_daily)
+    tapo_text, tapo_html = _build_tapo_email_sections(tapo_status)
 
     now_local = event_time_utc.astimezone(LOCAL_TZ)
     previous_2230 = (now_local - timedelta(days=1)).replace(
@@ -175,6 +178,7 @@ async def notify_startup_email(
         f"Live Generation: {live_solar_text}\n\n"
         f"{forecast_text}\n"
         + (f"{zappi_text}\n" if zappi_text else "")
+        + (f"{tapo_text}\n" if tapo_text else "")
         + "Transitions Since 10:30 PM\n"
         "---------------------------\n"
         f"{timeline_text}\n"
@@ -225,6 +229,7 @@ async def notify_startup_email(
                 </table>
                 {forecast_html}
                 {zappi_html}
+                {tapo_html}
                 {timeline_html}
             </div>
         </div>
@@ -245,15 +250,61 @@ async def notify_startup_email(
         logger.error("[EMAIL] Failed to send startup notification: %s", exc)
 
 
+def _build_tapo_email_sections(tapo_status: dict[str, Any] | None) -> tuple[str, str]:
+    """Build plain-text and HTML sections for the Tapo P110 granny charger plug.
+
+    Returns:
+        Tuple of (plain_text_section, html_section); both empty when unavailable.
+    """
+    if not tapo_status:
+        return "", ""
+
+    name = str(tapo_status.get("name") or "Granny Charger")
+    state = "On" if tapo_status.get("is_on") else "Off"
+    power_w = tapo_status.get("power_w")
+    today_kwh = tapo_status.get("today_kwh")
+    month_kwh = tapo_status.get("month_kwh")
+    power_txt = f"{power_w / 1000.0:.2f} kW" if power_w is not None else "n/a"
+    today_txt = f"{today_kwh:.2f} kWh" if today_kwh is not None else "n/a"
+    month_txt = f"{month_kwh:.1f} kWh" if month_kwh is not None else "n/a"
+    rows = [("Status", state), ("Power", power_txt), ("Today", today_txt), ("This Month", month_txt)]
+
+    plain_text = (
+        f"EV Charger ({name}, Tapo P110)\n"
+        + "-" * (len(name) + 24)
+        + "\n"
+        + "\n".join(f"{k}: {v}" for k, v in rows)
+        + "\n"
+    )
+    rows_html = "".join(
+        f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">{k}</td>'
+        f'<td style="padding:4px 0;font-size:12px;color:#172033;">{escape(v)}</td></tr>'
+        for k, v in rows
+    )
+    html = (
+        '<div style="margin-top:12px;padding:10px 12px;background:#f8fafc;'
+        'border:1px solid #e4ebf3;border-radius:10px;">'
+        '<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;'
+        f'color:#143a52;font-weight:700;margin-bottom:6px;">EV Charger ({escape(name)}, Tapo P110)</div>'
+        '<table role="presentation" style="width:100%;border-collapse:collapse;">'
+        + rows_html
+        + '</table>'
+        '</div>'
+    )
+    return plain_text, html
+
+
 def _build_zappi_email_sections(
     zappi_status: dict[str, Any] | None,
     zappi_daily: dict[str, Any] | None = None,
+    tapo_status: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Build plain-text and HTML sections for Zappi EV charger status.
 
     Args:
         zappi_status: Normalized Zappi live-status dict, or None when unavailable.
         zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
+        tapo_status: Latest Tapo granny-charger plug snapshot, or None when unavailable.
 
     Returns:
         Tuple of (plain_text_section, html_section). Both empty strings when
@@ -346,6 +397,7 @@ async def notify_mode_change_email(
     today_period_forecast: dict[str, tuple[int, str]] | None = None,
     zappi_status: dict[str, Any] | None = None,
     zappi_daily: dict[str, Any] | None = None,
+    tapo_status: dict[str, Any] | None = None,
     response: Any | None = None,
     error: str | None = None,
     logger: logging.Logger | None = None,
@@ -367,6 +419,7 @@ async def notify_mode_change_email(
         today_period_forecast: Daytime period forecast snapshot for today.
         zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
         zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
+        tapo_status: Latest Tapo granny-charger plug snapshot, or None when unavailable.
         response: Optional API response payload on success.
         error: Optional error message on failure.
         logger: Logger instance used for status/error output.
@@ -420,6 +473,7 @@ async def notify_mode_change_email(
     )
     forecast_text, forecast_html = _build_today_forecast_email_sections(today_period_forecast)
     zappi_text, zappi_html = _build_zappi_email_sections(zappi_status, zappi_daily)
+    tapo_text, tapo_html = _build_tapo_email_sections(tapo_status)
     response_text = _format_email_payload(response)
     error_text = error if error else "None"
     body = (
@@ -433,6 +487,7 @@ async def notify_mode_change_email(
         f"Live Generation: {live_solar_text}\n\n"
         f"{forecast_text}\n"
         + (f"{zappi_text}\n" if zappi_text else "")
+        + (f"{tapo_text}\n" if tapo_text else "")
         + "Mode Transition\n"
         "---------------\n"
         f"Previous Mode: {previous_mode_label} (raw={previous_mode_value})\n"
@@ -531,6 +586,7 @@ async def notify_mode_change_email(
                 </table>
                 {forecast_html}
                 {zappi_html}
+                {tapo_html}
                 <div style="margin-bottom:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e4ebf3;border-radius:10px;font-size:13px;line-height:1.5;color:#26354d;">
                     <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;color:#143a52;font-weight:700;margin-bottom:4px;">Reason</div>
                     {escape(reason)}

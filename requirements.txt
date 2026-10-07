@@ -3,3 +3,4 @@ matplotlib~=3.10.9
 python-dotenv~=1.2.2
 requests~=2.34.2
 sigen~=3.0.2
+python-kasa~=0.11.0

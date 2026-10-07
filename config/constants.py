@@ -177,6 +177,12 @@ SOLCAST_ARCHIVE_PATH: Final[str] = os.getenv(
     "data/solcast_readings.jsonl",
 ).strip()
 
+# Local archive file for Tapo P110 granny-charger plug telemetry snapshots.
+TAPO_TELEMETRY_ARCHIVE_PATH: Final[str] = os.getenv(
+    "TAPO_TELEMETRY_ARCHIVE_PATH",
+    "data/tapo_telemetry.jsonl",
+)
+
 # Local archive file for Zappi EV charger telemetry snapshots.
 ZAPPI_TELEMETRY_ARCHIVE_PATH: Final[str] = os.getenv(
     "ZAPPI_TELEMETRY_ARCHIVE_PATH",

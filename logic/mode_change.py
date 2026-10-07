@@ -57,6 +57,7 @@ async def apply_mode_change(
     today_period_forecast: dict[str, tuple[int, str]] | None = None,
     zappi_status: dict[str, Any] | None = None,
     zappi_daily: dict[str, Any] | None = None,
+    tapo_status: dict[str, Any] | None = None,
 ) -> bool:
     """Attempt to change the inverter operational mode with idempotency checks.
 
@@ -80,6 +81,7 @@ async def apply_mode_change(
         today_period_forecast: Daytime period forecast snapshot for today.
         zappi_status: Most recent Zappi live-status snapshot, or None when unavailable.
         zappi_daily: Today's Zappi daily charge totals, or None when unavailable.
+        tapo_status: Latest Tapo granny-charger plug snapshot, or None when unavailable.
 
     Returns:
         True if mode was set or already at target, False if set operation failed.
@@ -107,4 +109,5 @@ async def apply_mode_change(
         today_period_forecast=today_period_forecast,
         zappi_status=zappi_status,
         zappi_daily=zappi_daily,
+        tapo_status=tapo_status,
     )

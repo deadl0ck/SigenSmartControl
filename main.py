@@ -180,6 +180,7 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
             startup_mode_raw, startup_soc, startup_solar_today_kwh, startup_live_solar_kw = await log_current_mode_on_startup(sigen, mode_names)
             startup_zappi_status = None
             startup_zappi_daily = None
+            startup_tapo_status = None
             try:
                 from integrations.zappi_auth import get_zappi_interaction
                 from zoneinfo import ZoneInfo
@@ -191,6 +192,13 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                     startup_zappi_daily = await zappi.get_daily_totals(local_today)
             except Exception as exc:
                 logger.warning("[SCHEDULER] Could not fetch Zappi data for startup email: %s", exc)
+            try:
+                from integrations.tapo_auth import get_tapo_plug
+                tapo = get_tapo_plug()
+                if tapo is not None:
+                    startup_tapo_status = await tapo.get_live_status()
+            except Exception as exc:
+                logger.warning("[SCHEDULER] Could not fetch Tapo data for startup email: %s", exc)
             await notify_startup_email(
                 current_mode_raw=startup_mode_raw,
                 battery_soc=startup_soc,
@@ -202,6 +210,7 @@ async def create_scheduler_interaction(mode_names: dict[int, str]) -> SigenInter
                 logger=logger,
                 zappi_status=startup_zappi_status,
                 zappi_daily=startup_zappi_daily,
+                tapo_status=startup_tapo_status,
             )
             return sigen
         except Exception as e:
@@ -320,6 +329,7 @@ async def run_scheduler() -> None:
             today_period_forecast=resolved_forecast,
             zappi_status=state.latest_zappi_status,
             zappi_daily=state.latest_zappi_daily,
+            tapo_status=state.latest_tapo_status,
         )
         if ok:
             state.tick_mode_change_successes += 1

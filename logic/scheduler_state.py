@@ -86,6 +86,8 @@ class SchedulerState:
         immersion_state: Daily boost counter for the SwitchBot immersion heater (boosts_today, last_boost_date).
         latest_zappi_status: Most recent Zappi live-status snapshot, or None when
             Zappi is not configured or the last fetch failed.
+        latest_tapo_status: Most recent Tapo granny-charger plug snapshot, or None when
+            the plug is not configured or the last fetch failed.
         latest_zappi_daily: Today's Zappi daily charge totals, or None when
             Zappi is not configured or the last fetch failed.
     """
@@ -126,3 +128,4 @@ class SchedulerState:
     })
     latest_zappi_status: dict[str, Any] | None = None
     latest_zappi_daily: dict[str, Any] | None = None
+    latest_tapo_status: dict[str, Any] | None = None
