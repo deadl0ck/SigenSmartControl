@@ -1528,6 +1528,9 @@ python scripts/battery_throughput.py
 
 ## Recent Updates
 
+**2026-11-13**
+- **Evening no longer sleeps at sunset.** The scheduler now keeps polling every tick until the cheap rate starts at 23:00, then sleeps as before, so winter evenings (including the 17:00–19:00 peak) get telemetry; the `night_sleep_start` snapshot now lands at 23:00.
+
 **2026-10-07**
 - **Added Tapo P110 granny-charger plug as an optional read-only device.** Polls power, on/off and daily/monthly kWh each tick (via `python-kasa`), archives to `data/tapo_telemetry.jsonl`, and adds a "Granny Charger" section to startup and mode-change emails, giving a second EV-charging data point alongside the Zappi. Enable with `TAPO_HOST`, `TAPO_USERNAME` (Tapo cloud email) and `TAPO_PASSWORD` in `.env`; absent values disable it.
 

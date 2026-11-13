@@ -239,6 +239,7 @@ async def handle_night_window(
             minutes=MAX_PRE_PERIOD_WINDOW_MINUTES
         )
         wake_at = pre_window_opens_at
+        before_cheap_rate_today = False
 
         if night_context["window_name"] == "EVENING-NIGHT":
             cheap_rate_start_local = now_utc.astimezone(LOCAL_TZ).replace(
@@ -247,7 +248,12 @@ async def handle_night_window(
                 second=0,
                 microsecond=0,
             )
-            if now_utc.astimezone(LOCAL_TZ) >= cheap_rate_start_local:
+            now_local = now_utc.astimezone(LOCAL_TZ)
+            # Evening (after noon) and still before today's cheap-rate start: keep polling.
+            before_cheap_rate_today = (
+                now_local.hour >= 12 and now_local < cheap_rate_start_local
+            )
+            if now_local >= cheap_rate_start_local:
                 cheap_rate_start_local = cheap_rate_start_local + timedelta(days=1)
             cheap_rate_start_utc = cheap_rate_start_local.astimezone(timezone.utc)
             wake_at = min(wake_at, cheap_rate_start_utc)
@@ -258,7 +264,7 @@ async def handle_night_window(
             )
             wake_at = min(wake_at, pre_sunrise_wake_at)
 
-        if now_utc < wake_at:
+        if now_utc < wake_at and not before_cheap_rate_today:
             candidate_sleep_seconds = max(1, int((wake_at - now_utc).total_seconds()))
             if candidate_sleep_seconds > _POLL_INTERVAL_SECONDS:
                 local_date = now_utc.astimezone(LOCAL_TZ).date()
