@@ -6,11 +6,13 @@ import logging
 import importlib
 from typing import Any
 
-def mask(val: Any, key: str | None = None) -> str:
-	if key and key.upper() in ("SIGEN_PASSWORD",):
-		return "***MASKED***"
-	if isinstance(val, str) and ("PASS" in val or "SECRET" in val or "TOKEN" in val):
-		return val[:2] + "***MASKED***" + val[-2:]
+_SENSITIVE_WORDS = ("PASS", "SECRET", "TOKEN", "KEY", "AUTH", "CRED")
+
+
+def mask(val: Any, key: str | None = None) -> Any:
+	"""Return a fully masked placeholder when the setting name looks sensitive."""
+	if key and any(w in key.upper() for w in _SENSITIVE_WORDS) and val not in (None, ""):
+		return "********"
 	return val
 
 def pytest_configure() -> None:
@@ -51,7 +53,7 @@ def pytest_configure() -> None:
 		for k in dir(constants):
 			if k.isupper():
 				v = getattr(constants, k)
-				logger.info(f"[TEST] {k} = {mask(v)}")
+				logger.info(f"[TEST] {k} = {mask(v, k)}")
 	except Exception as e:
 		logger.warning(f"[TEST] Could not load config.constants for logging: {e}")
 
