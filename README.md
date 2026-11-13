@@ -1530,7 +1530,6 @@ python scripts/battery_throughput.py
 
 **2026-11-13**
 - **Removed "Grid Imported Today" from the Zappi email section.** It was the whole-site grid import, not EV charging, so it was misleading under the EV charger heading.
-
 - **Evening no longer sleeps at sunset.** The scheduler now keeps polling every tick until the cheap rate starts at 23:00, then sleeps as before, so winter evenings (including the 17:00–19:00 peak) get telemetry; the `night_sleep_start` snapshot now lands at 23:00.
 - **Test logs no longer print secrets.** `tests/conftest.py` now masks any setting whose name contains PASS, SECRET, TOKEN, KEY, AUTH or CRED as `********` (it previously checked the value, so SwitchBot credentials leaked).
 
