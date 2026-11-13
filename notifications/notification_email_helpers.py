@@ -341,13 +341,10 @@ def _build_zappi_email_sections(
         total_kwh = zappi_daily.get("total_kwh", 0.0)
         diverted_kwh = zappi_daily.get("diverted_kwh", 0.0)
         boosted_kwh = zappi_daily.get("boosted_kwh", 0.0)
-        grid_imported_kwh = zappi_daily.get("grid_imported_kwh")
         rows_text += [
             f"Today's Total to EV: {total_kwh:.2f} kWh  "
             f"(Solar: {diverted_kwh:.2f} kWh | Grid: {boosted_kwh:.2f} kWh)",
         ]
-        if grid_imported_kwh is not None:
-            rows_text.append(f"Grid Imported Today: {grid_imported_kwh:.2f} kWh")
         rows_html += (
             f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">Today — Total to EV</td>'
             f'<td style="padding:4px 0;font-size:12px;font-weight:600;color:#172033;">{total_kwh:.2f} kWh</td></tr>'
@@ -356,11 +353,6 @@ def _build_zappi_email_sections(
             f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">&nbsp;&nbsp;Grid boost</td>'
             f'<td style="padding:4px 0;font-size:12px;color:#172033;">{boosted_kwh:.2f} kWh</td></tr>'
         )
-        if grid_imported_kwh is not None:
-            rows_html += (
-                f'<tr><td style="padding:4px 8px 4px 0;font-size:12px;color:#5b6b82;white-space:nowrap;">Grid Imported Today</td>'
-                f'<td style="padding:4px 0;font-size:12px;font-weight:600;color:#172033;">{grid_imported_kwh:.2f} kWh</td></tr>'
-            )
 
     plain_text = (
         "EV Charger (Zappi)\n"
